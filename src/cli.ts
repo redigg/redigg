@@ -1,9 +1,9 @@
 import { createInterface } from 'readline';
-import { SQLiteStorage } from './infra/storage/sqlite.js';
-import { MemoryManager } from './core/memory/MemoryManager.js';
-import { MemoryEvolutionSystem } from './app/memory-evo/MemoryEvolutionSystem.js';
-import { ResearchAgent } from './core/agent/ResearchAgent.js';
-import { MockLLMClient, LLMClient, LLMResponse } from './core/llm/LLMClient.js';
+import { MemoryManager } from './memory/MemoryManager.js';
+import { SQLiteStorage } from './storage/sqlite.js';
+import { ResearchAgent } from './agent/ResearchAgent.js';
+import { MemoryEvolutionSystem } from './memory/evolution/MemoryEvolutionSystem.js';
+import { MockLLMClient, LLMClient, LLMResponse } from './llm/LLMClient.js';
 import chalk from 'chalk';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';

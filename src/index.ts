@@ -1,15 +1,16 @@
-import { startGateway } from './infra/gateway/index.js';
-import { A2AGateway } from './infra/a2a/gateway.js';
-import { SQLiteStorage } from './infra/storage/sqlite.js';
-import { MemoryManager } from './core/memory/MemoryManager.js';
-import { MemoryEvolutionSystem } from './app/memory-evo/MemoryEvolutionSystem.js';
-import { ResearchAgent } from './core/agent/ResearchAgent.js';
-import { MockLLMClient, LLMClient, LLMResponse, LLMStreamHandler } from './core/llm/LLMClient.js';
+import { A2AGateway } from './gateway/index.js';
+import { MemoryManager } from './memory/MemoryManager.js';
+import { SQLiteStorage } from './storage/sqlite.js';
+import { ResearchAgent } from './agent/ResearchAgent.js';
+import { MemoryEvolutionSystem } from './memory/evolution/MemoryEvolutionSystem.js';
+import { MockLLMClient, LLMClient, LLMResponse, LLMStreamHandler } from './llm/LLMClient.js';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
-import chalk from 'chalk';
+import { createLogger } from './utils/logger.js';
 
 dotenv.config({ override: true });
+
+const logger = createLogger('Main');
 
 // Real OpenAI Client (Copied from cli.ts for now, should be refactored to shared location)
 class OpenAIClient implements LLMClient {
@@ -65,7 +66,7 @@ class OpenAIClient implements LLMClient {
 }
 
 async function main() {
-  console.log(chalk.green.bold('🦎 Redigg Agent System Starting...'));
+  logger.info('🦎 Redigg Agent System Starting...');
 
   // 1. Initialize Core Components
   const storage = new SQLiteStorage();
@@ -73,30 +74,29 @@ async function main() {
 
   let llm: LLMClient;
   if (process.env.OPENAI_API_KEY) {
-    console.log(chalk.blue('Using Real OpenAI API'));
+    logger.info('Using Real OpenAI API');
     llm = new OpenAIClient(
       process.env.OPENAI_API_KEY!,
       process.env.OPENAI_BASE_URL,
       process.env.OPENAI_MODEL
     );
   } else {
-    console.log(chalk.yellow('Using Mock LLM'));
+    logger.warn('Using Mock LLM');
     llm = new MockLLMClient();
   }
 
   const memoryEvo = new MemoryEvolutionSystem(memoryManager, llm);
   const agent = new ResearchAgent(memoryManager, memoryEvo, llm);
+  
+  // Start agent background processes (heartbeat, cron)
+  agent.start();
 
-  // 2. Start A2A Gateway
-  const a2aPort = parseInt(process.env.A2A_PORT || '4000');
-  const a2aGateway = new A2AGateway(agent, a2aPort);
-  a2aGateway.start();
-
-  // 3. Start Legacy Gateway (if needed)
-  // await startGateway();
+  // Start A2A Gateway
+  const gateway = new A2AGateway(agent, 4000);
+  gateway.start();
 }
 
 main().catch(error => {
-  console.error('Failed to start Redigg:', error);
+  logger.error('Failed to start Redigg:', error);
   process.exit(1);
 });

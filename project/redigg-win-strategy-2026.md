@@ -250,6 +250,15 @@
 - 预览：https://alytics.framer.website/
 - 使用：https://framer.link/LHXPlmf?duplicateType=siteTemplate
 
+**Round 21 新增洞察** (2026-03-08 02:00):
+- **Elicit 官网深度验证**: 500 万 + 用户、1.38 亿 + 论文、54.5 万 + 临床试验（数据确认）
+- **Elicit 功能架构**: Search/Reports/Systematic Review/Library/Alerts 五大模块
+- **Elicit 差异化**: Scale（1000 篇/20000 数据点）、Accuracy（验证报告）、Transparency（句级引用）
+- **Litmaps 验证**: 功能稳定，无重大更新
+- **Alytics 模板结构确认**: Features/Benefits/Integrations/Pricing/FAQ/Blogs 六部分
+- **内容映射完成**: Redigg 价值主张适配方案已制定
+- **执行细化**: Landing Page 搭建 2-4 小时可完成
+
 **需要 Vix 决策**:
 1. **Phase 2 完成确认**: ✅ Phase 2 已 100% 完成，可按计划进行
 2. **种子用户邀请名单**: ⏳ Vix 提供 10-20 个初始联系人（3/14 前）

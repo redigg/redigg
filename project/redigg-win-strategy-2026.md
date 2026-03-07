@@ -242,10 +242,18 @@
 - 竞品均无颠覆性创新，Redigg 时间窗口确认
 - 明日（3/8 周日）重点：Landing Page 调研和搭建
 
+**Round 20 新增洞察** (2026-03-08 01:00):
+- **Landing Page 模板选定**: Alytics（Framer，免费，SaaS 专用）
+- 模板特点：Dashboard 展示、SEO 就绪、移动端优化、30.4K 浏览量验证
+- 执行时间：1-2 天可完成定制和发布
+- 成本：免费（域名另计，约¥100-200/年）
+- 预览：https://alytics.framer.website/
+- 使用：https://framer.link/LHXPlmf?duplicateType=siteTemplate
+
 **需要 Vix 决策**:
 1. **Phase 2 完成确认**: ✅ Phase 2 已 100% 完成，可按计划进行
 2. **种子用户邀请名单**: ⏳ Vix 提供 10-20 个初始联系人（3/14 前）
-3. **Landing Page 预算**: ⏳ 确认预算<¥5000，使用 Framer/Webflow 模板（3/8-3/14）
+3. **Landing Page 域名确认**: ⏳ 建议 redigg.ai 或 redigg.io（约¥100-200/年）
 4. **种子用户计划**: ✅ 文档已创建 (`docs/seed-user-plan.md`)
 5. **发布策略**: 邀请制 100 人（阶段 1: 10-20 人，3/16 开始）
 6. **定价策略**: 基础免费 + 高级 Skill 付费（种子用户终身免费）

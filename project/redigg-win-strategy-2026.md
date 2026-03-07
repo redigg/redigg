@@ -274,6 +274,13 @@
 - **时间窗口再确认**: 6-12 个月，Elicit API 生态需要时间发展
 - **Redigg 应对策略**: 加速 Skill 市场建设（比 Elicit API 更开放）、强化本地优势、Landing Page 今天执行
 
+**Round 24 新增洞察** (2026-03-08 05:00):
+- **Elicit API 深度分析**: API v0.0.1，1.25 亿论文，Pro 计划起（100 请求/天），Enterprise 无限制
+- **API 端点**: Search（语义搜索）+ Reports（异步 5-15 分钟生成）
+- **开发者生态**: 完整示例库（curl/JS/Python/CLI/Slack/Claude Code），Claude Code 集成直接竞争
+- **Redigg 差异化**: Skill 市场（更开放）+ 本地 + 云端混合（隐私）+ 多数据源（PubMed/arXiv/自有+Elicit API 可选）
+- **Landing Page 准备就绪**: Alytics 模板内容适配方案完成，今天执行（2-4 小时，成本<¥500）
+
 **需要 Vix 决策**:
 1. **Phase 2 完成确认**: ✅ Phase 2 已 100% 完成，可按计划进行
 2. **种子用户邀请名单**: ⏳ Vix 提供 10-20 个初始联系人（3/14 前）

@@ -1,0 +1,470 @@
+{
+  "manifest_version": 1,
+  "generated_at": "2026-03-02T00:40:00Z",
+  "default_branch": "main",
+  "license_policy": {
+    "allowed": [
+      "MIT",
+      "Apache-2.0",
+      "BSD-2-Clause",
+      "BSD-3-Clause"
+    ],
+    "note": "Only skills from repositories with approved OSS licenses are eligible for import."
+  },
+  "skills": [
+    {
+      "id": "kda-literature-review",
+      "name": "Literature Review",
+      "description": "Systematic multi-source literature review workflow.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/literature-review/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "research",
+        "literature",
+        "synthesis"
+      ]
+    },
+    {
+      "id": "kda-scientific-writing",
+      "name": "Scientific Writing",
+      "description": "IMRAD manuscript drafting and revision guidance.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/scientific-writing/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "writing",
+        "paper",
+        "manuscript"
+      ]
+    },
+    {
+      "id": "kda-peer-review",
+      "name": "Peer Review",
+      "description": "Structured academic review and decision support.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/peer-review/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "review",
+        "evaluation"
+      ]
+    },
+    {
+      "id": "kda-hypothesis-generation",
+      "name": "Hypothesis Generation",
+      "description": "Generate testable hypotheses and rationale.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/hypothesis-generation/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "ideation",
+        "hypothesis"
+      ]
+    },
+    {
+      "id": "kda-scientific-critical-thinking",
+      "name": "Scientific Critical Thinking",
+      "description": "Critical reasoning over assumptions, evidence, and validity threats.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/scientific-critical-thinking/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "reasoning",
+        "quality"
+      ]
+    },
+    {
+      "id": "kda-citation-management",
+      "name": "Citation Management",
+      "description": "Citation organization, normalization, and formatting.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/citation-management/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "citation",
+        "bibliography"
+      ]
+    },
+    {
+      "id": "kda-research-lookup",
+      "name": "Research Lookup",
+      "description": "Fast retrieval and grounding of research evidence.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/research-lookup/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "search",
+        "evidence"
+      ]
+    },
+    {
+      "id": "kda-openalex-database",
+      "name": "OpenAlex Database",
+      "description": "Academic graph and bibliometric retrieval using OpenAlex.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/openalex-database/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "database",
+        "bibliometrics"
+      ]
+    },
+    {
+      "id": "kda-pubmed-database",
+      "name": "PubMed Database",
+      "description": "Biomedical literature retrieval and query workflows.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/pubmed-database/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "biomed",
+        "database",
+        "search"
+      ]
+    },
+    {
+      "id": "kda-bgpt-paper-search",
+      "name": "BGPT Paper Search",
+      "description": "Paper discovery and ranking workflow.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/bgpt-paper-search/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "paper-search",
+        "ranking"
+      ]
+    },
+    {
+      "id": "kda-pyzotero",
+      "name": "PyZotero",
+      "description": "Zotero-based reference ingestion and sync workflows.",
+      "version": "1.0.0",
+      "approved": false,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/pyzotero/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "zotero",
+        "reference-manager"
+      ]
+    },
+    {
+      "id": "kda-scholar-evaluation",
+      "name": "Scholar Evaluation",
+      "description": "Evaluate claims and evidence quality for scholarly outputs.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/scholar-evaluation/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "evaluation",
+        "quality-control"
+      ]
+    },
+    {
+      "id": "kda-exploratory-data-analysis",
+      "name": "Exploratory Data Analysis",
+      "description": "EDA workflow for scientific datasets.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/exploratory-data-analysis/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "eda",
+        "data"
+      ]
+    },
+    {
+      "id": "kda-statistical-analysis",
+      "name": "Statistical Analysis",
+      "description": "Hypothesis testing and uncertainty-aware statistical reporting.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/statistical-analysis/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "statistics",
+        "inference"
+      ]
+    },
+    {
+      "id": "kda-scikit-learn",
+      "name": "Scikit-learn",
+      "description": "Classical ML modeling and validation workflow.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/scikit-learn/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "ml",
+        "modeling"
+      ]
+    },
+    {
+      "id": "kda-statsmodels",
+      "name": "Statsmodels",
+      "description": "Econometric and statistical modeling skill.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/statsmodels/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "statistics",
+        "econometrics"
+      ]
+    },
+    {
+      "id": "kda-polars",
+      "name": "Polars",
+      "description": "High-performance dataframe operations for large-scale analysis.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/polars/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "dataframe",
+        "performance"
+      ]
+    },
+    {
+      "id": "kda-seaborn",
+      "name": "Seaborn",
+      "description": "Statistical plotting for analysis reports.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/seaborn/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "visualization",
+        "plotting"
+      ]
+    },
+    {
+      "id": "kda-matplotlib",
+      "name": "Matplotlib",
+      "description": "Low-level plotting and figure customization.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/matplotlib/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "visualization",
+        "figure"
+      ]
+    },
+    {
+      "id": "kda-plotly",
+      "name": "Plotly",
+      "description": "Interactive charting and presentation-ready visuals.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/plotly/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "interactive-viz",
+        "dashboard"
+      ]
+    },
+    {
+      "id": "kda-biopython",
+      "name": "Biopython",
+      "description": "Bioinformatics data processing and sequence workflows.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/biopython/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "bioinformatics",
+        "sequence"
+      ]
+    },
+    {
+      "id": "kda-scanpy",
+      "name": "Scanpy",
+      "description": "Single-cell analysis workflow.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/scanpy/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "single-cell",
+        "omics"
+      ]
+    },
+    {
+      "id": "kda-rdkit",
+      "name": "RDKit",
+      "description": "Computational chemistry and molecular feature workflows.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "path": "scientific-skills/rdkit/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "chemistry",
+        "drug-discovery"
+      ]
+    },
+    {
+      "id": "orch-ml-paper-writing",
+      "name": "ML Paper Writing",
+      "description": "Top-tier ML conference paper drafting workflow.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "Orchestra-Research/AI-Research-SKILLs",
+        "path": "20-ml-paper-writing/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "paper-writing",
+        "ml-conference"
+      ]
+    },
+    {
+      "id": "orch-brainstorming-research-ideas",
+      "name": "Brainstorming Research Ideas",
+      "description": "Generate and prioritize research ideas with explicit criteria.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "Orchestra-Research/AI-Research-SKILLs",
+        "path": "21-research-ideation/brainstorming-research-ideas/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "ideation",
+        "prioritization"
+      ]
+    },
+    {
+      "id": "orch-creative-thinking-for-research",
+      "name": "Creative Thinking for Research",
+      "description": "Divergent/convergent ideation patterns for novel research directions.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "Orchestra-Research/AI-Research-SKILLs",
+        "path": "21-research-ideation/creative-thinking-for-research/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "creative-thinking",
+        "research-design"
+      ]
+    },
+    {
+      "id": "orch-lm-evaluation-harness",
+      "name": "LM Evaluation Harness",
+      "description": "Standardized LLM benchmark evaluation workflows.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "Orchestra-Research/AI-Research-SKILLs",
+        "path": "11-evaluation/lm-evaluation-harness/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "benchmark",
+        "evaluation"
+      ]
+    },
+    {
+      "id": "orch-faiss-rag",
+      "name": "FAISS RAG",
+      "description": "Vector retrieval setup and evaluation for RAG workflows.",
+      "version": "1.0.0",
+      "approved": true,
+      "source": {
+        "repo": "Orchestra-Research/AI-Research-SKILLs",
+        "path": "15-rag/faiss/SKILL.md",
+        "license": "MIT"
+      },
+      "tags": [
+        "rag",
+        "retrieval",
+        "vector-db"
+      ]
+    }
+  ],
+  "updated_at": "2026-03-01T17:08:35.372Z",
+  "approval_note": "Approved 27 passed skills; keep kda-pyzotero blocked"
+}

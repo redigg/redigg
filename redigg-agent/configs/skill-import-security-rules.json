@@ -1,0 +1,92 @@
+{
+  "manifest_version": 1,
+  "max_markdown_bytes": 180000,
+  "blocked_patterns": [
+    {
+      "id": "rm-rf",
+      "severity": "high",
+      "pattern": "\\brm\\s+-rf\\b",
+      "flags": "i",
+      "reason": "Destructive filesystem deletion is not allowed in imported skills."
+    },
+    {
+      "id": "curl-bash",
+      "severity": "high",
+      "pattern": "\\bcurl\\b[^\\n|]*\\|\\s*(bash|sh)\\b",
+      "flags": "i",
+      "reason": "Piping remote scripts into shell is prohibited."
+    },
+    {
+      "id": "wget-bash",
+      "severity": "high",
+      "pattern": "\\bwget\\b[^\\n|]*\\|\\s*(bash|sh)\\b",
+      "flags": "i",
+      "reason": "Piping remote scripts into shell is prohibited."
+    },
+    {
+      "id": "sudo-usage",
+      "severity": "high",
+      "pattern": "\\bsudo\\b",
+      "flags": "i",
+      "reason": "Privilege escalation commands are not allowed in shared marketplace skills."
+    },
+    {
+      "id": "disk-format",
+      "severity": "high",
+      "pattern": "\\bmkfs(\\.[a-z0-9]+)?\\b|\\bfdisk\\b|\\bparted\\b",
+      "flags": "i",
+      "reason": "Disk formatting/partitioning operations are prohibited."
+    },
+    {
+      "id": "dd-write",
+      "severity": "high",
+      "pattern": "\\bdd\\s+if=",
+      "flags": "i",
+      "reason": "Raw disk write operations are prohibited."
+    },
+    {
+      "id": "ssh-private-key-read",
+      "severity": "high",
+      "pattern": "\\.ssh/(id_rsa|id_ed25519|authorized_keys)",
+      "flags": "i",
+      "reason": "Potential private key access is prohibited."
+    },
+    {
+      "id": "env-secret-inline",
+      "severity": "high",
+      "pattern": "(^|[\\n;])\\s*(export\\s+)?[A-Z][A-Z0-9_]*(KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\\s*=\\s*[^\\s][^\\n]*",
+      "flags": "m",
+      "reason": "Inline secret material in skill content is prohibited."
+    }
+  ],
+  "warn_patterns": [
+    {
+      "id": "package-install",
+      "severity": "medium",
+      "pattern": "\\b(pip|pip3|npm|pnpm|yarn|apt-get|apt|brew|conda)\\s+install\\b",
+      "flags": "i",
+      "reason": "Dependency installation commands require runtime environment review."
+    },
+    {
+      "id": "docker-or-k8s",
+      "severity": "medium",
+      "pattern": "\\b(docker|kubectl|helm)\\b",
+      "flags": "i",
+      "reason": "Container/cluster commands may be unavailable in agent runtime."
+    },
+    {
+      "id": "remote-shell",
+      "severity": "medium",
+      "pattern": "\\b(ssh|scp|rsync)\\b",
+      "flags": "i",
+      "reason": "Remote access commands should be manually reviewed."
+    },
+    {
+      "id": "external-network-calls",
+      "severity": "low",
+      "pattern": "\\b(curl|wget|Invoke-WebRequest)\\b",
+      "flags": "i",
+      "reason": "External network calls should be validated for trust and reproducibility."
+    }
+  ]
+}

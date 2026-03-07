@@ -13,8 +13,8 @@
 | 名称 | 状态 | Stars | 说明 |
 |------|------|-------|------|
 | **clawphd** | ❌ 已占用 | 107⭐ | 活跃更新（21 小时前） |
+| **researchclaw** | ❌ 已占用 | 待查 | ymx10086/ResearchClaw |
 | **paperclaw** | ✅ 可用 | 0 | 无匹配结果 |
-| **researchclaw** | ✅ 可用 | 0 | 无匹配结果 |
 | **scienceclaw** | ✅ 可用 | 0 | 无匹配结果 |
 | **redigg-agent** | ✅ 自有 | - | npm 包已发布 |
 
@@ -49,7 +49,53 @@
 - ❌ 无论文写作能力
 - ❌ 单机工具无社区
 
-### 1.3 其他 AI Research Agent 项目
+### 1.3 ResearchClaw 详细分析（新发现！）
+
+**仓库**: https://github.com/ymx10086/ResearchClaw  
+**Stars**: 24 ⭐  
+**Forks**: 3  
+**更新**: 2 小时前（非常活跃！）  
+**License**: Apache 2.0  
+**安装**: `pip install -e ".[dev]"`  
+**网站**: https://researchclaw.github.io/
+
+**定位**: "Your AI-Powered Research Assistant - An intelligent agent-based assistant designed specifically for academic researchers"
+
+**核心功能**:
+- 📄 Search & discover papers - ArXiv, Semantic Scholar, Google Scholar
+- 📚 Manage references - BibTeX import/export
+- 🔍 Read & summarize papers - PDF 提取
+- 📊 Analyze data - pandas, matplotlib, scipy
+- ✍️ Write & review - LaTeX assistance, literature review
+- ⏰ Stay updated - Daily paper digests, deadline reminders
+- 🧠 Build knowledge - Persistent research notes
+
+**技术栈**:
+- 基于 AgentScope 框架（阿里 ModelScope）
+- ReAct Agent 架构
+- FastAPI + Uvicorn 后端
+- Web UI (Vite + React)
+- 支持多 LLM（OpenAI/Anthropic/DashScope/Ollama）
+
+**优势**:
+- ✅ 功能完整（文献 + 数据 + 写作）
+- ✅ 本地部署（数据隐私）
+- ✅ 中文文档（README_zh.md）
+- ✅ 活跃开发（2 小时前还在更新）
+- ✅ 技能系统可扩展
+
+**劣势**:
+- ❌ 基于 AgentScope（非 OpenClaw）
+- ❌ 单机工具（无社区）
+- ❌ 无商业模式（纯开源）
+- ❌ 需要本地部署（门槛高）
+
+**最新动态**:
+- 2 小时前：`docs: refactor roadmap to IM-first research agent strategy`
+- 昨天：多个 branding 和 frontend 更新
+- 3 天前：v1.0 发布
+
+### 1.4 其他 AI Research Agent 项目
 
 | 项目 | Stars | 更新 | 定位 |
 |------|-------|------|------|
@@ -59,7 +105,10 @@
 | PhDBot | 1⭐ | 2025-09 | 科学研究个性化 AI Agent |
 | 其他 | 0-3⭐ | 不定期 | 个人项目为主 |
 
-**结论**: 除 ClawPhD 外，其他都是个位数 stars 的小项目，不构成威胁。
+**结论**: 
+- ❌ **ResearchClaw 是最大威胁**（24⭐，2 小时前更新，功能完整）
+- ⚠️ ClawPhD 次之（107⭐，但只专注可视化）
+- ✅ 其他项目不构成威胁
 
 ---
 
@@ -117,14 +166,18 @@
 
 ### 3.1 vs GitHub 竞品
 
-| 维度 | ClawPhD | 其他项目 | Redigg |
-|------|---------|----------|--------|
-| **定位** | 论文可视化 | 单点工具 | 研究基础设施 |
-| **场景** | 已有论文处理 | 特定场景 | 完整研究流程 |
-| **功能** | 图表/视频/海报 | 单一功能 | 文献 + 实验 + 论文 |
+| 维度 | ClawPhD | ResearchClaw | Redigg |
+|------|---------|--------------|--------|
+| **定位** | 论文可视化 | 个人研究助手 | 研究基础设施 |
+| **Stars** | 107⭐ | 24⭐ | 待发展 |
+| **更新** | 21 小时前 | 2 小时前 | 活跃 |
+| **场景** | 已有论文处理 | 个人研究全流程 | 完整研究流程 + 社区 |
+| **功能** | 图表/视频/海报 | 文献 + 数据 + 写作 | 文献 + 实验 + 论文+Peer Review |
+| **框架** | Nanobot | AgentScope | OpenClaw |
+| **部署** | 本地 | 本地 | 本地 + 云端 |
 | **社区** | 无 | 无 | Reddit 风格社区 |
-| **商业** | 免费开源 | 个人项目 | 付费订阅 |
-| **品牌** | 独立项目 | 个人项目 | Redigg 生态 |
+| **商业** | 免费开源 | 免费开源 | 付费订阅 |
+| **品牌** | 独立项目 | 独立项目 | Redigg 生态 |
 
 ### 3.2 vs 小红书内容
 
@@ -204,11 +257,17 @@
 
 ### 6.1 市场验证
 
-**ClawPhD 107⭐ 证明**:
-- ✅ 科研 + AI 方向正确
+**ClawPhD 107⭐ + ResearchClaw 24⭐ 证明**:
+- ✅ 科研 + AI 方向正确（两个项目都活跃）
 - ✅ PhD 学生愿意用 AI 工具
-- ✅ 可视化功能受欢迎
+- ✅ 完整流程是趋势（ResearchClaw 也在做）
 - ✅ 开源模式可行
+
+**关键发现**:
+- ⚠️ **ResearchClaw 是最大威胁** - 2 小时前还在更新，功能完整
+- ⚠️ 基于 AgentScope（阿里系），不是 OpenClaw
+- ⚠️ 有中文文档，瞄准中国市场
+- ✅ 但它是单机工具，无社区
 
 **小红书内容证明**:
 - ✅ 科研工具需求旺盛
@@ -218,10 +277,22 @@
 
 ### 6.2 Redigg 机会
 
-**差异化定位**:
-- ClawPhD: 单点工具 → Redigg: 完整流程
-- 国外工具：英文 + 翻墙 → Redigg: 中文 + 本土
-- 免费开源：无持续收入 → Redigg: 付费订阅可持续
+**vs ResearchClaw 的差异化**:
+| 维度 | ResearchClaw | Redigg |
+|------|--------------|--------|
+| **定位** | 个人研究助手 | 研究基础设施即服务 |
+| **框架** | AgentScope（阿里） | OpenClaw（独立） |
+| **场景** | 个人研究 | 个人 + 社区 + 协作 |
+| **部署** | 本地 | 本地 + 云端 |
+| **社区** | 无 | Reddit 风格社区 |
+| **商业** | 免费开源 | 付费订阅可持续 |
+| **生态** | 技能系统 | Skill 市场 + 网络效应 |
+
+**Redigg 胜算**:
+1. ✅ 社区网络效应（ResearchClaw 是单机）
+2. ✅ 商业模式可持续（不是纯开源）
+3. ✅ Redigg.com 平台背书（不只是 GitHub 项目）
+4. ✅ Skill 市场生态（开发者经济）
 
 **市场空间**:
 - 全球 1000 万 PhD 学生
@@ -234,17 +305,24 @@
 
 **竞品不是威胁，是验证！**
 
-✅ ClawPhD 验证了方向正确  
+✅ ClawPhD (107⭐) 验证了方向正确  
+✅ ResearchClaw (24⭐) 验证了完整流程是趋势  
+✅ 两个项目都在中国时间活跃更新（21 小时前/2 小时前）  
 ✅ 小红书验证了需求存在  
-✅ 个位数 stars 项目证明市场空白  
+
+**⚠️ 紧急度提升**:
+- ResearchClaw 2 小时前还在更新
+- 有中文文档
+- 功能完整（文献 + 数据 + 写作）
+- **必须加快发布节奏！**
 
 **Redigg 胜算**:
-1. 完整研究流程（不只是单点）
-2. 中文本土化（不只是翻译）
-3. 社区网络效应（不只是工具）
-4. 可持续商业模式（不只是开源）
+1. 社区网络效应（不只是工具）
+2. 商业模式可持续（不只是开源）
+3. 平台背书（Redigg.com）
+4. Skill 市场生态
 
-**行动建议**: **立刻发布，抢占心智！**
+**行动建议**: **立刻发布，抢占心智！今晚就要发小红书！**
 
 ---
 

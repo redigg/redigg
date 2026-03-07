@@ -281,6 +281,14 @@
 - **Redigg 差异化**: Skill 市场（更开放）+ 本地 + 云端混合（隐私）+ 多数据源（PubMed/arXiv/自有+Elicit API 可选）
 - **Landing Page 准备就绪**: Alytics 模板内容适配方案完成，今天执行（2-4 小时，成本<¥500）
 
+**Round 25 新增洞察** (2026-03-08 06:00):
+- **Elicit 官网实时数据更新**: 论文库从 1.25 亿更新为 1.38 亿（持续增长），500 万 + 用户，54.5 万 + 临床试验
+- **Elicit 核心功能确认**: Search/Reports/Systematic Review/Library/Alerts 五大模块
+- **Elicit 差异化四点**: Scale（1000 篇/20000 数据点）/Accuracy（验证报告）/Transparency（句级引用）/More than chat
+- **Elicit API 生态验证**: curl/JS/Python 三语言支持，CLI/Slack/Claude Code 集成，Claude Code Skill 直接竞争 Redigg Agent
+- **Alytics 模板实时验证**: 可访问可 Remix，内容适配方案完成，今天执行（2-4 小时，成本<¥500）
+- **Landing Page 执行确认**: 域名 redigg.ai/redigg.io（约¥100-200/年），今天搭建完成
+
 **需要 Vix 决策**:
 1. **Phase 2 完成确认**: ✅ Phase 2 已 100% 完成，可按计划进行
 2. **种子用户邀请名单**: ⏳ Vix 提供 10-20 个初始联系人（3/14 前）

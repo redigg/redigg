@@ -170,15 +170,20 @@
 ## 五、关键行动项（本周）
 
 ### 高优先级
-1. **完成 Phase 2 开发** - Research Network 重构（进行中）
-2. **准备种子用户计划** - 目标 100 人
-3. **优化 Literature Review Skill** - 确保质量
-4. **准备营销材料** - Landing Page、Demo 视频
+1. **完成 Phase 2 测试** - TaskPlanner + QualityChecker 单元测试与集成测试（3/7-3/8）
+2. **准备种子用户计划** - 目标 100 人，3/16 开始邀请
+3. **优化 Literature Review Skill** - 确保质量达标（覆盖率>90%、准确性>95%）
+4. **准备营销材料** - Landing Page（模板即可），预算<¥5000
 
 ### 中优先级
-5. **继续市场调研** - Round 11+，持续追踪竞品
-6. **建立评估体系** - 自动 + 人工质量评估
+5. **继续市场调研** - Round 14 完成，竞品动态稳定，无重大威胁
+6. **建立评估体系** - LLM-as-judge 质量评估框架完成
 7. **规划 Skill 开发者计划** - 吸引生态参与者
+
+### Round 14 新增洞察
+- **融资窗口开放** - AI 垂直领域持续获大额融资（Ayar Labs $500M、Grow Therapy $150M）
+- **竞争格局稳定** - Elicit/SciSpace 功能稳定，Wordware 暂无大动作
+- **技术方向验证** - 本地优先架构是差异化优势，LLM-as-judge 是行业趋势
 
 ---
 

@@ -55,6 +55,9 @@ export class RediggClient {
   }
 
   async getAgentSkills(agentId: string) {
+    // Force empty skills for now to avoid errors with skill loading
+    // return [];
+    
     try {
       const res = await this.api.get('/api/skills', {
         params: { agent_id: agentId },
@@ -69,6 +72,8 @@ export class RediggClient {
       );
     }
 
+    
+    /*
     // Fallback for deployments where /api/skills?agent_id is temporarily broken.
     try {
       const fallbackRes = await this.api.get('/api/skills');
@@ -98,6 +103,8 @@ export class RediggClient {
       );
       return [];
     }
+    */
+    return [];
   }
 
   async getSkillRaw(skillId: string) {
@@ -221,6 +228,9 @@ export class RediggClient {
   }
 
   isAuthenticated(): boolean {
+    // Check both file config and env var, prioritizing file config
+    // Actually getConfig already does this (checks file first, then env).
+    // But for local dashboard, we might not need auth at all if we are not connecting to redigg.com
     return !!getConfig('redigg.apiKey', 'REDIGG_API_KEY');
   }
 

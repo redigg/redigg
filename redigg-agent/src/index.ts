@@ -5,10 +5,12 @@ import { AgentRuntime } from './agent/runtime';
 import { RediggClient } from './api/client';
 import { WorkspaceManager } from './workspace';
 import { startInteractiveSession } from './cli/interactive';
+import { runOneShot } from './cli/oneshot';
 import { 
     ensureWorkspace, 
     createDefaultAgentProfile, 
     createDefaultProfiles,
+    createDefaultAgentsMd,
     REDIGG_DIR 
 } from './config/workspace';
 import fs from 'fs';
@@ -16,12 +18,47 @@ import path from 'path';
 import { intro, text, outro, select, confirm } from '@clack/prompts';
 import pc from 'picocolors';
 
+import { startDashboard } from './ui/server';
+
 const program = new Command();
 
 program
   .name('redigg')
   .description('Redigg Agent CLI for Autonomous Research')
-  .version('0.1.0');
+  .version('0.1.0')
+  .argument('[instruction]', 'One-shot instruction to execute')
+  .option('-p, --print', 'Print output to stdout only (clean mode)')
+  .action(async (instruction, options) => {
+    if (instruction) {
+      await runOneShot(instruction, options);
+    } else {
+      await startInteractiveSession();
+    }
+  });
+
+program
+  .command('ui')
+  .description('Start the local dashboard')
+  .option('-p, --port <port>', 'Port to listen on', '3000')
+  .action(async (options) => {
+    // Auto configure default ID if missing
+    if (!getConfig('redigg.agentId')) {
+       setConfig('redigg.agentId', 'local-dashboard-agent');
+       setConfig('redigg.agentName', 'Local Dashboard Agent');
+    }
+    
+    // Check if we need to auto-configure debug key for local dev
+    const currentKey = getConfig('redigg.apiKey');
+    const currentBase = getConfig('redigg.apiBase');
+    
+    if (!currentKey && currentBase?.includes('localhost')) {
+         console.log(pc.yellow('Auto-configuring debug API Key for local development...'));
+         setConfig('redigg.apiKey', 'sk-redigg-0f3cec5849054a0ba397d5a21ce5ff50');
+         setConfig('redigg.agentId', 'a84dfac4-a7b6-415f-82a3-20f7b3c2834d');
+    }
+
+    startDashboard(parseInt(options.port));
+  });
 
 program
   .command('init')
@@ -33,6 +70,7 @@ program
     ensureWorkspace();
     createDefaultAgentProfile();
     createDefaultProfiles();
+    createDefaultAgentsMd();
     
     console.log(pc.green(`✅ Workspace initialized at ${REDIGG_DIR}`));
     
@@ -100,18 +138,33 @@ program
     const openaiKey = getConfig('openai.apiKey');
     console.log(`LLM API:    ${openaiKey ? pc.green('Configured') : pc.red('Missing')}`);
     
+    const tavilyKey = getConfig('tavily.apiKey');
+    console.log(`Web Search: ${tavilyKey ? pc.green('Configured') : pc.yellow('Missing')}`);
+    
     const client = new RediggClient();
     if (rediggKey) {
         try {
-            // Simple check by listing tasks or just assuming key implies auth until used
-            // Client doesn't have a specific "ping" but getTasks works
             process.stdout.write('Connecting to Redigg... ');
+            
+            // Try getMe first to check auth validity
+            try {
+                const me = await client.getMe();
+                if (me && me.id) {
+                     // Auth is valid
+                }
+            } catch (e: any) {
+                if (e.response?.status === 401) {
+                    throw new Error('Unauthorized (Invalid API Key)');
+                }
+                // Ignore other errors (like 404 on /me) and try getTasks
+            }
+
             const tasks = await client.getTasks();
             console.log(pc.green('Online ✅'));
             console.log(`Pending Tasks: ${tasks.data?.length || 0}`);
         } catch (e: any) {
             console.log(pc.red('Offline ❌'));
-            console.log(pc.dim(e.message));
+            console.log(pc.dim(e.message || 'Connection failed'));
         }
     } else {
         console.log('Redigg Connection: Skipped (No Key)');
@@ -157,9 +210,9 @@ program
       const data = await client.register(name, options.token);
       
       const apiKey = data?.api_key || data?.agent?.api_key || data?.data?.api_key;
-      const agentId = data?.agent?.id || data?.data?.agent?.id || data?.data?.id;
-      const agentName = data?.agent?.name || data?.data?.agent?.name || name;
-      const claimUrl = data?.claim_url || data?.data?.claim_url;
+      const agentId = data?.agent?.id || data?.data?.agent?.id || data?.data?.id || data?.id;
+      const agentName = data?.agent?.name || data?.data?.agent?.name || data?.name || name;
+      const claimUrl = data?.claim_url || data?.agent?.claim_url || data?.data?.claim_url;
 
       if (apiKey) setConfig('redigg.apiKey', apiKey);
       if (agentId) setConfig('redigg.agentId', agentId);
@@ -197,6 +250,9 @@ program
           }
           spinner.stop();
           console.log(pc.dim('Polling timed out. Please configure the API Key manually once claimed using: redigg config set redigg.apiKey <key>'));
+      } else if (apiKey) {
+          // If we got the API key directly (e.g. local registration), no need to claim
+          console.log(pc.green('API Key received and configured automatically.'));
       }
     } catch (error: any) {
       console.error(pc.red('Registration failed:'), error.response?.data || error.message);
@@ -300,7 +356,7 @@ program
 
 
 program
-  .command('chat', { isDefault: true })
+  .command('chat')
   .description('Start interactive research session (REPL)')
   .action(async () => {
     await startInteractiveSession();
@@ -332,7 +388,6 @@ program
 program
   .command('serve')
   .description('Start the agent in passive worker mode')
-  .alias('worker')
   .option('-t, --token <token>', 'API Key / Owner Token')
   .option('--follow <id>', 'Follow specific research ID')
   .action(async (options) => {

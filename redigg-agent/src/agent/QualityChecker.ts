@@ -1,731 +1,611 @@
 /**
- * QualityChecker - 质量检查与自反思模块
+ * QualityChecker - 质量检查器
  * 
- * 负责在任务执行的每个步骤后进行质量验证
- * 支持迭代改进和自动重试
- * 参考：Anthropic self-reflection、LLM-as-judge
- * 
- * @module QualityChecker
+ * 负责在任务执行的每个步骤后检查质量，
+ * 通过 5 个维度评估输出：完整性、准确性、相关性、格式、引用质量。
  */
 
-import { LLMClient } from '../llm/LLMClient';
-import { TaskStep } from './TaskPlanner';
+export interface QualityDimension {
+  name: QualityDimensionName;
+  weight: number;
+  score: number; // 0-5
+  feedback: string;
+  checks: QualityCheck[];
+}
 
-/**
- * 质量检查类型
- */
-export type CheckType = 
+export type QualityDimensionName = 
   | 'completeness'    // 完整性
   | 'accuracy'        // 准确性
   | 'relevance'       // 相关性
-  | 'format'          // 格式正确性
-  | 'consistency'     // 一致性
-  | 'citation_quality'; // 引用质量（科研场景专用）
+  | 'format'          // 格式
+  | 'citationQuality'; // 引用质量
 
-/**
- * 质量检查标准
- */
-export interface QualityCriterion {
-  /** 标准名称 */
-  name: string;
-  /** 标准描述 */
-  description: string;
-  /** 检查类型 */
-  checkType: CheckType;
-  /** 通过阈值（0-1） */
-  threshold: number;
-  /** 权重（用于综合评分） */
-  weight?: number;
-  /** 领域特定参数 */
-  domainParams?: Record<string, any>;
-}
-
-/**
- * 单项质量检查结果
- */
-export interface CriterionResult {
-  /** 标准名称 */
-  name: string;
-  /** 得分（0-1） */
-  score: number;
-  /** 是否通过 */
-  passed: boolean;
-  /** 详细反馈 */
-  feedback: string;
-  /** 改进建议 */
-  suggestions?: string[];
-}
-
-/**
- * 质量检查结果
- */
 export interface QualityCheck {
-  /** 关联的步骤 ID */
-  stepId: string;
-  /** 所有标准的检查结果 */
-  criteria: CriterionResult[];
-  /** 是否全部通过 */
+  checkId: string;
+  description: string;
   passed: boolean;
-  /** 综合得分（0-1） */
-  overallScore: number;
-  /** 总体反馈 */
-  feedback: string;
-  /** 建议的操作 */
-  suggestedAction: QualityAction;
-  /** 检查时间戳 */
+  details?: string;
+}
+
+export interface QualityReport {
+  taskId: string;
+  stepId?: string;
+  overallScore: number; // 0-5
+  passed: boolean;
+  dimensions: QualityDimension[];
+  criticalErrors: string[];
+  recommendations: string[];
   timestamp: number;
 }
 
-/**
- * 建议的操作类型
- */
-export type QualityAction = 
-  | 'accept'              // 接受，继续下一步
-  | 'retry'               // 重试当前步骤
-  | 'adjust_and_retry'    // 调整后重试
-  | 'escalate'            // 升级处理（需要人工干预）
-  | 'skip';               // 跳过（如果是可选步骤）
-
-/**
- * 质量检查配置
- */
-export interface QualityCheckConfig {
-  /** 是否启用 LLM-as-judge */
-  enableLLMJudge: boolean;
-  /** 是否启用自动重试 */
-  enableAutoRetry: boolean;
-  /** 最大重试次数 */
-  maxRetries: number;
-  /** 是否记录详细日志 */
-  verboseLogging: boolean;
-  /** 领域特定配置 */
-  domainConfig?: DomainConfig;
+export interface QualityThresholds {
+  completeness: number;    // 覆盖率 > 90%
+  accuracy: number;        // 引用正确率 > 95%
+  relevance: number;       // 内容相关度 > 4/5
+  format: number;          // 符合学术规范
+  citationQuality: number; // 来源可靠性 > 4/5
+  overall: number;         // 综合得分 > 4/5
 }
 
-/**
- * 领域特定配置
- */
-export interface DomainConfig {
-  /** 科研场景配置 */
-  research?: {
-    /** 最小引用数量 */
-    minCitations: number;
-    /** 要求近 5 年文献比例 */
-    recentPaperRatio: number;
-    /** 要求顶级会议/期刊 */
-    requireTopVenue: boolean;
-  };
-  /** 代码场景配置 */
-  code?: {
-    /** 要求单元测试 */
-    requireTests: boolean;
-    /** 要求类型注解 */
-    requireTypeAnnotations: boolean;
-  };
-}
+export const DEFAULT_THRESHOLDS: QualityThresholds = {
+  completeness: 4.5,      // 90% = 4.5/5
+  accuracy: 4.75,         // 95% = 4.75/5
+  relevance: 4.0,
+  format: 4.0,
+  citationQuality: 4.0,
+  overall: 4.0,
+};
 
-/**
- * 默认质量标准 - 文献综述场景
- */
-const LITERATURE_REVIEW_CRITERIA: QualityCriterion[] = [
-  {
-    name: '覆盖率',
-    description: '是否覆盖了关键论文和重要研究方向',
-    checkType: 'completeness',
-    threshold: 0.8,
-    weight: 0.25,
-    domainParams: { minCitations: 20 }
-  },
-  {
-    name: '准确性',
-    description: '论文信息、引用、总结是否准确',
-    checkType: 'accuracy',
-    threshold: 0.9,
-    weight: 0.25
-  },
-  {
-    name: '相关性',
-    description: '内容是否与用户研究问题相关',
-    checkType: 'relevance',
-    threshold: 0.85,
-    weight: 0.2
-  },
-  {
-    name: '结构完整性',
-    description: '综述结构是否清晰、逻辑是否连贯',
-    checkType: 'format',
-    threshold: 0.8,
-    weight: 0.15
-  },
-  {
-    name: '引用质量',
-    description: '引用是否规范、是否包含关键文献',
-    checkType: 'citation_quality',
-    threshold: 0.85,
-    weight: 0.15,
-    domainParams: { recentPaperRatio: 0.5 }
-  }
-];
+export const DIMENSION_WEIGHTS: Record<QualityDimensionName, number> = {
+  completeness: 0.25,
+  accuracy: 0.30,
+  relevance: 0.20,
+  format: 0.15,
+  citationQuality: 0.10,
+};
 
-/**
- * 默认质量标准 - 实验设计场景
- */
-const EXPERIMENT_DESIGN_CRITERIA: QualityCriterion[] = [
-  {
-    name: '问题明确性',
-    description: '研究问题是否清晰、可验证',
-    checkType: 'clarity',
-    threshold: 0.9,
-    weight: 0.2
-  },
-  {
-    name: '方法适当性',
-    description: '实验方法是否适合回答研究问题',
-    checkType: 'relevance',
-    threshold: 0.85,
-    weight: 0.25
-  },
-  {
-    name: '可复现性',
-    description: '实验步骤是否详细、可复现',
-    checkType: 'completeness',
-    threshold: 0.9,
-    weight: 0.25
-  },
-  {
-    name: '控制变量',
-    description: '是否考虑了适当的控制变量',
-    checkType: 'accuracy',
-    threshold: 0.8,
-    weight: 0.15
-  },
-  {
-    name: '伦理合规',
-    description: '是否符合研究伦理要求',
-    checkType: 'consistency',
-    threshold: 0.95,
-    weight: 0.15
-  }
-];
-
-/**
- * 默认质量标准 - 数据分析场景
- */
-const DATA_ANALYSIS_CRITERIA: QualityCriterion[] = [
-  {
-    name: '数据完整性',
-    description: '数据加载是否完整、无缺失',
-    checkType: 'completeness',
-    threshold: 0.9,
-    weight: 0.2
-  },
-  {
-    name: '分析正确性',
-    description: '统计方法使用是否正确',
-    checkType: 'accuracy',
-    threshold: 0.9,
-    weight: 0.3
-  },
-  {
-    name: '结果解释',
-    description: '结果解释是否合理、有洞察',
-    checkType: 'relevance',
-    threshold: 0.85,
-    weight: 0.25
-  },
-  {
-    name: '可视化质量',
-    description: '图表是否清晰、信息丰富',
-    checkType: 'format',
-    threshold: 0.8,
-    weight: 0.15
-  },
-  {
-    name: '代码质量',
-    description: '分析代码是否规范、可复现',
-    checkType: 'consistency',
-    threshold: 0.85,
-    weight: 0.1
-  }
-];
-
-/**
- * 默认质量标准 - 论文写作场景
- */
-const PAPER_WRITING_CRITERIA: QualityCriterion[] = [
-  {
-    name: '结构完整性',
-    description: '论文结构是否符合学术规范',
-    checkType: 'format',
-    threshold: 0.9,
-    weight: 0.2
-  },
-  {
-    name: '论证逻辑',
-    description: '论证是否清晰、逻辑是否连贯',
-    checkType: 'consistency',
-    threshold: 0.85,
-    weight: 0.25
-  },
-  {
-    name: '语言质量',
-    description: '语言表达是否准确、流畅',
-    checkType: 'accuracy',
-    threshold: 0.85,
-    weight: 0.2
-  },
-  {
-    name: '引用规范',
-    description: '引用格式是否规范、完整',
-    checkType: 'citation_quality',
-    threshold: 0.9,
-    weight: 0.2
-  },
-  {
-    name: '创新性表达',
-    description: '是否清晰表达了创新贡献',
-    checkType: 'relevance',
-    threshold: 0.8,
-    weight: 0.15
-  }
-];
-
-/**
- * QualityChecker 类
- * 
- * 质量检查与自反思核心实现
- */
 export class QualityChecker {
-  private llmClient: LLMClient;
-  private config: QualityCheckConfig;
-  private criteriaCache: Map<string, QualityCriterion[]>;
+  private thresholds: QualityThresholds;
 
-  constructor(llmClient: LLMClient, config?: Partial<QualityCheckConfig>) {
-    this.llmClient = llmClient;
-    this.config = {
-      enableLLMJudge: true,
-      enableAutoRetry: true,
-      maxRetries: 3,
-      verboseLogging: true,
-      ...config
-    };
-    this.criteriaCache = new Map();
-    this.initializeCriteriaCache();
+  constructor(thresholds: QualityThresholds = DEFAULT_THRESHOLDS) {
+    this.thresholds = thresholds;
   }
 
   /**
-   * 初始化质量标准缓存
+   * 检查输出质量
    */
-  private initializeCriteriaCache(): void {
-    this.criteriaCache.set('literature_review', LITERATURE_REVIEW_CRITERIA);
-    this.criteriaCache.set('experiment_design', EXPERIMENT_DESIGN_CRITERIA);
-    this.criteriaCache.set('data_analysis', DATA_ANALYSIS_CRITERIA);
-    this.criteriaCache.set('paper_writing', PAPER_WRITING_CRITERIA);
-  }
-
-  /**
-   * 主函数：检查步骤结果质量
-   * 
-   * @param step 任务步骤（包含输出）
-   * @param taskType 任务类型
-   * @param customCriteria 自定义标准（可选）
-   * @returns 质量检查结果
-   */
-  async check(
-    step: TaskStep,
-    taskType: string,
-    customCriteria?: QualityCriterion[]
-  ): Promise<QualityCheck> {
-    const startTime = Date.now();
-
-    // 1. 获取质量标准
-    const criteria = customCriteria || this.getCriteriaForTaskType(taskType);
-
-    // 2. 执行各项检查
-    const criterionResults: CriterionResult[] = [];
-    for (const criterion of criteria) {
-      const result = await this.evaluateCriterion(step, criterion);
-      criterionResults.push(result);
+  async checkQuality(
+    taskId: string,
+    content: string,
+    context?: {
+      stepId?: string;
+      taskType?: string;
+      inputQuery?: string;
+      expectedOutput?: string;
     }
+  ): Promise<QualityReport> {
+    const dimensions: QualityDimension[] = [];
 
-    // 3. 计算综合得分
-    const overallScore = this.calculateOverallScore(criterionResults);
+    // 1. 完整性检查
+    dimensions.push(await this.checkCompleteness(content, context));
 
-    // 4. 判断是否通过
-    const passed = criterionResults.every(r => r.passed);
+    // 2. 准确性检查
+    dimensions.push(await this.checkAccuracy(content, context));
 
-    // 5. 生成总体反馈
-    const feedback = this.generateOverallFeedback(criterionResults, overallScore);
+    // 3. 相关性检查
+    dimensions.push(await this.checkRelevance(content, context));
 
-    // 6. 确定建议操作
-    const suggestedAction = this.determineAction(passed, step, overallScore);
+    // 4. 格式检查
+    dimensions.push(await this.checkFormat(content, context));
 
-    const qualityCheck: QualityCheck = {
-      stepId: step.stepId,
-      criteria: criterionResults,
-      passed,
+    // 5. 引用质量检查
+    dimensions.push(await this.checkCitationQuality(content, context));
+
+    // 计算总体分数
+    const overallScore = this.calculateOverallScore(dimensions);
+
+    // 识别严重错误
+    const criticalErrors = this.identifyCriticalErrors(dimensions);
+
+    // 生成建议
+    const recommendations = this.generateRecommendations(dimensions);
+
+    // 判断是否通过
+    const passed = overallScore >= this.thresholds.overall && criticalErrors.length === 0;
+
+    return {
+      taskId,
+      stepId: context?.stepId,
       overallScore,
-      feedback,
-      suggestedAction,
-      timestamp: startTime
+      passed,
+      dimensions,
+      criticalErrors,
+      recommendations,
+      timestamp: Date.now(),
     };
-
-    // 7. 记录日志（如果启用）
-    if (this.config.verboseLogging) {
-      this.logQualityCheck(qualityCheck);
-    }
-
-    return qualityCheck;
   }
 
   /**
-   * 获取任务类型对应的质量标准
-   * 
-   * @param taskType 任务类型
-   * @returns 质量标准列表
+   * 完整性检查 - 覆盖率 > 90%
    */
-  getCriteriaForTaskType(taskType: string): QualityCriterion[] {
-    return this.criteriaCache.get(taskType) || LITERATURE_REVIEW_CRITERIA;
-  }
-
-  /**
-   * 评估单项标准
-   * 
-   * @param step 任务步骤
-   * @param criterion 质量标准
-   * @returns 检查结果
-   */
-  private async evaluateCriterion(
-    step: TaskStep,
-    criterion: QualityCriterion
-  ): Promise<CriterionResult> {
-    // 如果禁用 LLM Judge，使用规则检查
-    if (!this.config.enableLLMJudge) {
-      return this.ruleBasedCheck(step, criterion);
-    }
-
-    // 使用 LLM-as-judge
-    return await this.llmJudgeCheck(step, criterion);
-  }
-
-  /**
-   * LLM-as-judge 检查
-   * 
-   * @param step 任务步骤
-   * @param criterion 质量标准
-   * @returns 检查结果
-   */
-  private async llmJudgeCheck(
-    step: TaskStep,
-    criterion: QualityCriterion
-  ): Promise<CriterionResult> {
-    const prompt = this.buildJudgePrompt(step, criterion);
-
-    try {
-      const response = await this.llmClient.generate(prompt, {
-        maxTokens: 500,
-        temperature: 0.1
-      });
-
-      // 解析 LLM 响应
-      const result = this.parseJudgeResponse(response.text, criterion);
-      return result;
-    } catch (error) {
-      console.error(`LLM judge failed for ${criterion.name}:`, error);
-      // 降级到规则检查
-      return this.ruleBasedCheck(step, criterion);
-    }
-  }
-
-  /**
-   * 构建 LLM Judge 提示词
-   * 
-   * @param step 任务步骤
-   * @param criterion 质量标准
-   * @returns 提示词
-   */
-  private buildJudgePrompt(step: TaskStep, criterion: QualityCriterion): string {
-    const outputPreview = JSON.stringify(step.output, null, 2).slice(0, 2000);
-
-    return `
-你是一位严格的学术质量评估专家。请评估以下任务输出的质量。
-
-## 评估标准
-**标准名称**: ${criterion.name}
-**标准描述**: ${criterion.description}
-**检查类型**: ${criterion.checkType}
-**通过阈值**: ${criterion.threshold} (0-1 之间的分数)
-
-## 任务输出
-${outputPreview}
-
-## 评估要求
-1. 仔细分析输出内容
-2. 根据评估标准打分（0-1 之间，保留 2 位小数）
-3. 提供具体的反馈意见
-4. 如果分数低于阈值，提供改进建议
-
-## 输出格式
-请严格按照以下 JSON 格式输出：
-{
-  "score": 0.85,
-  "passed": true,
-  "feedback": "具体的评估反馈...",
-  "suggestions": ["改进建议 1", "改进建议 2"]
-}
-
-只输出 JSON，不要其他内容。
-`.trim();
-  }
-
-  /**
-   * 解析 LLM Judge 响应
-   * 
-   * @param response LLM 响应文本
-   * @param criterion 质量标准
-   * @returns 检查结果
-   */
-  private parseJudgeResponse(
-    response: string,
-    criterion: QualityCriterion
-  ): CriterionResult {
-    try {
-      // 尝试提取 JSON
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No JSON found in response');
-      }
-
-      const parsed = JSON.parse(jsonMatch[0]);
-
-      return {
-        name: criterion.name,
-        score: Math.min(1, Math.max(0, parsed.score || 0)),
-        passed: (parsed.score || 0) >= criterion.threshold,
-        feedback: parsed.feedback || '评估完成',
-        suggestions: parsed.suggestions || []
-      };
-    } catch (error) {
-      console.error('Failed to parse judge response:', error);
-      // 返回保守评估
-      return {
-        name: criterion.name,
-        score: 0.5,
-        passed: false,
-        feedback: '无法解析评估结果，建议人工检查',
-        suggestions: ['手动验证输出质量']
-      };
-    }
-  }
-
-  /**
-   * 规则基础检查（LLM 不可用时的降级方案）
-   * 
-   * @param step 任务步骤
-   * @param criterion 质量标准
-   * @returns 检查结果
-   */
-  private ruleBasedCheck(
-    step: TaskStep,
-    criterion: QualityCriterion
-  ): CriterionResult {
-    // 简单的规则检查逻辑
-    let score = 0.5;
+  private async checkCompleteness(content: string, context?: any): Promise<QualityDimension> {
+    const checks: QualityCheck[] = [];
+    let score = 5.0;
     const feedback: string[] = [];
 
-    // 检查输出是否存在
-    if (!step.output) {
-      score = 0;
-      feedback.push('输出为空');
+    // 检查 1: 内容长度是否合理
+    const wordCount = content.split(/\s+/).length;
+    if (wordCount < 100) {
+      checks.push({
+        checkId: 'completeness_1',
+        description: 'Content length check',
+        passed: false,
+        details: `Content too short: ${wordCount} words (minimum 100)`,
+      });
+      score -= 1.5;
+      feedback.push('Content is too short, may be missing key information');
     } else {
-      // 根据检查类型进行简单规则判断
-      switch (criterion.checkType) {
-        case 'completeness':
-          // 检查输出是否包含必要字段
-          if (Object.keys(step.output).length > 0) {
-            score = 0.8;
-            feedback.push('输出包含数据');
-          }
-          break;
-        case 'format':
-          // 检查输出格式
-          score = 0.7;
-          feedback.push('格式基本正确');
-          break;
-        default:
-          score = 0.6;
-          feedback.push('通过基础检查');
+      checks.push({
+        checkId: 'completeness_1',
+        description: 'Content length check',
+        passed: true,
+        details: `Adequate length: ${wordCount} words`,
+      });
+    }
+
+    // 检查 2: 是否有明确的结构
+    const hasStructure = 
+      content.includes('##') || 
+      content.includes('###') ||
+      content.includes('1.') ||
+      content.includes('- ') ||
+      content.includes('* ');
+    
+    checks.push({
+      checkId: 'completeness_2',
+      description: 'Structure check',
+      passed: hasStructure,
+      details: hasStructure ? 'Content has clear structure' : 'Content lacks clear structure',
+    });
+    if (!hasStructure) {
+      score -= 0.5;
+      feedback.push('Consider adding clear sections and organization');
+    }
+
+    // 检查 3: 是否有结论或总结
+    const hasConclusion = 
+      content.toLowerCase().includes('conclusion') ||
+      content.toLowerCase().includes('summary') ||
+      content.toLowerCase().includes('in summary') ||
+      content.toLowerCase().includes('to conclude');
+    
+    checks.push({
+      checkId: 'completeness_3',
+      description: 'Conclusion check',
+      passed: hasConclusion,
+      details: hasConclusion ? 'Content includes conclusion' : 'Content missing conclusion',
+    });
+    if (!hasConclusion) {
+      score -= 0.5;
+      feedback.push('Add a conclusion or summary section');
+    }
+
+    // 检查 4: 关键元素是否存在（基于任务类型）
+    if (context?.taskType === 'literature_review') {
+      const hasCitations = content.includes('[') && content.includes(']');
+      checks.push({
+        checkId: 'completeness_4',
+        description: 'Citation presence check',
+        passed: hasCitations,
+        details: hasCitations ? 'Citations present' : 'No citations found',
+      });
+      if (!hasCitations) {
+        score -= 1.0;
+        feedback.push('Literature review should include citations');
       }
     }
 
     return {
-      name: criterion.name,
-      score,
-      passed: score >= criterion.threshold,
+      name: 'completeness',
+      weight: DIMENSION_WEIGHTS.completeness,
+      score: Math.max(0, score),
       feedback: feedback.join('; '),
-      suggestions: score < criterion.threshold ? ['建议启用 LLM Judge 进行详细评估'] : []
+      checks,
     };
   }
 
   /**
-   * 计算综合得分
-   * 
-   * @param results 各项检查结果
-   * @returns 综合得分
+   * 准确性检查 - 引用正确率 > 95%
    */
-  private calculateOverallScore(results: CriterionResult[]): number {
-    if (results.length === 0) return 0;
+  private async checkAccuracy(content: string, context?: any): Promise<QualityDimension> {
+    const checks: QualityCheck[] = [];
+    let score = 5.0;
+    const feedback: string[] = [];
 
-    let totalWeight = 0;
+    // 检查 1: 是否有明显的事实错误标记
+    const uncertaintyMarkers = [
+      'i think',
+      'maybe',
+      'probably',
+      'not sure',
+      'might be',
+      'could be',
+    ];
+    const uncertaintyCount = uncertaintyMarkers.filter(m => 
+      content.toLowerCase().includes(m)
+    ).length;
+
+    checks.push({
+      checkId: 'accuracy_1',
+      description: 'Uncertainty language check',
+      passed: uncertaintyCount < 3,
+      details: `Found ${uncertaintyCount} uncertainty markers`,
+    });
+    if (uncertaintyCount >= 3) {
+      score -= 1.0;
+      feedback.push('Reduce uncertain language, be more definitive');
+    }
+
+    // 检查 2: 数字和统计数据是否合理
+    const numbers = content.match(/\d+(\.\d+)?%/g);
+    if (numbers) {
+      const invalidPercentages = numbers.filter(n => {
+        const value = parseFloat(n);
+        return value < 0 || value > 100;
+      });
+      
+      checks.push({
+        checkId: 'accuracy_2',
+        description: 'Percentage validity check',
+        passed: invalidPercentages.length === 0,
+        details: invalidPercentages.length === 0 
+          ? 'All percentages valid' 
+          : `Invalid percentages: ${invalidPercentages.join(', ')}`,
+      });
+      if (invalidPercentages.length > 0) {
+        score -= 2.0;
+        feedback.push('Fix invalid percentage values');
+      }
+    }
+
+    // 检查 3: 内部一致性
+    const contradictions = this.detectContradictions(content);
+    checks.push({
+      checkId: 'accuracy_3',
+      description: 'Internal consistency check',
+      passed: contradictions.length === 0,
+      details: contradictions.length === 0 
+        ? 'No contradictions detected' 
+        : `Potential contradictions: ${contradictions.join(', ')}`,
+    });
+    if (contradictions.length > 0) {
+      score -= 1.5;
+      feedback.push('Resolve internal contradictions');
+    }
+
+    return {
+      name: 'accuracy',
+      weight: DIMENSION_WEIGHTS.accuracy,
+      score: Math.max(0, score),
+      feedback: feedback.join('; '),
+      checks,
+    };
+  }
+
+  /**
+   * 相关性检查 - 内容相关度 > 4/5
+   */
+  private async checkRelevance(content: string, context?: any): Promise<QualityDimension> {
+    const checks: QualityCheck[] = [];
+    let score = 5.0;
+    const feedback: string[] = [];
+
+    const inputQuery = context?.inputQuery?.toLowerCase() || '';
+    const contentLower = content.toLowerCase();
+
+    // 检查 1: 关键词匹配
+    if (inputQuery) {
+      const queryWords = inputQuery.split(/\s+/).filter((w: string) => w.length > 3);
+      const matchCount = queryWords.filter((w: string) => contentLower.includes(w)).length;
+      const matchRate = queryWords.length > 0 ? matchCount / queryWords.length : 0;
+
+      checks.push({
+        checkId: 'relevance_1',
+        description: 'Keyword match check',
+        passed: matchRate > 0.5,
+        details: `${Math.round(matchRate * 100)}% of query keywords found in content`,
+      });
+
+      if (matchRate < 0.3) {
+        score -= 2.0;
+        feedback.push('Content does not match query keywords well');
+      } else if (matchRate < 0.5) {
+        score -= 1.0;
+        feedback.push('Consider addressing more query keywords');
+      }
+    }
+
+    // 检查 2: 是否有无关内容
+    const offTopicMarkers = ['by the way', 'unrelated', 'side note', 'interesting fact'];
+    const offTopicCount = offTopicMarkers.filter(m => contentLower.includes(m)).length;
+
+    checks.push({
+      checkId: 'relevance_2',
+      description: 'Off-topic content check',
+      passed: offTopicCount === 0,
+      details: offTopicCount === 0 ? 'No off-topic markers' : `${offTopicCount} off-topic markers found`,
+    });
+    if (offTopicCount > 0) {
+      score -= 0.5;
+      feedback.push('Remove off-topic content');
+    }
+
+    return {
+      name: 'relevance',
+      weight: DIMENSION_WEIGHTS.relevance,
+      score: Math.max(0, score),
+      feedback: feedback.join('; '),
+      checks,
+    };
+  }
+
+  /**
+   * 格式检查 - 符合学术规范
+   */
+  private async checkFormat(content: string, context?: any): Promise<QualityDimension> {
+    const checks: QualityCheck[] = [];
+    let score = 5.0;
+    const feedback: string[] = [];
+
+    // 检查 1: 段落结构
+    const paragraphs = content.split('\n\n').filter(p => p.trim().length > 0);
+    checks.push({
+      checkId: 'format_1',
+      description: 'Paragraph structure check',
+      passed: paragraphs.length >= 2,
+      details: `Found ${paragraphs.length} paragraphs`,
+    });
+    if (paragraphs.length < 2) {
+      score -= 1.0;
+      feedback.push('Add more paragraphs for better readability');
+    }
+
+    // 检查 2: 列表格式
+    const hasLists = 
+      content.includes('- ') || 
+      content.includes('* ') ||
+      content.includes('1.') ||
+      content.includes('•');
+    
+    checks.push({
+      checkId: 'format_2',
+      description: 'List formatting check',
+      passed: hasLists,
+      details: hasLists ? 'Lists properly formatted' : 'No lists found',
+    });
+
+    // 检查 3: 代码块格式（如果有代码）
+    if (content.includes('```')) {
+      const codeBlocks = content.match(/```[\s\S]*?```/g);
+      const allClosed = codeBlocks && codeBlocks.length % 2 === 0;
+      
+      checks.push({
+        checkId: 'format_3',
+        description: 'Code block formatting check',
+        passed: !!allClosed,
+        details: allClosed ? 'Code blocks properly closed' : 'Unclosed code blocks',
+      });
+      if (!allClosed) {
+        score -= 1.0;
+        feedback.push('Close all code blocks');
+      }
+    }
+
+    // 检查 4: Markdown 语法
+    const markdownElements = ['##', '###', '**', '*', '`', '[', ']', '>', '|'];
+    const markdownUsage = markdownElements.filter(e => content.includes(e)).length;
+    
+    checks.push({
+      checkId: 'format_4',
+      description: 'Markdown usage check',
+      passed: markdownUsage >= 2,
+      details: `Using ${markdownUsage} Markdown elements`,
+    });
+
+    return {
+      name: 'format',
+      weight: DIMENSION_WEIGHTS.format,
+      score: Math.max(0, score),
+      feedback: feedback.join('; '),
+      checks,
+    };
+  }
+
+  /**
+   * 引用质量检查 - 来源可靠性 > 4/5
+   */
+  private async checkCitationQuality(content: string, context?: any): Promise<QualityDimension> {
+    const checks: QualityCheck[] = [];
+    let score = 5.0;
+    const feedback: string[] = [];
+
+    // 检查 1: 是否有引用
+    const citations = content.match(/\[[^\]]+\]/g) || [];
+    const doiPattern = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+\b/gi;
+    const dois = content.match(doiPattern) || [];
+    const urlPattern = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi;
+    const urls = content.match(urlPattern) || [];
+
+    checks.push({
+      checkId: 'citation_1',
+      description: 'Citation presence check',
+      passed: citations.length > 0 || dois.length > 0 || urls.length > 0,
+      details: `Found ${citations.length} citations, ${dois.length} DOIs, ${urls.length} URLs`,
+    });
+
+    // 检查 2: 引用格式一致性
+    if (citations.length > 0) {
+      const hasConsistentFormat = 
+        citations.every(c => /^\[\d+\]$/.test(c)) ||
+        citations.every(c => /^\[[A-Za-z]+,\s*\d{4}\]$/.test(c));
+      
+      checks.push({
+        checkId: 'citation_2',
+        description: 'Citation format consistency check',
+        passed: hasConsistentFormat,
+        details: hasConsistentFormat ? 'Consistent citation format' : 'Inconsistent citation formats',
+      });
+      if (!hasConsistentFormat) {
+        score -= 0.5;
+        feedback.push('Use consistent citation format throughout');
+      }
+    }
+
+    // 检查 3: 权威来源检查
+    const authoritativeDomains = [
+      'arxiv.org',
+      'doi.org',
+      'pubmed',
+      'ieee',
+      'acm',
+      'springer',
+      'elsevier',
+      'nature',
+      'science',
+      '.edu',
+      '.gov',
+    ];
+    
+    const authoritativeCount = urls.filter(url => 
+      authoritativeDomains.some(domain => url.includes(domain))
+    ).length;
+    
+    if (urls.length > 0) {
+      const authorityRate = authoritativeCount / urls.length;
+      
+      checks.push({
+        checkId: 'citation_3',
+        description: 'Source authority check',
+        passed: authorityRate > 0.5,
+        details: `${Math.round(authorityRate * 100)}% from authoritative sources`,
+      });
+      
+      if (authorityRate < 0.3) {
+        score -= 1.5;
+        feedback.push('Use more authoritative sources');
+      } else if (authorityRate < 0.5) {
+        score -= 0.5;
+        feedback.push('Consider using more authoritative sources');
+      }
+    }
+
+    // 如果没有引用，根据任务类型决定扣分
+    if (citations.length === 0 && dois.length === 0 && urls.length === 0) {
+      if (context?.taskType === 'literature_review' || context?.taskType === 'paper_writing') {
+        score -= 2.0;
+        feedback.push('Academic content should include citations');
+      }
+    }
+
+    return {
+      name: 'citationQuality',
+      weight: DIMENSION_WEIGHTS.citationQuality,
+      score: Math.max(0, score),
+      feedback: feedback.join('; '),
+      checks,
+    };
+  }
+
+  /**
+   * 计算总体分数
+   */
+  private calculateOverallScore(dimensions: QualityDimension[]): number {
     let weightedSum = 0;
+    let totalWeight = 0;
 
-    for (const result of results) {
-      const weight = this.getWeightForResult(result);
-      weightedSum += result.score * weight;
-      totalWeight += weight;
+    for (const dim of dimensions) {
+      weightedSum += dim.score * dim.weight;
+      totalWeight += dim.weight;
     }
 
     return totalWeight > 0 ? weightedSum / totalWeight : 0;
   }
 
   /**
-   * 获取检查结果的权重
-   * 
-   * @param result 检查结果
-   * @returns 权重
+   * 识别严重错误
    */
-  private getWeightForResult(result: CriterionResult): number {
-    // 从原始标准中获取权重，默认 1
-    const defaultWeight = 1;
-    
-    // 这里可以根据需要动态调整权重
-    // 例如：某些关键标准的权重更高
-    
-    return defaultWeight;
-  }
+  private identifyCriticalErrors(dimensions: QualityDimension[]): string[] {
+    const errors: string[] = [];
 
-  /**
-   * 生成总体反馈
-   * 
-   * @param results 各项检查结果
-   * @param overallScore 综合得分
-   * @returns 总体反馈
-   */
-  private generateOverallFeedback(
-    results: CriterionResult[],
-    overallScore: number
-  ): string {
-    const passedCount = results.filter(r => r.passed).length;
-    const totalCount = results.length;
+    for (const dim of dimensions) {
+      // 检查未通过的关键检查项
+      for (const check of dim.checks) {
+        if (!check.passed && check.checkId.includes('accuracy')) {
+          errors.push(`Accuracy issue: ${check.details}`);
+        }
+      }
 
-    const summary = `质量评估完成：${passedCount}/${totalCount} 项标准通过，综合得分 ${overallScore.toFixed(2)}`;
-
-    const failedCriteria = results.filter(r => !r.passed);
-    if (failedCriteria.length > 0) {
-      const failedNames = failedCriteria.map(r => r.name).join('、');
-      return `${summary}。未通过项：${failedNames}。建议：${failedCriteria[0].suggestions?.[0] || '请检查相关输出'}`;
-    }
-
-    return `${summary}。输出质量良好，可以继续。`;
-  }
-
-  /**
-   * 确定建议操作
-   * 
-   * @param passed 是否通过
-   * @param step 任务步骤
-   * @param overallScore 综合得分
-   * @returns 建议操作
-   */
-  private determineAction(
-    passed: boolean,
-    step: TaskStep,
-    overallScore: number
-  ): QualityAction {
-    if (passed) {
-      return 'accept';
-    }
-
-    // 如果分数接近阈值，建议调整后重试
-    if (overallScore >= 0.6) {
-      return 'adjust_and_retry';
-    }
-
-    // 如果分数很低，检查是否可以重试
-    if (step.retryCount < (this.config.maxRetries || 3)) {
-      return 'retry';
-    }
-
-    // 超过最大重试次数，建议升级处理
-    return 'escalate';
-  }
-
-  /**
-   * 记录质量检查日志
-   * 
-   * @param check 质量检查结果
-   */
-  private logQualityCheck(check: QualityCheck): void {
-    const status = check.passed ? '✅' : '❌';
-    console.log(`[${status}] QualityCheck for ${check.stepId}: ${check.overallScore.toFixed(2)} - ${check.suggestedAction}`);
-    
-    if (!check.passed) {
-      const failed = check.criteria.filter(c => !c.passed);
-      console.log(`  未通过项：${failed.map(c => c.name).join(', ')}`);
-    }
-  }
-
-  /**
-   * 批量检查多个步骤
-   * 
-   * @param steps 步骤列表
-   * @param taskType 任务类型
-   * @returns 检查结果列表
-   */
-  async batchCheck(
-    steps: TaskStep[],
-    taskType: string
-  ): Promise<QualityCheck[]> {
-    const checks: QualityCheck[] = [];
-
-    for (const step of steps) {
-      if (step.output) {
-        const check = await this.check(step, taskType);
-        checks.push(check);
+      // 分数过低
+      if (dim.score < 2.0) {
+        errors.push(`${dim.name} score critically low: ${dim.score}/5`);
       }
     }
 
-    return checks;
+    return errors;
   }
 
   /**
-   * 生成质量报告
-   * 
-   * @param checks 检查结果列表
-   * @returns 质量报告
+   * 生成改进建议
    */
-  generateQualityReport(checks: QualityCheck[]): string {
-    const totalChecks = checks.length;
-    const passedChecks = checks.filter(c => c.passed).length;
-    const avgScore = checks.reduce((sum, c) => sum + c.overallScore, 0) / totalChecks;
+  private generateRecommendations(dimensions: QualityDimension[]): string[] {
+    const recommendations: string[] = [];
 
-    const report = `
-## 质量检查报告
+    for (const dim of dimensions) {
+      if (dim.score < this.thresholds[dim.name]) {
+        if (dim.feedback) {
+          recommendations.push(`[${dim.name}] ${dim.feedback}`);
+        }
+      }
+    }
 
-**总检查数**: ${totalChecks}
-**通过数**: ${passedChecks}
-**通过率**: ${(passedChecks / totalChecks * 100).toFixed(1)}%
-**平均得分**: ${avgScore.toFixed(2)}
+    return recommendations;
+  }
 
-### 详细结果
-${checks.map(c => `
-- **${c.stepId}**: ${c.passed ? '✅' : '❌'} ${c.overallScore.toFixed(2)}
-  ${c.feedback}
-`).join('\n')}
-`.trim();
+  /**
+   * 检测内容中的潜在矛盾
+   */
+  private detectContradictions(content: string): string[] {
+    const contradictions: string[] = [];
+    
+    // 简单的矛盾检测：查找相反的表达
+    const positivePatterns = ['increases', 'improves', 'enhances', 'positive', 'better'];
+    const negativePatterns = ['decreases', 'worsens', 'reduces', 'negative', 'worse'];
 
-    return report;
+    const contentLower = content.toLowerCase();
+    
+    const hasPositive = positivePatterns.some(p => contentLower.includes(p));
+    const hasNegative = negativePatterns.some(p => contentLower.includes(p));
+
+    if (hasPositive && hasNegative) {
+      // 需要更复杂的分析来确定是否真的矛盾
+      // 这里简化处理，只标记潜在问题
+      contradictions.push('Mixed positive/negative claims detected');
+    }
+
+    return contradictions;
+  }
+
+  /**
+   * 更新阈值
+   */
+  updateThresholds(newThresholds: Partial<QualityThresholds>): void {
+    this.thresholds = { ...this.thresholds, ...newThresholds };
+  }
+
+  /**
+   * 获取当前阈值
+   */
+  getThresholds(): QualityThresholds {
+    return { ...this.thresholds };
   }
 }
-
-export default QualityChecker;

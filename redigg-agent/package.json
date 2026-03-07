@@ -58,7 +58,8 @@
     "openai": "^6.22.0",
     "ora": "^5.4.1",
     "picocolors": "^1.1.1",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "better-sqlite3": "^9.0.0"
   },
   "devDependencies": {
     "@types/conf": "^2.1.0",
@@ -67,6 +68,7 @@
     "prettier": "^3.8.1",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@types/better-sqlite3": "^7.6.0"
   }
 }

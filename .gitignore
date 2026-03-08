@@ -16,6 +16,8 @@ market-research-hourly/
 temp-files/
 project/
 redigg-web/
+redigg/docs/
+README-redigg.md
 
 # Dependencies
 node_modules/

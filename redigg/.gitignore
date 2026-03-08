@@ -1,38 +1,10 @@
-# OpenClaw workspace files (not part of redigg project)
-.openclaw/
-AGENTS.md
-HEARTBEAT.md
-IDENTITY.md
-SOUL.md
-TOOLS.md
-USER.md
-BOOTSTRAP.md
-MEMORY.md
-memory/
-chat-logs/
-hourly-reports/
-hourly-reviews/
-market-research-hourly/
-temp-files/
-project/
-redigg-web/
-skills/
-docs/seed-user-plan.md
-chat-to-project-report.md
-README.md
-
 # Dependencies
 node_modules/
-redigg/node_modules/
-redigg/web/node_modules/
-
-# Build outputs
 dist/
-redigg/dist/
-redigg/web/dist/
 
 # Environment
 .env
+.env.local
 *.local
 
 # IDE
@@ -44,3 +16,7 @@ redigg/web/dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

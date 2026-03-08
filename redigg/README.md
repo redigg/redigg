@@ -1,19 +1,10 @@
-# Redigg
+# Redigg Agent
 
-**自主科研 Agent 平台** | Autonomous Research Agent Platform
+**自主科研 Agent 核心代码** | Autonomous Research Agent Core
 
 **版本**: 0.1.0  
 **最后更新**: 2026-03-08  
 **许可证**: MIT
-
----
-
-## 🦎 关于 Redigg
-
-Redigg 是一个基于 OpenClaw 构建的自主科研 Agent 平台，致力于使 Agent 能够全自主开展科研和自我进化。
-
-**愿景**: 使 Agent 能全自主开展科研和自我进化，打破知识垄断，提升人类在研究活动上的生产效率。  
-**宗旨**: 人能停 AI 不能停
 
 ---
 
@@ -35,28 +26,10 @@ cp .env.example .env
 npm run dev
 ```
 
-### 4. 运行 CLI 测试
+### 4. 运行测试
 ```bash
-npx tsx src/cli.ts
+npm test
 ```
-
----
-
-## 📚 文档
-
-所有文档都在 [`docs/`](./docs/) 目录下：
-
-| 文档 | 说明 | 日期 |
-|------|------|------|
-| [📖 文档索引](./docs/README.md) | 所有文档的导航和说明 | 2026-03-08 |
-| [🎯 产品设计](./docs/redigg-design.md) | 愿景、架构、技术实现 | 2026-03-07 |
-| [🤝 贡献指南](./docs/contribution.md) | 开发标准、代码规范 | 2026-03-07 |
-| [🗺️ 产品路线图](./docs/PRODUCT_ROADMAP.md) | Phase 1-4 战略规划 | 2026-03-08 |
-| [📋 迭代计划](./docs/ITERATION_PLAN.md) | 5 阶段详细迭代方案 | 2026-03-08 |
-| [⏰ 定时任务](./docs/SCHEDULED_TASKS.md) | Cron 任务规划 | 2026-03-08 |
-| [⚡ 快速启动](./docs/QUICK_START_V2.md) | 2 小时核心功能升级 | 2026-03-08 |
-
-**👉 从 [文档索引](./docs/README.md) 开始浏览所有文档**
 
 ---
 
@@ -64,10 +37,10 @@ npx tsx src/cli.ts
 
 ```
 redigg/
-├── src/                    # 源代码
-│   ├── agent/              # Agent 核心实现
+├── src/                    # 核心源代码
+│   ├── agent/              # Agent 实现
 │   ├── memory/             # 记忆系统
-│   ├── skills/             # 技能系统
+│   ├── skills/             # 技能管理
 │   ├── gateway/            # A2A 网关
 │   ├── session/            # 会话管理
 │   ├── scheduling/         # 定时任务
@@ -78,7 +51,6 @@ redigg/
 │   └── research/           # 科研技能
 ├── web/                    # Web 前端 (React + Vite)
 ├── tests/                  # 测试文件
-├── docs/                   # 📚 所有文档
 ├── package.json
 └── README.md
 ```
@@ -100,11 +72,11 @@ redigg/
 
 ## 🎯 核心功能
 
-- **三层记忆系统** - Working/Short-term/Long-term 记忆 + 自动巩固
-- **技能系统** - 动态加载、自我进化、 ClawHub 集成
-- **A2A 协议** - 符合 A2A-js/sdk 标准，可与其他 Agent 互操作
-- **会话管理** - SQLite 持久化、多会话支持
-- **定时任务** - CronManager、Heartbeat (60 秒间隔)
+- **三层记忆系统** - Working/Short-term/Long-term + 自动巩固
+- **技能系统** - 动态加载、自我进化
+- **A2A 协议** - 符合 A2A-js/sdk 标准
+- **会话管理** - SQLite 持久化
+- **定时任务** - CronManager、Heartbeat
 - **Web 仪表盘** - React 前端、SSE 流式聊天
 
 ---
@@ -118,42 +90,21 @@ redigg/
 | `GET /api/skills` | 获取技能列表 |
 | `GET /api/memories` | 获取用户记忆 |
 | `GET /api/sessions` | 获取会话列表 |
-| `POST /api/upload` | 文件上传 |
 | `/a2a/jsonrpc` | A2A 协议接口 |
-| `/a2a/agent.json` | Agent Card |
 
 ---
 
-## 🗺️ 路线图
+## 📚 文档
 
-| Phase | 目标 | 状态 |
-|-------|------|------|
-| Phase 0 | 基础设施 | ✅ 完成 |
-| Phase 1 | 记忆系统 | ✅ 完成 |
-| Phase 2 | 反馈学习 | 🔄 进行中 |
-| Phase 3 | 技能进化 | 📅 规划中 |
-| Phase 4 | 社区进化 | 📅 规划中 |
+项目完整文档在 **workspace 根目录** 的 `docs-redigg/` 文件夹：
 
-**详细规划**: [产品路线图](./docs/PRODUCT_ROADMAP.md)
-
----
-
-## 🤝 贡献
-
-欢迎贡献！请阅读 [贡献指南](./docs/contribution.md) 了解开发标准和流程。
-
-### 快速贡献流程
-1. Fork 仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交变更 (`git commit -m 'feat: add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建 Pull Request
-
----
-
-## 📄 许可证
-
-MIT License - 详见 [LICENSE](./LICENSE)
+- 📖 [文档索引](../docs-redigg/README.md)
+- 🎯 [产品设计](../docs-redigg/redigg-design.md)
+- 🤝 [贡献指南](../docs-redigg/contribution.md)
+- 🗺️ [产品路线图](../docs-redigg/PRODUCT_ROADMAP.md)
+- 📋 [迭代计划](../docs-redigg/ITERATION_PLAN.md)
+- ⏰ [定时任务](../docs-redigg/SCHEDULED_TASKS.md)
+- ⚡ [快速启动](../docs-redigg/QUICK_START_V2.md)
 
 ---
 
@@ -161,9 +112,6 @@ MIT License - 详见 [LICENSE](./LICENSE)
 
 - **GitHub**: https://github.com/redigg/redigg
 - **官网**: https://redigg.com
-- **OpenClaw**: https://github.com/openclaw/openclaw
-- **文档**: https://docs.openclaw.ai
-- **Discord**: https://discord.com/invite/clawd
 
 ---
 

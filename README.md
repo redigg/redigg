@@ -1,69 +1,70 @@
 # Redigg
 
-Redigg is an autonomous research agent platform based on OpenClaw.
+Redigg is an autonomous research agent platform based on OpenClaw, designed to help researchers with literature review, data analysis, and scientific discovery.
 
-## Setup
+**[📚 Documentation Index](docs/README.md)**
 
-1.  Clone the repository.
-2.  Run `npm install`.
-3.  Copy `.env.example` to `.env` (create one if needed).
-4.  Run `npm run dev` to start the development server.
+## 🚀 Quick Start
 
-## Documentation
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/redigg/redigg.git
+    cd redigg
+    ```
 
--   [Design Document](docs/redigg-design.md) - The core design philosophy, architecture, and roadmap.
--   [Contribution Guidelines](docs/contribution.md) - Coding standards and project structure for contributors.
+2.  **Install dependencies**
+    ```bash
+    npm install
+    ```
 
-## Architecture
+3.  **Configure environment**
+    ```bash
+    cp .env.example .env
+    # Edit .env and set your OPENAI_API_KEY
+    ```
 
--   `src/app`: Application Layer (Memory Evolution, Skill Evolution, etc.)
--   `src/core`: Core Layer (Agent, Memory Manager, etc.)
--   `src/infra`: Infrastructure Layer (Gateway, Storage, etc.)
+4.  **Run development server**
+    ```bash
+    npm run dev
+    ```
 
-## Modules
+5.  **Access the Web UI**
+    Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-### Memory System (Phase 1)
-Implemented in `src/core/memory/MemoryManager.ts` using SQLite (`src/infra/storage/sqlite.ts`).
-Supports storing and retrieving user preferences, facts, and context.
+## 📖 Documentation
 
-- [x] Memory Storage (SQLite)
-- [x] Basic CRUD Operations
-- [x] Memory Injection (Keyword Search)
-- [x] Memory Evolution (Learning from interaction)
+All documentation is located in the `docs/` directory.
 
-### Skill System (Phase 2)
-Implemented in `src/core/skills/SkillManager.ts`.
-Supports executing modular skills with context and memory access.
+-   **[Product Design](docs/redigg-design.md)**: Vision, architecture, and core concepts.
+-   **[Product Roadmap](docs/PRODUCT_ROADMAP.md)**: Strategic plan and milestones.
+-   **[Iteration Plan](docs/ITERATION_PLAN.md)**: Detailed execution plan for upcoming features.
+-   **[Scheduled Tasks](docs/SCHEDULED_TASKS.md)**: Plan for background jobs and cron tasks.
+-   **[Contribution Guide](docs/contribution.md)**: How to contribute to Redigg.
+-   **[Quick Start V2](docs/QUICK_START_V2.md)**: Guide for upgrading to V2 features (Vector Search, Planner, Feedback).
 
-- [x] Skill Interface & Manager
-- [x] Literature Review Skill (Mock Scholar Search)
-- [ ] Skill Evolution (Self-improvement)
+## 🏗️ Architecture
 
-### A2A Gateway
-Implemented in `src/infra/a2a/gateway.ts`.
-Allows Redigg to be used as an autonomous agent node by OpenClaw or other A2A-compliant systems.
+Redigg follows a modular architecture:
 
-- [x] Agent Card (Discovery)
-- [x] JSON-RPC Interface
-- [x] HTTP+JSON Interface
+-   `src/app`: Application Layer (Evolution Systems)
+-   `src/core`: Core Layer (Agent, Memory, Planning)
+-   `src/infra`: Infrastructure Layer (Gateway, Storage, Skills)
+-   `src/skills`: Skill Modules
+-   `web/`: React Frontend
 
-## Usage
+## 🧪 Testing
 
-### CLI Demo
-Run the CLI to test the autonomous research agent with memory capabilities.
+Run the test suite:
 
 ```bash
-# Create .env file with OPENAI_API_KEY for real LLM (Optional)
-cp .env.example .env
-
-# Run CLI
-npx tsx src/cli.ts
+npm test
 ```
 
-In the CLI, try:
-1.  **Teach**: "My name is Alice" or "I am interested in cancer research"
-2.  **Verify**: "What is my name?" or "What should I research today?"
-    - The agent will use injected memories to personalize the response.
+## 📄 License
 
-## Reference
-OpenClaw reference code is available in `reference/openclaw`.
+MIT
+
+---
+
+**Redigg AI Team** 🦎
+*"人能停 AI 不能停"*

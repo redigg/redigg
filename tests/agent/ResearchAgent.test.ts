@@ -20,8 +20,8 @@ describe('ResearchAgent', () => {
       fs.unlinkSync(dbPath);
     }
     const storage = new SQLiteStorage(dbPath);
-    memoryManager = new MemoryManager(storage);
     llm = new MockLLMClient();
+    memoryManager = new MemoryManager(storage, llm);
     memoryEvo = new MemoryEvolutionSystem(memoryManager, llm);
     agent = new ResearchAgent(memoryManager, memoryEvo, llm);
   });
@@ -39,10 +39,11 @@ describe('ResearchAgent', () => {
     // 2. Mock LLM Response
     const chatSpy = vi.spyOn(llm, 'chat')
       .mockResolvedValueOnce({
-        content: 'NO_SEARCH' // For shouldSearch check
+        content: JSON.stringify({ intent: 'single', steps: [{ tool: 'Chat', params: { message: 'What is THBS2?' } }] }) // For Planner
       })
+      // NOTE: executeStep(Chat) calls LLM directly, skipping shouldSearch logic in the fallback path
       .mockResolvedValueOnce({
-        content: 'THBS2 is Thrombospondin-2.' // For actual chat
+        content: 'THBS2 is Thrombospondin-2.' // For executeStep(Chat)
       })
       .mockResolvedValueOnce({
         // For Memory Evolution

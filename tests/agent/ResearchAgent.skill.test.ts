@@ -23,8 +23,8 @@ describe('ResearchAgent - Skills', () => {
       fs.unlinkSync(dbPath);
     }
     const storage = new SQLiteStorage(dbPath);
-    memoryManager = new MemoryManager(storage);
     llm = new MockLLMClient();
+    memoryManager = new MemoryManager(storage, llm);
     memoryEvo = new MemoryEvolutionSystem(memoryManager, llm);
     
     // We pass undefined for skillManager, ResearchAgent should create its own and register skills

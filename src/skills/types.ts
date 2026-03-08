@@ -15,6 +15,7 @@ export interface SkillContext {
     session?: any; // Avoiding circular dependency with SessionManager
     agent?: any; // Avoiding circular dependency with SubAgentManager
     browser?: any; // Avoiding circular dependency with BrowserManager
+    event?: any; // Avoiding circular dependency with EventManager
   };
 
   // Logging function

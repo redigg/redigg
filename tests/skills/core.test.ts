@@ -3,8 +3,8 @@ import { ResearchAgent } from '../../src/agent/ResearchAgent.js';
 import { LLMClient } from '../../src/llm/LLMClient.js';
 import { MemoryManager } from '../../src/memory/MemoryManager.js';
 import { MemoryEvolutionSystem } from '../../src/memory/evolution/MemoryEvolutionSystem.js';
+import { SQLiteStorage } from '../../src/storage/sqlite.js';
 import path from 'path';
-import SchedulingSkill from '../../skills/core/scheduling/index.js';
 
 describe('Core Skills Integration', () => {
   let agent: ResearchAgent;
@@ -23,30 +23,12 @@ describe('Core Skills Integration', () => {
         embed: async (text: string) => Array(1536).fill(0),
     } as unknown as LLMClient;
     
-    // MemoryManager needs a real DB or mock. 
-    // Assuming MemoryManager can work with in-memory SQLite or we mock it.
-    // Let's use real one but with a test DB path if possible, or just mock it.
-    // Since MemoryManager uses SQLite directly in constructor, it's hard to mock without refactoring.
-    // Let's assume we can instantiate it safely.
-    
-    // Actually, let's just rely on the fact that we are running in a test env.
-    // We'll skip complex mocking and just test if skills are registered.
-    
     llm = mockLLM;
-    memory = new MemoryManager(llm);
-    // Initialize DB
-    // await memory.initialize(); // MemoryManager auto-initializes or doesn't have this method publicly exposed in this version
+    memory = new MemoryManager(new SQLiteStorage(':memory:'), llm);
     
     const memoryEvo = new MemoryEvolutionSystem(memory, llm);
     
     agent = new ResearchAgent(memory, memoryEvo, llm);
-    
-    // Manually inject managers for testing environment because ResearchAgent constructor only injects into the modules loaded by IT.
-    // In tests, we might be importing different instances of the skill modules if module resolution is tricky.
-    // However, ResearchAgent constructor DOES inject them.
-    // The issue might be that vitest isolates modules.
-    // Let's try to inject explicitly here.
-    SchedulingSkill.setManagers(agent.cronManager, agent.skillManager);
     
     // Wait for async loading
     await new Promise(resolve => setTimeout(resolve, 2000));

@@ -4,6 +4,7 @@ import { MemoryManager } from '../memory/MemoryManager.js';
 import { createLogger } from '../utils/logger.js';
 import path from 'path';
 import fs from 'fs/promises';
+import yaml from 'js-yaml';
 
 const logger = createLogger('SkillManager');
 
@@ -75,11 +76,85 @@ export class SkillManager {
                 const skillMdPath = path.join(itemPath, 'SKILL.md');
                 const indexTsPath = path.join(itemPath, 'index.ts');
 
+                let loaded = false;
+
                 try {
                     await fs.access(skillMdPath);
                     // It's a Skill with metadata
-                    await this.loadSkill(itemPath);
+                    // Try to parse SKILL.md to see if it's an OpenClaw skill (metadata block)
+                    const content = await fs.readFile(skillMdPath, 'utf-8');
+                    const match = content.match(/^---\n([\s\S]*?)\n---/);
+                    if (match) {
+                        try {
+                            const meta = yaml.load(match[1]) as any;
+                            // Check if there is an index.ts implementing our Skill interface
+                            try {
+                                await fs.access(indexTsPath);
+                                await this.loadSkill(itemPath);
+                                loaded = true;
+                            } catch (e) {
+                                // No index.ts, so it's a pure OpenClaw skill (markdown only or external bin)
+                                // We wrap it in a ShellSkill
+                                logger.info(`Adapting OpenClaw skill: ${path.basename(itemPath)}`);
+                                
+                                // Create a dynamic ShellSkill
+                                const skillName = path.basename(itemPath);
+                                const description = meta.description || '';
+                                
+                                const shellSkill: Skill = {
+                                    id: skillName,
+                                    name: meta.name || skillName,
+                                    description: description,
+                                    // version: '1.0.0', // Skill interface does not have version
+                                    execute: async (ctx, params) => {
+                                        ctx.log('thinking', `Executing external skill: ${skillName} with params: ${JSON.stringify(params)}`);
+                                        
+                                        // For now, just a placeholder implementation
+                                        if (skillName === 'agent-browser') {
+                                             const { exec } = await import('child_process');
+                                             const util = await import('util');
+                                             const execAsync = util.promisify(exec);
+                                             
+                                             // Example: agent-browser open <url>
+                                             if (params.command) {
+                                                 const cmd = `agent-browser ${params.command}`;
+                                                 ctx.log('action', `Running: ${cmd}`);
+                                                 try {
+                                                     const { stdout, stderr } = await execAsync(cmd);
+                                                     return { stdout, stderr, success: true };
+                                                 } catch (err: any) {
+                                                     return { error: err.message, success: false };
+                                                 }
+                                             }
+                                        }
+
+                                        return { 
+                                            success: true, 
+                                            message: `Executed OpenClaw skill ${skillName} (Simulation)`,
+                                            meta 
+                                        };
+                                    }
+                                };
+                                this.registerSkill(shellSkill);
+                            // This duplication in loadSkillsFromDisk is legacy.
+                            // The actual fix should be in loadPack.
+                            // Let's just keep it clean here.
+                            
+                            loaded = true;
+                            }
+                        } catch (e) {
+                            // Invalid YAML
+                        }
+                    } else {
+                        // Standard skill
+                        await this.loadSkill(itemPath);
+                        loaded = true;
+                    }
                 } catch (e) {
+                    // No SKILL.md or parsing failed
+                }
+
+                if (!loaded) {
                     // Maybe it's a skill without metadata?
                     try {
                         await fs.access(indexTsPath);
@@ -95,11 +170,10 @@ export class SkillManager {
     }
   }
 
-  private async loadSkill(skillPath: string): Promise<Skill | null> {
+  private async loadSkill(skillPath: string, packId?: string): Promise<Skill | null> {
     const implPath = path.join(skillPath, 'index.ts');
     try {
         await fs.access(implPath);
-        // logger.debug(`Loading dynamic skill from ${implPath}`);
         
         // Use pathToFileURL to handle ESM import properly on all platforms
         const { pathToFileURL } = await import('url');
@@ -116,22 +190,18 @@ export class SkillManager {
                     logger.debug(`Overwriting existing skill: ${skillInstance.id}`);
                 }
                 
-                // If the skill is "heartbeat", we should probably register it specially or just normally.
-                // The issue is that `heartbeat` is in `skills/infra/heartbeat`, which is inside `skills/infra` pack.
-                // But `loadPack` might not be loading it correctly if the pack structure is complex?
-                // Actually `loadPack` scans subdirectories. 
-                // `skills/infra` contains `heartbeat` directory.
-                // `loadPack` calls `loadSkill` on `skills/infra/heartbeat`.
-                // `loadSkill` loads `index.ts`.
-                // It should work.
-                
                 this.skills.set(skillInstance.id, skillInstance);
                 logger.info(`Registered skill: ${skillInstance.id}`);
                 return skillInstance;
             }
         }
     } catch (e) {
-        logger.error(`Failed to load skill from ${implPath}: ${e}`);
+        // Only log error if file exists but failed to load (e.g. syntax error)
+        // If file doesn't exist (fs.access fails), we just return null silently
+        // But we need to distinguish between ENOENT and other errors
+        if ((e as any).code !== 'ENOENT') {
+             logger.error(`Failed to load skill from ${implPath}: ${e}`);
+        }
     }
     return null;
   }
@@ -145,6 +215,9 @@ export class SkillManager {
         skills: [],
         path: packPath
     };
+    
+    // Register pack first so we can add skills to it
+    this.packs.set(pack.id, pack);
 
     // Scan for sub-directories which are skills
     const entries = await fs.readdir(packPath, { withFileTypes: true });
@@ -152,19 +225,115 @@ export class SkillManager {
         if (entry.isDirectory()) {
             const skillPath = path.join(packPath, entry.name);
             
-            // Wait, if it's 'heartbeat' (no SKILL.md), loadSkill should still work because it looks for index.ts
-            // But verify loadSkill logic
-            
-            const skill = await this.loadSkill(skillPath);
-            if (skill) {
-                // Assign packId to skill for organization
-                (skill as any).packId = packId;
-                pack.skills.push(skill);
+            // Check if it's a Skill (has SKILL.md or just index.ts?)
+            const skillMdPath = path.join(skillPath, 'SKILL.md');
+            const indexTsPath = path.join(skillPath, 'index.ts');
+
+            let loaded = false;
+
+            try {
+                await fs.access(skillMdPath);
+                // It's a Skill with metadata
+                // Try to parse SKILL.md to see if it's an OpenClaw skill (metadata block)
+                const content = await fs.readFile(skillMdPath, 'utf-8');
+                const match = content.match(/^---\n([\s\S]*?)\n---/);
+                if (match) {
+                    try {
+                        const meta = yaml.load(match[1]) as any;
+                        
+                        // Check if there is an index.ts implementing our Skill interface
+                        try {
+                            await fs.access(indexTsPath);
+                            const skill = await this.loadSkill(skillPath, packId);
+                            if (skill) {
+                                (skill as any).packId = packId;
+                                pack.skills.push(skill);
+                            }
+                            loaded = true;
+                        } catch (e) {
+                            // No index.ts, so it's a pure OpenClaw skill (markdown only or external bin)
+                            // We wrap it in a ShellSkill
+                            logger.info(`Adapting OpenClaw skill: ${path.basename(skillPath)}`);
+                            
+                            // Create a dynamic ShellSkill
+                            const skillName = path.basename(skillPath);
+                            const description = meta.description || '';
+                            
+                            const shellSkill: Skill = {
+                                id: skillName,
+                                name: meta.name || skillName,
+                                description: description,
+                                // version: '1.0.0', // Skill interface does not have version
+                                execute: async (ctx, params) => {
+                                    // Use 'action' log type which is valid
+                                    if (ctx.log) ctx.log('action', `Executing external skill: ${skillName} with params: ${JSON.stringify(params)}`);
+                                    
+                                    // For now, just a placeholder implementation
+                                    if (skillName === 'agent-browser') {
+                                         const { exec } = await import('child_process');
+                                         const util = await import('util');
+                                         const execAsync = util.promisify(exec);
+                                         
+                                         // Example: agent-browser open <url>
+                                         if (params.command) {
+                                             const cmd = `agent-browser ${params.command}`;
+                                             if (ctx.log) ctx.log('action', `Running: ${cmd}`);
+                                             try {
+                                                 const { stdout, stderr } = await execAsync(cmd);
+                                                 return { stdout, stderr, success: true };
+                                             } catch (err: any) {
+                                                 return { error: err.message, success: false };
+                                             }
+                                         }
+                                    }
+
+                                    return { 
+                                        success: true, 
+                                        message: `Executed OpenClaw skill ${skillName} (Simulation)`,
+                                        meta 
+                                    };
+                                }
+                            };
+                            this.registerSkill(shellSkill);
+                            logger.info(`Registered skill: ${shellSkill.id}`);
+                            (shellSkill as any).packId = packId;
+                            pack.skills.push(shellSkill);
+                            
+                            loaded = true;
+                        }
+                    } catch (e) {
+                        // Invalid YAML
+                    }
+                } else {
+                    // Standard skill
+                    const skill = await this.loadSkill(skillPath, packId);
+                    if (skill) {
+                        (skill as any).packId = packId;
+                        pack.skills.push(skill);
+                    }
+                    loaded = true;
+                }
+            } catch (e) {
+                // No SKILL.md or parsing failed
+            }
+
+            if (!loaded) {
+                // Try standard loading (index.ts) if not already loaded
+                try {
+                    await fs.access(indexTsPath);
+                    const skill = await this.loadSkill(skillPath, packId);
+                    if (skill) {
+                        (skill as any).packId = packId;
+                        pack.skills.push(skill);
+                        loaded = true;
+                    }
+                } catch (e2) {
+                    // Not a skill
+                }
             }
         }
     }
     
-    this.packs.set(pack.id, pack);
     logger.info(`Registered pack: ${packId} with ${pack.skills.length} skills`);
   }
 
@@ -226,7 +395,14 @@ export class SkillManager {
     };
 
     try {
-      return await skill.execute(context, params);
+      const result = await skill.execute(context, params);
+      
+      // Emit event if EventManager is available
+      if (this.managers && this.managers.event) {
+          this.managers.event.emit('skill:executed', { skillId, result });
+      }
+      
+      return result;
     } catch (error) {
       context.log('error', `Execution failed: ${error}`);
       throw error;

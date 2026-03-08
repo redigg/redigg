@@ -338,6 +338,9 @@ export class A2AGateway {
                 } else if (type === 'log') {
                     // Send log
                     res.write(`data: ${JSON.stringify({ type: 'log', content })}\n\n`);
+                } else if (type === 'plan') {
+                    // Send plan update
+                    res.write(`data: ${JSON.stringify({ type: 'plan', content })}\n\n`);
                 }
             }, sessionId);
             

@@ -18,8 +18,8 @@ describe('MemoryEvolutionSystem', () => {
       fs.unlinkSync(dbPath);
     }
     const storage = new SQLiteStorage(dbPath);
-    memoryManager = new MemoryManager(storage);
     llm = new MockLLMClient();
+    memoryManager = new MemoryManager(storage, llm);
     evolutionSystem = new MemoryEvolutionSystem(memoryManager, llm);
   });
 

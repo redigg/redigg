@@ -1,77 +1,69 @@
-# Redigg 开发群
+# Redigg
 
-研究平台（与 evowork 工作平台形成互补）
+Redigg is an autonomous research agent platform based on OpenClaw.
 
----
+## Setup
 
-## 项目概述
+1.  Clone the repository.
+2.  Run `npm install`.
+3.  Copy `.env.example` to `.env` (create one if needed).
+4.  Run `npm run dev` to start the development server.
 
-Redigg 是一个研究平台，专注于 AI Agent 工作流、研究协作平台、众包平台的市场调研和产品开发。
+## Documentation
 
----
+-   [Design Document](docs/redigg-design.md) - The core design philosophy, architecture, and roadmap.
+-   [Contribution Guidelines](docs/contribution.md) - Coding standards and project structure for contributors.
 
-## 核心定位
+## Architecture
 
-研究平台（与 evowork 工作平台形成互补）
+-   `src/app`: Application Layer (Memory Evolution, Skill Evolution, etc.)
+-   `src/core`: Core Layer (Agent, Memory Manager, etc.)
+-   `src/infra`: Infrastructure Layer (Gateway, Storage, etc.)
 
----
+## Modules
 
-## 核心任务
+### Memory System (Phase 1)
+Implemented in `src/core/memory/MemoryManager.ts` using SQLite (`src/infra/storage/sqlite.ts`).
+Supports storing and retrieving user preferences, facts, and context.
 
-1. **市场调研** - AI Agent 工作流、研究协作平台、众包平台
-2. **竞品分析** - 追踪竞品动态
-3. **产品开发** - Redigg 平台功能开发
+- [x] Memory Storage (SQLite)
+- [x] Basic CRUD Operations
+- [x] Memory Injection (Keyword Search)
+- [x] Memory Evolution (Learning from interaction)
 
----
+### Skill System (Phase 2)
+Implemented in `src/core/skills/SkillManager.ts`.
+Supports executing modular skills with context and memory access.
 
-## 调研目标
+- [x] Skill Interface & Manager
+- [x] Literature Review Skill (Mock Scholar Search)
+- [ ] Skill Evolution (Self-improvement)
 
-追踪 AI Agent 工作流、研究协作平台、众包平台相关的新动态
+### A2A Gateway
+Implemented in `src/infra/a2a/gateway.ts`.
+Allows Redigg to be used as an autonomous agent node by OpenClaw or other A2A-compliant systems.
 
----
+- [x] Agent Card (Discovery)
+- [x] JSON-RPC Interface
+- [x] HTTP+JSON Interface
 
-## 调研内容
+## Usage
 
-### 1. 竞品平台动态 (每轮必查)
-- **AI Agent 框架**: AutoGPT、BabyAGI、CrewAI、LangGraph、AutoGen
-- **Agent 市场**: Gumloop、Relevance AI、Wordware、Voiceflow
-- **研究协作**: Overleaf、ResearchGate、Mendeley、Zotero
-- **众包平台**: Kaggle、Upwork、Amazon MTurk、TaskRabbit
+### CLI Demo
+Run the CLI to test the autonomous research agent with memory capabilities.
 
-### 2. 技术趋势 (每轮必查)
-- **论文**: arXiv (cs.AI, cs.SE, cs.MA) - Agentic Workflow, Multi-Agent System
-- **GitHub**: Trending repositories related to AI agents, workflow automation
-- **产品发布**: Product Hunt, Hacker News - AI agent tools
+```bash
+# Create .env file with OPENAI_API_KEY for real LLM (Optional)
+cp .env.example .env
 
-### 3. 行业动态 (每轮必查)
-- **融资新闻**: Crunchbase, TechCrunch - AI Agent startups
-- **产品更新**: 主要竞品平台的changelog和blog
-- **社区讨论**: Reddit (r/MachineLearning, r/LocalLLaMA), Discord
-
----
-
-## 文件结构
-
-```
-redigg-group/
-├── README.md              # 本文档
-├── project/               # 项目成果（成熟内容）
-├── chat-logs/            # 关键聊天记录
-├── temp-files/           # 临时文件
-├── hourly-reviews/       # 每小时 review 报告
-├── iterations/           # 迭代记录
-├── skills/               # 技能优化记录
-├── best-practices/       # 最佳实践记录
-└── market-research-hourly/  # 每小时市场调研
+# Run CLI
+npx tsx src/cli.ts
 ```
 
----
+In the CLI, try:
+1.  **Teach**: "My name is Alice" or "I am interested in cancer research"
+2.  **Verify**: "What is my name?" or "What should I research today?"
+    - The agent will use injected memories to personalize the response.
 
-## 相关文档
-
-- **最佳实践**: `../docs/BEST_PRACTICES.md`
-- **Workspace 结构**: `../WORKSPACE.md`
-
----
-
-**项目状态**: 🟡 需要重新激活市场调研任务
+## Reference
+OpenClaw reference code is available in `reference/openclaw`.

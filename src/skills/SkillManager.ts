@@ -99,8 +99,13 @@ export class SkillManager {
     const implPath = path.join(skillPath, 'index.ts');
     try {
         await fs.access(implPath);
-        // logger.debug(`Loading dynamic skill from ${implPath}`);
-        
+    } catch (e) {
+        // If index.ts does not exist, it might be a non-TS skill or just a placeholder.
+        // We skip it without error.
+        return null;
+    }
+
+    try {
         // Use pathToFileURL to handle ESM import properly on all platforms
         const { pathToFileURL } = await import('url');
         // Add a timestamp query param to bust the cache when reloading
@@ -115,15 +120,6 @@ export class SkillManager {
                 if (this.skills.has(skillInstance.id)) {
                     logger.debug(`Overwriting existing skill: ${skillInstance.id}`);
                 }
-                
-                // If the skill is "heartbeat", we should probably register it specially or just normally.
-                // The issue is that `heartbeat` is in `skills/infra/heartbeat`, which is inside `skills/infra` pack.
-                // But `loadPack` might not be loading it correctly if the pack structure is complex?
-                // Actually `loadPack` scans subdirectories. 
-                // `skills/infra` contains `heartbeat` directory.
-                // `loadPack` calls `loadSkill` on `skills/infra/heartbeat`.
-                // `loadSkill` loads `index.ts`.
-                // It should work.
                 
                 this.skills.set(skillInstance.id, skillInstance);
                 logger.info(`Registered skill: ${skillInstance.id}`);

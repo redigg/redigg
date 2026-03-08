@@ -366,6 +366,23 @@
 - **融资策略确认**: 种子用户验证后启动（3-6 个月后，$500K-$1M Pre-Seed）
 - **执行优先级**: Landing Page 今天搭建，种子用户 3/16 开始邀请
 
+**Round 31 新增洞察** (2026-03-08 13:00): ✅
+
+- **Elicit 连续 8 轮验证**: 数据持续稳定（500 万/1.38 亿+/54.5 万），市场地位稳固
+  - 机构采用扩展：Stanford, Yale, UMich, NUS + NASA, CDC, NIH, J&J, Unilever, Takeda
+  - 行业覆盖：Pharma / Academia / Medtech / Consumer Goods / Policy / Industrials / Software
+  - 最新动态：API 发布 5 天，Research Agents 上线（与 Redigg Phase 2 能力重叠）
+- **Litmaps 状态确认**: 页面稳定，整合迹象不明显
+  - 用户数：350,000+ researchers worldwide（150+ 国家）
+  - 核心功能：Discover/Visualize/Share/Monitor 四大模块
+  - 用户评价强调"network enhances thinking process"（可视化是核心差异化）
+  - 整合期 3-6 个月仍是 Redigg 机会窗口
+- **时间窗口再确认**: 6-12 个月
+  - Elicit API 生态形成需要时间（开发者采用、工具链完善）
+  - Litmaps 整合期是机会窗口（用户可能寻找替代方案）
+  - 本地 + 云端混合是差异化优势（隐私敏感用户）
+- **执行优先级确认**: Landing Page 今天搭建，种子用户 3/16 开始邀请
+
 **需要 Vix 决策** (Round 30 更新):
 1. **Phase 2 完成确认**: ✅ Phase 2 已 100% 完成，可按计划进行
 2. **种子用户邀请名单**: ⏳ Vix 提供 10-20 个初始联系人（3/14 前，建议含机构联系人）

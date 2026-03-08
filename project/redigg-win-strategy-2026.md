@@ -297,6 +297,18 @@
 - **种子用户计划细化**: Onboarding 流程（Day 0-7）+ 反馈机制（Day 1/Day 7 问卷）完成
 - **执行时间表**: 今天（3/8）Landing Page 搭建 → 本周（3/8-3/14）审核 + 名单确认 → 下周（3/16）邀请开始
 
+**Round 27 新增洞察** (2026-03-08 08:00): 🚨
+- **Litmaps 重大动态**: 收购 ResearchRabbit + 融资 100 万美元（首轮 NZ$680K）
+- **Litmaps 增长**: ARR $1M（翻倍）+ 用户 200 万 +（收购后）
+- **机构采用验证**: Harvard, Stanford, Imperial, Cambridge 等主要大学已采用
+- **产品差异化**: 可视化引用图谱 + AI + 验证数据（无幻觉）
+- **投资方**: Scholarly Angels (UK) 领投（Andrew Preston, Publons 创始人）
+- **Redigg 应对**: 
+  - 差异化定位：Litmaps 侧重"发现"，Redigg 侧重"综合 + 产出"
+  - 可视化评估：Phase 3 考虑集成引用图谱/知识图谱功能
+  - 机构合作：种子用户计划中考虑机构联系人
+  - 市场验证：Elicit (500 万) + Litmaps (200 万 + $1M ARR) 双重验证市场可行
+
 **需要 Vix 决策**:
 1. **Phase 2 完成确认**: ✅ Phase 2 已 100% 完成，可按计划进行
 2. **种子用户邀请名单**: ⏳ Vix 提供 10-20 个初始联系人（3/14 前）

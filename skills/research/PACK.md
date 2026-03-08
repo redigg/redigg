@@ -1,11 +1,7 @@
----
-name: research
-description: Academic and literature research capabilities
----
+# Research Skills Pack
 
-# Research Skills
-
-Domain-specific skills for conducting scientific research.
+Academic and scientific research capabilities.
 
 ## Skills
-- **literature-review**: Search, analyze, and summarize academic papers.
+
+- `literature-review`: Literature review and academic search

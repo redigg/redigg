@@ -62,7 +62,7 @@ describe('Core Skills Integration', () => {
     expect(skillIds).toContain('local_file_ops');
     expect(skillIds).toContain('code_analysis');
     
-    // Research -> Vendor
+    // Research -> Research
     expect(skillIds).toContain('literature_review');
   });
 
@@ -72,6 +72,7 @@ describe('Core Skills Integration', () => {
     
     expect(packIds).toContain('agent');
     expect(packIds).toContain('system');
+    expect(packIds).toContain('research');
     expect(packIds).toContain('vendor');
   });
 

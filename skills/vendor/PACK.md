@@ -4,7 +4,7 @@ Third-party or specialized domain skills.
 
 ## Skills
 
-- `research`: Literature review and academic search
+- `literature-review`: Literature review and academic search
 - `agent-browser`: Web browsing capabilities
 - `searxng`: Meta-search engine integration
 - `proactive-agent`: Autonomous behavior modules

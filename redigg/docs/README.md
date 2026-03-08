@@ -136,19 +136,19 @@
 
 ```
 workspace/
-├── docs-redigg/              # 📚 所有文档
-│   ├── README.md             # 文档索引 (从这里开始)
-│   ├── redigg-design.md      # 产品设计文档
-│   ├── contribution.md       # 贡献指南
-│   ├── PRODUCT_ROADMAP.md    # 产品路线图
-│   ├── ITERATION_PLAN.md     # 迭代计划
-│   ├── SCHEDULED_TASKS.md    # 定时任务规划
-│   └── QUICK_START_V2.md     # 快速启动指南
-├── redigg/                   # Redigg Agent 核心代码
+├── redigg/                   # Redigg Agent
 │   ├── src/                  # 源代码
 │   ├── skills/               # 技能模块
 │   ├── web/                  # Web 前端
-│   └── tests/                # 测试文件
+│   ├── tests/                # 测试文件
+│   └── docs/                 # 📚 项目文档
+│       ├── README.md         # 文档索引 (从这里开始)
+│       ├── redigg-design.md  # 产品设计文档
+│       ├── contribution.md   # 贡献指南
+│       ├── PRODUCT_ROADMAP.md # 产品路线图
+│       ├── ITERATION_PLAN.md  # 迭代计划
+│       ├── SCHEDULED_TASKS.md # 定时任务规划
+│       └── QUICK_START_V2.md  # 快速启动指南
 └── ...                       # 其他 OpenClaw workspace 文件
 ```
 

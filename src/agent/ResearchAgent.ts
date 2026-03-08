@@ -5,7 +5,6 @@ import { LLMClient } from '../llm/LLMClient.js';
 import { SkillManager } from '../skills/SkillManager.js';
 import { SessionManager, Session } from '../session/SessionManager.js';
 import { CronManager } from '../scheduling/CronManager.js';
-import { EventManager } from '../events/EventManager.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('Agent');
@@ -18,7 +17,6 @@ export class ResearchAgent {
   public skillManager: SkillManager;
   public sessionManager: SessionManager;
   public cronManager: CronManager;
-  public eventManager: EventManager;
   private heartbeatInterval: NodeJS.Timeout | null = null;
 
   constructor(
@@ -32,7 +30,6 @@ export class ResearchAgent {
     this.llm = llm;
     this.sessionManager = new SessionManager(memoryManager.storage); // Reuse storage
     this.cronManager = new CronManager();
-    this.eventManager = new EventManager();
     
     // Pass managers to SkillManager for injection into SkillContext
     this.skillManager = skillManager || new SkillManager(llm, memoryManager, process.cwd());
@@ -42,7 +39,6 @@ export class ResearchAgent {
         cron: this.cronManager,
         session: this.sessionManager,
         skill: this.skillManager, // Self-reference for skills that need to execute other skills
-        event: this.eventManager,
     });
     
     this.skillEvo = new SkillEvolutionSystem(this.skillManager, llm);
@@ -51,28 +47,6 @@ export class ResearchAgent {
     this.skillManager.loadSkillsFromDisk().catch(err => {
         logger.error('Failed to load skills from disk:', err);
     });
-
-    // Wire up events
-    this.setupEventListeners();
-  }
-
-  private setupEventListeners() {
-      // Example: Log all commands
-      this.eventManager.on('command:executed', (payload) => {
-          logger.info(`[Event] Command Executed: ${payload.command}`);
-      });
-
-      // Example: Log memory additions
-      this.eventManager.on('memory:added', (payload) => {
-          logger.info(`[Event] Memory Added: ${payload.id} (${payload.type})`);
-      });
-
-      // Hook Memory Evolution to chat events or explicit triggers?
-      // Currently Memory Evolution is called explicitly in `chat()`.
-      // We can decouple it by emitting an event 'agent:chat_complete' and having a listener.
-      // But `chat` is async and returns a response, so we might want to keep evolution inside for now,
-      // or make it purely background via event.
-      // Let's keep it explicit for now but emit events *from* it.
   }
 
   public async start() {
@@ -129,7 +103,7 @@ export class ResearchAgent {
   public async chat(
     userId: string, 
     message: string, 
-    onProgress?: (type: 'token' | 'log' | 'plan', content: any) => void,
+    onProgress?: (type: 'token' | 'log', content: string) => void,
     sessionId?: string
   ): Promise<string> {
     // Helper to log and emit progress
@@ -138,10 +112,6 @@ export class ResearchAgent {
       // Encode stats into the log string if provided, using a special delimiter
       const payload = stats ? `${content}__STATS__${JSON.stringify(stats)}` : content;
       onProgress?.('log', payload);
-    };
-
-    const sendPlan = (plan: any) => {
-        onProgress?.('plan', plan);
     };
 
     // Get or create session
@@ -164,222 +134,10 @@ export class ResearchAgent {
 
     this.sessionManager.addMessage(session.id, 'user', message);
 
-    // Intent Detection & Planning
-    const plan = await this.createPlan(message);
-    
-    let reply = '';
+    // Intent Detection & Skill Execution
+    // TODO: This should be replaced by a proper Planning/Routing system using LLM
+    // For now, we use simple keyword matching to route to skills
 
-    if (plan.intent === 'multi_step' || (plan.intent === 'single' && plan.steps.length > 0)) {
-        // Send initial plan to UI
-        sendPlan({ steps: plan.steps });
-        
-        for (let i = 0; i < plan.steps.length; i++) {
-            const step = plan.steps[i];
-            
-            // Update UI: Step in progress
-            step.status = 'in_progress';
-            sendPlan({ steps: plan.steps });
-            
-            log(`[Planner] Executing step ${i + 1}: ${step.description}`);
-            
-            try {
-                // Execute Step
-                const result = await this.executeStep(session, userId, step, log);
-                
-                // Update UI: Step completed
-                step.status = 'completed';
-                step.result = result;
-                sendPlan({ steps: plan.steps });
-                
-                if (result) {
-                    if (plan.steps.length === 1 && plan.intent === 'single') {
-                        reply = result;
-                    } else {
-                        reply += `\n\n**Step ${i + 1} Result:**\n${result}`;
-                    }
-                }
-            } catch (e) {
-                // Update UI: Step failed
-                step.status = 'failed';
-                step.error = String(e);
-                sendPlan({ steps: plan.steps });
-                log(`[Planner] Step ${i + 1} failed: ${e}`);
-                reply += `\n\n**Step ${i + 1} Failed:** ${e}`;
-            }
-        }
-        
-        // Final consolidation
-        this.sessionManager.addMessage(session.id, 'assistant', reply);
-    } else {
-        // Legacy logic fallback
-        reply = await this.executeLegacyLogic(session, userId, message, log);
-    }
-
-    // Evolve Memory (Async)
-    this.memoryEvo.evolve(userId, message, reply).then(result => {
-        if (result && result.added && result.added.length > 0) {
-            log(`[Evolution] Extracted ${result.added.length} new memories.`);
-            result.added.forEach((m: any) => {
-                log(`[Evolution] New Memory: "${m.content}" (${m.type}/${m.tier})`);
-            });
-
-            // If a new memory is created, we can append a small note to the chat history or just rely on the logs.
-            // The user requested: "create a chat, tell user we have new memory"
-            // So we will add a system/agent message.
-            
-            if (result.added.length > 0) {
-                 const memoryContent = result.added[0].content;
-                 const note = `(I've noted: "${memoryContent}")`;
-                 // We don't want to create a whole new bubble if possible, or maybe we do.
-                 // Let's add a separate message for now.
-                 this.sessionManager.addMessage(session.id, 'assistant', note);
-                 // We also need to send this to the client if it's connected via stream, but `chat` method returns the *first* reply.
-                 // The client polls or listens to events. The `addMessage` saves it to DB.
-                 // If using SSE, we should push this event.
-                 // But `chat` function finishes and returns `reply`.
-                 
-                 // If we want to push this to the UI *after* the main reply, we need the SSE handler passed in `onProgress` to handle a "message" event?
-                 // Currently `onProgress` handles tokens and logs.
-                 
-                 // Let's just log it for now as requested by the specific instruction "log it out".
-                 // Wait, instruction says "create a chat, tell user".
-                 // Since `chat` returns a string, we can't easily append another message to the return value without confusing the caller.
-                 // But we can save it to history. The UI might pick it up on refresh or if it listens to "new message".
-            }
-        }
-        if (result && result.updated && result.updated.length > 0) {
-             log(`[Evolution] Updated ${result.updated.length} memories.`);
-             result.updated.forEach((m: any) => {
-                log(`[Evolution] Updated Memory: "${m.content}" (${m.type}/${m.tier})`);
-             });
-        }
-
-        // Trigger memory consolidation immediately after new interaction
-        this.memoryManager.consolidateMemories(userId).then(() => {
-             // logger.debug('Post-chat consolidation complete');
-        }).catch(e => {
-             logger.error('Post-chat consolidation failed', e);
-        });
-
-        // After response and memory evolution, generate a title for the session if it's still generic
-        if (session.messages.length <= 4 && (session.title || '').length > 20) { // Early in convo or long default title
-            this.generateSessionTitle(session, message, reply).then(title => {
-                if (title) {
-                    session.title = title;
-                    onProgress?.('token', `[TITLE_GENERATED]${title}`);
-                }
-            });
-        }
-    }).catch(err => {
-      logger.error('Memory evolution failed:', err);
-    });
-
-    return reply;
-  }
-
-  private async createPlan(message: string): Promise<{ intent: string, steps: any[] }> {
-      const prompt = `
-You are a planner for a research agent.
-User Request: "${message}"
-
-Available Tools:
-- LiteratureReview: Search for academic papers. Params: { topic: string }
-- CodeAnalysis: Analyze project structure/files. Params: { path: string, operation: "structure" }
-- MemorySearch: Recall past conversations/facts. Params: { query: string }
-- FileOps: Organize files. Params: { operation: "organize" }
-- AgentOrchestration: Manage sub-agents. Params: { operation: "create_agent" | "list_agents", name?: string, role?: string }
-- Evolution: Create new skills. Params: { intent: string }
-- Chat: General conversation, greetings, or questions not covered by tools. Params: { message: string }
-
-Analyze the request. Break it down into logical steps if needed.
-If the request implies a complex workflow (e.g. "Search papers and then summarize"), create multiple steps.
-If it's a simple request, create one step.
-
-Return ONLY JSON in this format:
-{
-  "intent": "single" | "multi_step",
-  "steps": [
-    { 
-      "id": "1", 
-      "description": "Short description of step", 
-      "tool": "ToolName", 
-      "params": { ... } 
-    }
-  ]
-}
-`;
-      try {
-          const response = await this.llm.chat([{ role: 'user', content: prompt }]);
-          let text = response.content.trim();
-          // Clean up markdown blocks
-          if (text.startsWith('```')) {
-              text = text.replace(/^```(json)?/, '').replace(/```$/, '');
-          }
-          const plan = JSON.parse(text);
-          return plan;
-      } catch (e) {
-          logger.error('Planning failed:', e);
-          // Fallback to empty plan (will trigger legacy logic)
-          return { intent: 'single', steps: [] }; 
-      }
-  }
-
-  private async executeStep(session: Session, userId: string, step: any, log: (content: string, stats?: any) => void): Promise<string> {
-      switch (step.tool) {
-          case 'LiteratureReview':
-              return this.executeLiteratureReview(session, userId, step.params.topic, log);
-          
-          case 'CodeAnalysis':
-              const caResult = await this.skillManager.executeSkill('code_analysis', userId, step.params);
-              return `Code Structure:\n${caResult.structure}`;
-
-          case 'MemorySearch':
-              const memResult = await this.skillManager.executeSkill('memory_management', userId, { 
-                  operation: 'search', 
-                  query: step.params.query 
-              });
-              const memories = memResult.results as any[];
-              if (memories.length === 0) return `No memories found for "${step.params.query}".`;
-              return memories.map(m => `- ${m.content}`).join('\n');
-
-          case 'FileOps':
-              const fileResult = await this.skillManager.executeSkill('local_file_ops', userId, step.params);
-              return `Organized ${fileResult.moved} files.`;
-
-          case 'AgentOrchestration':
-              const agentResult = await this.skillManager.executeSkill('agent_orchestration', userId, step.params);
-              if (step.params.operation === 'list_agents') {
-                  const agents = agentResult.agents as any[];
-                  return `Active Agents:\n${agents.map(a => `- ${a.name}`).join('\n')}`;
-              }
-              return `Agent Operation Result: ${JSON.stringify(agentResult)}`;
-
-          case 'Evolution':
-              const evoResult = await this.skillManager.executeSkill('evolution', userId, {
-                   operation: 'create_skill',
-                   intent: step.params.intent
-              });
-              return evoResult.success ? `Evolved new skill: ${evoResult.skillId}` : `Evolution failed: ${evoResult.message}`;
-
-          case 'Chat':
-              // Use direct LLM call to avoid recursion loop
-              const context = await this.memoryManager.getFormattedMemories(userId, step.params.message);
-              const history = this.sessionManager.getHistory(session.id, 5);
-              const historyText = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
-              
-              const systemPrompt = `You are Redigg. Context:\n${context}\nHistory:\n${historyText}`;
-              const response = await this.llm.chat([
-                  { role: 'system', content: systemPrompt },
-                  { role: 'user', content: step.params.message }
-              ]);
-              return response.content;
-
-          default:
-              return `Unknown tool: ${step.tool}`;
-      }
-  }
-
-  private async executeLegacyLogic(session: Session, userId: string, message: string, log: (content: string, stats?: any) => void): Promise<string> {
     const lowerMsg = message.toLowerCase();
 
     // 1. Research Skills / Web Search
@@ -523,6 +281,8 @@ Return ONLY JSON in this format:
     }
 
     // 4. Intelligent Default: Web Search for Unknown Topics
+    // Check if we have relevant memories. Strict search (no fallback to recent).
+    // This implements the "Default to Search" behavior for new topics.
     const strictMemories = await this.memoryManager.searchMemories(userId, message, { limit: 1 });
     const hasContext = strictMemories.length > 0;
     const isConversational = /^(hello|hi|hey|thanks|thank you|bye|goodbye|ok|okay|yes|no|cool|great|wow|who are you|what are you)\b/i.test(message.trim().replace(/[!.?]+$/, ''));
@@ -572,22 +332,88 @@ Instructions:
     log(`[Agent] Generating response...`);
     
     let reply = '';
-    
-    // Since we are in legacy logic, we don't have access to onProgress directly if we want to stream inside here,
-    // but we can assume executeLegacyLogic is awaited.
-    // However, if we want to stream, we need to pass the streaming callback.
-    // I simplified executeLegacyLogic to just return string for now, skipping streaming in fallback to keep it simple.
-    // Or I can copy the streaming logic.
-    // Given the complexity, I'll just use non-streaming for legacy fallback inside this refactor.
 
-    const response = await this.llm.chat([
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: message }
-    ]);
-    reply = response.content;
+    if (this.llm.chatStream && onProgress) {
+        await this.llm.chatStream([
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: message }
+        ], {
+            onToken: (token) => {
+                reply += token;
+                onProgress('token', token);
+            },
+            onError: (err) => logger.error(String(err))
+        });
+    } else {
+        const response = await this.llm.chat([
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: message }
+        ]);
+        reply = response.content;
+    }
 
     // Save response to session
     this.sessionManager.addMessage(session.id, 'assistant', reply);
+
+    // Evolve Memory (Async)
+    this.memoryEvo.evolve(userId, message, reply).then(result => {
+        if (result && result.added && result.added.length > 0) {
+            log(`[Evolution] Extracted ${result.added.length} new memories.`);
+            result.added.forEach((m: any) => {
+                log(`[Evolution] New Memory: "${m.content}" (${m.type}/${m.tier})`);
+            });
+
+            // If a new memory is created, we can append a small note to the chat history or just rely on the logs.
+            // The user requested: "create a chat, tell user we have new memory"
+            // So we will add a system/agent message.
+            
+            if (result.added.length > 0) {
+                 const memoryContent = result.added[0].content;
+                 const note = `(I've noted: "${memoryContent}")`;
+                 // We don't want to create a whole new bubble if possible, or maybe we do.
+                 // Let's add a separate message for now.
+                 this.sessionManager.addMessage(session.id, 'assistant', note);
+                 // We also need to send this to the client if it's connected via stream, but `chat` method returns the *first* reply.
+                 // The client polls or listens to events. The `addMessage` saves it to DB.
+                 // If using SSE, we should push this event.
+                 // But `chat` function finishes and returns `reply`.
+                 
+                 // If we want to push this to the UI *after* the main reply, we need the SSE handler passed in `onProgress` to handle a "message" event?
+                 // Currently `onProgress` handles tokens and logs.
+                 
+                 // Let's just log it for now as requested by the specific instruction "log it out".
+                 // Wait, instruction says "create a chat, tell user".
+                 // Since `chat` returns a string, we can't easily append another message to the return value without confusing the caller.
+                 // But we can save it to history. The UI might pick it up on refresh or if it listens to "new message".
+            }
+        }
+        if (result && result.updated && result.updated.length > 0) {
+             log(`[Evolution] Updated ${result.updated.length} memories.`);
+             result.updated.forEach((m: any) => {
+                log(`[Evolution] Updated Memory: "${m.content}" (${m.type}/${m.tier})`);
+             });
+        }
+
+        // Trigger memory consolidation immediately after new interaction
+        this.memoryManager.consolidateMemories(userId).then(() => {
+             // logger.debug('Post-chat consolidation complete');
+        }).catch(e => {
+             logger.error('Post-chat consolidation failed', e);
+        });
+
+        // After response and memory evolution, generate a title for the session if it's still generic
+        if (session.messages.length <= 4 && (session.title || '').length > 20) { // Early in convo or long default title
+            this.generateSessionTitle(session, message, reply).then(title => {
+                if (title) {
+                    session.title = title;
+                    onProgress?.('token', `[TITLE_GENERATED]${title}`);
+                }
+            });
+        }
+    }).catch(err => {
+      logger.error('Memory evolution failed:', err);
+    });
+
     return reply;
   }
 

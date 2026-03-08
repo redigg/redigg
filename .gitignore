@@ -1,45 +1,13 @@
-# Coverage
-coverage/
-
-# OpenClaw workspace files (not part of redigg project)
-.openclaw/
-AGENTS.md
-HEARTBEAT.md
-IDENTITY.md
-SOUL.md
-TOOLS.md
-USER.md
-BOOTSTRAP.md
-MEMORY.md
-memory/
-chat-logs/
-hourly-reports/
-hourly-reviews/
-market-research-hourly/
-temp-files/
-project/
-redigg-web/
-
-# Dependencies
 node_modules/
-redigg/node_modules/
-redigg/web/node_modules/
-
-# Build outputs
 dist/
-redigg/dist/
-redigg/web/dist/
-
-# Environment
+coverage/
 .env
-*.local
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
 .DS_Store
-Thumbs.db
+.trae/
+data/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+reference/

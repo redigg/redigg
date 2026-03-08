@@ -4,12 +4,41 @@ import { SQLiteStorage } from './storage/sqlite.js';
 import { ResearchAgent } from './agent/ResearchAgent.js';
 import { MemoryEvolutionSystem } from './memory/evolution/MemoryEvolutionSystem.js';
 import { MockLLMClient, LLMClient, LLMResponse } from './llm/LLMClient.js';
-import { OpenAIClient } from './llm/OpenAIClient.js';
 import chalk from 'chalk';
+import OpenAI from 'openai';
 import dotenv from 'dotenv';
 
 dotenv.config({ override: true });
 
+// Real OpenAI Client
+class OpenAIClient implements LLMClient {
+  private openai: OpenAI;
+  private model: string;
+
+  constructor(apiKey: string, baseURL?: string, model?: string) {
+    this.openai = new OpenAI({ 
+      apiKey,
+      baseURL: baseURL || 'https://api.openai.com/v1'
+    });
+    this.model = model || 'gpt-3.5-turbo';
+  }
+
+  async complete(prompt: string): Promise<LLMResponse> {
+    const response = await this.openai.chat.completions.create({
+      model: this.model,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    return { content: response.choices[0].message.content || '' };
+  }
+
+  async chat(messages: { role: string; content: string }[]): Promise<LLMResponse> {
+    const response = await this.openai.chat.completions.create({
+      model: this.model,
+      messages: messages as any,
+    });
+    return { content: response.choices[0].message.content || '' };
+  }
+}
 // Extended Mock LLM for CLI Demo
 class DemoLLMClient extends MockLLMClient {
   async chat(messages: { role: string; content: string }[]): Promise<LLMResponse> {
@@ -76,6 +105,7 @@ async function main() {
   console.log(chalk.gray('Initializing system...'));
 
   const storage = new SQLiteStorage();
+  const memoryManager = new MemoryManager(storage);
 
   let llm: LLMClient;
   if (process.env.OPENAI_API_KEY) {
@@ -92,8 +122,6 @@ async function main() {
     console.log(chalk.yellow('Using Mock LLM (Demo Mode)'));
     llm = new DemoLLMClient();
   }
-
-  const memoryManager = new MemoryManager(storage, llm);
 
   const memoryEvo = new MemoryEvolutionSystem(memoryManager, llm);
   const agent = new ResearchAgent(memoryManager, memoryEvo, llm);

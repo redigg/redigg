@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MemoryManager } from '../../src/memory/MemoryManager.js';
 import { SQLiteStorage } from '../../src/storage/sqlite.js';
-import { MockLLMClient } from '../../src/llm/LLMClient.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -15,8 +14,7 @@ describe('MemoryManager', () => {
       fs.unlinkSync(dbPath);
     }
     const storage = new SQLiteStorage(dbPath);
-    const llm = new MockLLMClient();
-    memoryManager = new MemoryManager(storage, llm);
+    memoryManager = new MemoryManager(storage);
   });
 
   afterEach(() => {
@@ -62,11 +60,11 @@ describe('MemoryManager', () => {
     await memoryManager.addMemory('user1', 'fact', 'lives in NYC');
     await memoryManager.addMemory('user1', 'context', 'working on frontend');
 
-    const results = await memoryManager.searchMemories('user1', 'mode', { useVector: false });
+    const results = await memoryManager.searchMemories('user1', 'mode');
     expect(results.length).toBe(1);
     expect(results[0].content).toBe('likes dark mode');
 
-    const empty = await memoryManager.searchMemories('user1', 'banana', { useVector: false });
+    const empty = await memoryManager.searchMemories('user1', 'banana');
     expect(empty.length).toBe(0);
   });
 

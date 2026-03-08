@@ -19,8 +19,8 @@ describe('SkillManager', () => {
       fs.unlinkSync(dbPath);
     }
     const storage = new SQLiteStorage(dbPath);
+    memoryManager = new MemoryManager(storage);
     llm = new MockLLMClient();
-    memoryManager = new MemoryManager(storage, llm);
     skillManager = new SkillManager(llm, memoryManager);
     
     // Register skill

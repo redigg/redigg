@@ -355,7 +355,18 @@
 - **Elicit 连续 6 轮验证**: 数据稳定（500 万/1.38 亿/54.5 万），市场格局清晰
 - **时间窗口确认**: 6-12 个月（Elicit API 生态 + Litmaps 整合需要时间）
 
-**需要 Vix 决策** (Round 29 更新):
+**Round 30 新增洞察** (2026-03-08 12:00): ✅
+
+- **Elicit 连续 7 轮验证**: 数据持续稳定（500 万/1.38 亿/54.5 万），市场地位稳固
+  - 核心功能：Search/Reports/Systematic Review/Library/Alerts 五大模块
+  - 差异化：Scale (1000 篇/20000 数据点)/Accuracy/Transparency/More than chat
+  - 机构采用验证：500 万 + 研究人员，包括主要大学
+- **Litmaps 页面简化**: 可能正在整合 ResearchRabbit（待进一步验证）
+  - 整合期 3-6 个月是 Redigg 加速执行机会窗口
+- **融资策略确认**: 种子用户验证后启动（3-6 个月后，$500K-$1M Pre-Seed）
+- **执行优先级**: Landing Page 今天搭建，种子用户 3/16 开始邀请
+
+**需要 Vix 决策** (Round 30 更新):
 1. **Phase 2 完成确认**: ✅ Phase 2 已 100% 完成，可按计划进行
 2. **种子用户邀请名单**: ⏳ Vix 提供 10-20 个初始联系人（3/14 前，建议含机构联系人）
 3. **Landing Page 域名确认**: ⏳ 建议 redigg.ai 或 redigg.io（约¥100-200/年）

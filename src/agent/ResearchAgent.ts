@@ -5,6 +5,7 @@ import { LLMClient } from '../llm/LLMClient.js';
 import { SkillManager } from '../skills/SkillManager.js';
 import { SessionManager, Session } from '../session/SessionManager.js';
 import { CronManager } from '../scheduling/CronManager.js';
+import { EventManager } from '../events/EventManager.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('Agent');
@@ -17,6 +18,7 @@ export class ResearchAgent {
   public skillManager: SkillManager;
   public sessionManager: SessionManager;
   public cronManager: CronManager;
+  public eventManager: EventManager;
   private heartbeatInterval: NodeJS.Timeout | null = null;
 
   constructor(
@@ -30,6 +32,7 @@ export class ResearchAgent {
     this.llm = llm;
     this.sessionManager = new SessionManager(memoryManager.storage); // Reuse storage
     this.cronManager = new CronManager();
+    this.eventManager = new EventManager();
     
     // Pass managers to SkillManager for injection into SkillContext
     this.skillManager = skillManager || new SkillManager(llm, memoryManager, process.cwd());
@@ -39,6 +42,7 @@ export class ResearchAgent {
         cron: this.cronManager,
         session: this.sessionManager,
         skill: this.skillManager, // Self-reference for skills that need to execute other skills
+        event: this.eventManager,
     });
     
     this.skillEvo = new SkillEvolutionSystem(this.skillManager, llm);
@@ -47,6 +51,21 @@ export class ResearchAgent {
     this.skillManager.loadSkillsFromDisk().catch(err => {
         logger.error('Failed to load skills from disk:', err);
     });
+
+    // Wire up events
+    this.setupEventListeners();
+  }
+
+  private setupEventListeners() {
+      // Example: Log all commands
+      this.eventManager.on('command:executed', (payload) => {
+          logger.info(`[Event] Command Executed: ${payload.command}`);
+      });
+
+      // Example: Log memory additions
+      this.eventManager.on('memory:added', (payload) => {
+          logger.info(`[Event] Memory Added: ${payload.id} (${payload.type})`);
+      });
   }
 
   public async start() {
@@ -103,15 +122,18 @@ export class ResearchAgent {
   public async chat(
     userId: string, 
     message: string, 
-    onProgress?: (type: 'token' | 'log', content: string) => void,
+    onProgress?: (type: 'token' | 'log' | 'plan', content: any) => void,
     sessionId?: string
   ): Promise<string> {
     // Helper to log and emit progress
     const log = (content: string, stats?: any) => {
-      // logger.debug(content); // Too verbose for main log
-      // Encode stats into the log string if provided, using a special delimiter
       const payload = stats ? `${content}__STATS__${JSON.stringify(stats)}` : content;
       onProgress?.('log', payload);
+    };
+
+    // Send plan update
+    const sendPlan = (plan: { steps: any[] }) => {
+        onProgress?.('plan', plan);
     };
 
     // Get or create session
@@ -134,9 +156,181 @@ export class ResearchAgent {
 
     this.sessionManager.addMessage(session.id, 'user', message);
 
-    // Intent Detection & Skill Execution
-    // TODO: This should be replaced by a proper Planning/Routing system using LLM
-    // For now, we use simple keyword matching to route to skills
+    // 1. Plan
+    logger.info(`Creating plan for user ${userId}...`);
+    log(`[Agent] Planning response...`);
+    
+    // Check if message is simple conversational
+    const isConversational = /^(hello|hi|hey|thanks|thank you|bye|goodbye|ok|okay|yes|no|cool|great|wow|who are you|what are you)\b/i.test(message.trim().replace(/[!.?]+$/, ''));
+    
+    let plan = { intent: 'single', steps: [] as any[] };
+    
+    if (!isConversational) {
+        try {
+            plan = await this.createPlan(message);
+            if (plan.steps.length > 0) {
+                log(`[Agent] Created plan with ${plan.steps.length} steps.`);
+                sendPlan({ steps: plan.steps });
+            }
+        } catch (e) {
+            logger.error('Planning failed, falling back to legacy logic', e);
+        }
+    }
+
+    let reply = '';
+
+    // 2. Execute Plan or Fallback
+    if (plan.intent === 'multi_step' || (plan.intent === 'single' && plan.steps.length > 0)) {
+        for (const step of plan.steps) {
+            step.status = 'in_progress';
+            sendPlan({ steps: plan.steps });
+            
+            try {
+                log(`[Agent] Executing step: ${step.description}`);
+                const result = await this.executeStep(step, userId, session, log);
+                
+                step.status = 'completed';
+                step.result = result;
+                
+                if (step.tool === 'Chat') {
+                    reply = result;
+                }
+            } catch (e) {
+                step.status = 'failed';
+                step.error = String(e);
+                logger.error(`Step failed: ${step.description}`, e);
+                log(`[Agent] Step failed: ${step.description}`);
+            }
+            sendPlan({ steps: plan.steps });
+        }
+        
+        if (!reply) {
+            // If no chat step, summarize results
+            // For now, just say "Task completed."
+            reply = "I have completed the requested tasks.";
+            this.sessionManager.addMessage(session.id, 'assistant', reply);
+        }
+        
+    } else {
+        // Legacy logic fallback
+        reply = await this.executeLegacyLogic(session, userId, message, log, onProgress);
+    }
+
+    // 3. Post-processing (Memory Evolution, Title Generation) - same as legacy
+    // Note: executeLegacyLogic already does this if called.
+    // If we executed a plan, we should also trigger evolution/title gen?
+    // For now, let's rely on executeLegacyLogic to handle it, or duplicate it here.
+    // Ideally refactor into `postProcess(session, message, reply)`.
+    
+    // Since legacy logic does it internally, we skip if legacy was used.
+    if (plan.steps.length > 0) {
+         // Trigger evolution for planned execution results too?
+         // Maybe just for the final reply if it exists.
+         if (reply) {
+             this.handlePostProcessing(session, userId, message, reply, log, onProgress);
+         }
+    }
+
+    return reply;
+  }
+
+  private async createPlan(message: string): Promise<{ intent: string, steps: any[] }> {
+      const prompt = `
+You are a planning engine for a research agent.
+User Request: "${message}"
+
+Available Tools:
+- LiteratureReview(topic): Search for papers/web.
+- CodeAnalysis(path): Analyze project structure/code.
+- MemorySearch(query): Search past memories.
+- FileOps(operation): Organize files.
+- AgentOrchestration(operation): Create/manage sub-agents.
+- Evolution(intent): Create new skills.
+- Chat(message): Reply to user (final step).
+
+Return a JSON plan:
+{
+  "intent": "single" | "multi_step",
+  "steps": [
+    { "id": "1", "description": "...", "tool": "ToolName", "params": { ... } }
+  ]
+}
+`;
+      try {
+          const response = await this.llm.chat([{ role: 'user', content: prompt }]);
+          let text = response.content.trim();
+          if (text.startsWith('```')) {
+              text = text.replace(/^```(json)?/, '').replace(/```$/, '');
+          }
+          const plan = JSON.parse(text);
+          return plan;
+      } catch (e) {
+          logger.error('Planning failed:', e);
+          return { intent: 'single', steps: [] };
+      }
+  }
+
+  private async executeStep(step: any, userId: string, session: Session, log: (c: string) => void): Promise<string> {
+      switch (step.tool) {
+          case 'LiteratureReview':
+              return this.executeLiteratureReview(session, userId, step.params.topic, log);
+          case 'CodeAnalysis':
+               const caResult = await this.skillManager.executeSkill('code_analysis', userId, { path: step.params.path || '.', operation: 'structure' });
+               return `Project Structure:\n${caResult.structure}`;
+          case 'MemorySearch':
+               const msResult = await this.skillManager.executeSkill('memory_management', userId, { operation: 'search', query: step.params.query });
+               return JSON.stringify(msResult.results);
+          case 'FileOps':
+               const foResult = await this.skillManager.executeSkill('local_file_ops', userId, { operation: step.params.operation });
+               return `Moved ${foResult.moved} files.`;
+          case 'AgentOrchestration':
+               // ... simplified
+               return "Agent orchestration not fully implemented in plan yet.";
+          case 'Evolution':
+               // ... simplified
+               return "Evolution not fully implemented in plan yet.";
+          case 'Chat':
+              // Use direct LLM call to avoid recursion loop
+              // But we need context.
+              const context = await this.memoryManager.getFormattedMemories(userId, step.params.message);
+              const response = await this.llm.chat([
+                  { role: 'system', content: `You are Redigg. Context: ${context}` },
+                  { role: 'user', content: step.params.message }
+              ]);
+              const reply = response.content;
+              this.sessionManager.addMessage(session.id, 'assistant', reply);
+              return reply;
+          default:
+              throw new Error(`Unknown tool: ${step.tool}`);
+      }
+  }
+  
+  private async handlePostProcessing(
+      session: Session, 
+      userId: string, 
+      message: string, 
+      reply: string, 
+      log: (c: string) => void,
+      onProgress?: any
+  ) {
+    // Evolve Memory (Async)
+    this.memoryEvo.evolve(userId, message, reply).then(result => {
+        if (result && result.added && result.added.length > 0) {
+            log(`[Evolution] Extracted ${result.added.length} new memories.`);
+        }
+        this.memoryManager.consolidateMemories(userId).catch(e => logger.error('Consolidation failed', e));
+    }).catch(err => {
+      logger.error('Memory evolution failed:', err);
+    });
+  }
+
+  public async executeLegacyLogic(
+    session: Session,
+    userId: string, 
+    message: string, 
+    log: (content: string, stats?: any) => void,
+    onProgress?: (type: 'token' | 'log' | 'plan', content: any) => void
+  ): Promise<string> {
 
     const lowerMsg = message.toLowerCase();
 
@@ -476,6 +670,7 @@ NO_SEARCH
       try {
           if (log) log('[Agent] Thinking about whether to search the web...');
           const res = await this.llm.chat([{ role: 'user', content: prompt }]);
+          console.log('[DEBUG] shouldSearch response:', res);
           const text = res.content.trim();
           if (text.startsWith('SEARCH:')) {
               return { shouldSearch: true, topic: text.replace('SEARCH:', '').trim() };

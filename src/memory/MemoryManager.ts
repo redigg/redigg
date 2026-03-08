@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 export interface Memory {
   id: string;
   user_id: string;
-  type: 'preference' | 'fact' | 'context' | 'paper' | 'experiment';
+  type: 'preference' | 'fact' | 'context' | 'paper' | 'experiment' | 'page_index' | 'page_index_node';
   tier: 'working' | 'short_term' | 'long_term';
   content: string;
   metadata?: any;
@@ -12,6 +12,8 @@ export interface Memory {
   last_accessed_at: string;
   created_at: string;
   updated_at: string;
+  parent_id?: string;
+  index_path?: string;
 }
 
 export class MemoryManager {
@@ -35,10 +37,16 @@ export class MemoryManager {
         // Add new columns if not exist (simple migration)
         try {
             db.prepare('ALTER TABLE memories ADD COLUMN tier TEXT DEFAULT "working"').run();
+        } catch (e) {}
+        try {
             db.prepare('ALTER TABLE memories ADD COLUMN last_accessed_at TEXT').run();
-        } catch (e) {
-            // Ignore if columns exist
-        }
+        } catch (e) {}
+        try {
+            db.prepare('ALTER TABLE memories ADD COLUMN parent_id TEXT').run();
+        } catch (e) {}
+        try {
+            db.prepare('ALTER TABLE memories ADD COLUMN index_path TEXT').run();
+        } catch (e) {}
     } catch (e) {
         // Ignore DB connection errors
     }
@@ -50,19 +58,36 @@ export class MemoryManager {
     content: string, 
     metadata?: any,
     weight: number = 1.0,
-    tier: Memory['tier'] = 'working'
+    tier: Memory['tier'] = 'working',
+    parentId?: string
   ): Promise<Memory> {
     const db = this.storage.getDb();
     const id = uuidv4();
     const metadataStr = metadata ? JSON.stringify(metadata) : null;
     const now = new Date().toISOString();
     
+    // Calculate index_path
+    let indexPath = id;
+    if (parentId) {
+        try {
+            const parent = await this.getMemory(parentId);
+            if (parent && parent.index_path) {
+                indexPath = `${parent.index_path}/${id}`;
+            } else {
+                 // Fallback if parent has no path or not found (though should be found)
+                 indexPath = `${parentId}/${id}`;
+            }
+        } catch (e) {
+            // Parent might not exist or error
+        }
+    }
+
     const stmt = db.prepare(`
-      INSERT INTO memories (id, user_id, type, tier, content, metadata, weight, last_accessed_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, user_id, type, tier, content, metadata, weight, last_accessed_at, created_at, updated_at, parent_id, index_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(id, userId, type, tier, content, metadataStr, weight, now, now, now);
+    stmt.run(id, userId, type, tier, content, metadataStr, weight, now, now, now, parentId || null, indexPath);
 
     return this.getMemory(id);
   }

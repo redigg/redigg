@@ -26,9 +26,9 @@ export class PageIndex {
         // 1. Create Root Node
         const rootMemory = await this.memoryManager.addMemory(
             userId,
-            'context', // or 'document_root'
+            'page_index',
             `Document: ${title}`,
-            { title, isRoot: true, type: 'page_index' },
+            { title, isRoot: true },
             1.0,
             'long_term'
         );
@@ -44,9 +44,9 @@ export class PageIndex {
             
             await this.memoryManager.addMemory(
                 userId,
-                'context',
+                'page_index_node',
                 section,
-                { title: sectionTitle, type: 'page_index_node', docId: rootMemory.id },
+                { title: sectionTitle, docId: rootMemory.id },
                 0.8,
                 'long_term',
                 rootMemory.id // Parent ID

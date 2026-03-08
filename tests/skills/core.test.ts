@@ -3,8 +3,9 @@ import { ResearchAgent } from '../../src/agent/ResearchAgent.js';
 import { LLMClient } from '../../src/llm/LLMClient.js';
 import { MemoryManager } from '../../src/memory/MemoryManager.js';
 import { MemoryEvolutionSystem } from '../../src/memory/evolution/MemoryEvolutionSystem.js';
+import { SQLiteStorage } from '../../src/storage/sqlite.js';
 import path from 'path';
-import SchedulingSkill from '../../skills/core/scheduling/index.js';
+import SchedulingSkill from '../../skills/agent/scheduling/index.js';
 
 describe('Core Skills Integration', () => {
   let agent: ResearchAgent;
@@ -23,19 +24,12 @@ describe('Core Skills Integration', () => {
         embed: async (text: string) => Array(1536).fill(0),
     } as unknown as LLMClient;
     
-    // MemoryManager needs a real DB or mock. 
-    // Assuming MemoryManager can work with in-memory SQLite or we mock it.
-    // Let's use real one but with a test DB path if possible, or just mock it.
-    // Since MemoryManager uses SQLite directly in constructor, it's hard to mock without refactoring.
-    // Let's assume we can instantiate it safely.
-    
-    // Actually, let's just rely on the fact that we are running in a test env.
-    // We'll skip complex mocking and just test if skills are registered.
+    // Use test database
+    const dbPath = path.join(process.cwd(), 'data', 'test-core-skills.db');
+    const storage = new SQLiteStorage(dbPath);
     
     llm = mockLLM;
-    memory = new MemoryManager(llm);
-    // Initialize DB
-    // await memory.initialize(); // MemoryManager auto-initializes or doesn't have this method publicly exposed in this version
+    memory = new MemoryManager(storage);
     
     const memoryEvo = new MemoryEvolutionSystem(memory, llm);
     
@@ -62,12 +56,13 @@ describe('Core Skills Integration', () => {
     expect(skillIds).toContain('scheduling');
     expect(skillIds).toContain('session_management');
     expect(skillIds).toContain('skill_management');
+    expect(skillIds).toContain('heartbeat');
     
-    // Infra
+    // Infra -> System
     expect(skillIds).toContain('local_file_ops');
     expect(skillIds).toContain('code_analysis');
     
-    // Research
+    // Research -> Vendor
     expect(skillIds).toContain('literature_review');
   });
 
@@ -75,9 +70,9 @@ describe('Core Skills Integration', () => {
     const packs = agent.skillManager.getAllPacks();
     const packIds = packs.map(p => p.id);
     
-    expect(packIds).toContain('core');
-    expect(packIds).toContain('infra');
-    expect(packIds).toContain('research');
+    expect(packIds).toContain('agent');
+    expect(packIds).toContain('system');
+    expect(packIds).toContain('vendor');
   });
 
   it('should be able to execute session_management skill', async () => {

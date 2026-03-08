@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SkillManager } from '../../src/skills/SkillManager.js';
-import LiteratureReviewSkill from '../../skills/research/literature-review/index.js';
+import LiteratureReviewSkill from '../../skills/vendor/research/literature-review/index.js';
 import { MemoryManager } from '../../src/memory/MemoryManager.js';
 import { MockLLMClient } from '../../src/llm/LLMClient.js';
 import { SQLiteStorage } from '../../src/storage/sqlite.js';

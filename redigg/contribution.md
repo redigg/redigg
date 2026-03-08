@@ -22,7 +22,9 @@ Redigg is an autonomous research agent platform built with a modular architectur
 - `src/infra`: Infrastructure
   - `storage/`: Database access
   - `gateway/`: API Gateway
+- `src/scheduling/`: Cron & Scheduled Tasks
 - `docs/`: Documentation
+  - `SCHEDULED_TASKS.md`:定时任务规划文档
 - `tests/`: Integration tests
 
 ## 3. Coding Standards

@@ -46,10 +46,21 @@ describe('ResearchAgent - Skills', () => {
       content: 'This is a literature review summary.'
     });
 
-    // Mock chat response for fallback (should not be called if skill runs)
-    const chatSpy = vi.spyOn(llm, 'chat').mockResolvedValue({
-      content: 'I can help with that.'
-    });
+    // Mock chat response
+    const chatSpy = vi.spyOn(llm, 'chat')
+        // 1. Planner Response (returns empty to force fallback to legacy logic for this test)
+        .mockResolvedValueOnce({
+            content: JSON.stringify({ intent: 'single', steps: [] })
+        })
+        // 2. Quality Check Response
+        .mockResolvedValueOnce({
+            content: JSON.stringify({
+                score: 85,
+                reasoning: 'Good review.',
+                suggestions: [],
+                passed: true
+            })
+        });
 
     const reply = await agent.chat('user1', 'Do a literature review on reasoning in LLMs');
     

@@ -55,7 +55,8 @@ describe('ResearchAgent - Planning', () => {
     // Replace chat method with a mock function directly
     llm.chat = vi.fn()
         .mockResolvedValueOnce({ content: planJson }) // 1. Planner
-        .mockResolvedValue({ content: 'Mock LLM Response' }); // Subsequent calls
+        .mockResolvedValueOnce({ content: JSON.stringify({ score: 90, passed: true }) }) // 2. Quality Check
+        .mockResolvedValue({ content: 'Mock LLM Response' }); // Subsequent calls (e.g. Memory Evolution)
 
     const onProgress = vi.fn();
     

@@ -6,6 +6,7 @@ import { SkillManager } from '../skills/SkillManager.js';
 import { SessionManager, Session } from '../session/SessionManager.js';
 import { CronManager } from '../scheduling/CronManager.js';
 import { EventManager } from '../events/EventManager.js';
+import { QualityManager } from '../quality/QualityManager.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('Agent');
@@ -19,6 +20,7 @@ export class ResearchAgent {
   public sessionManager: SessionManager;
   public cronManager: CronManager;
   public eventManager: EventManager;
+  public qualityManager: QualityManager;
   private heartbeatInterval: NodeJS.Timeout | null = null;
 
   constructor(
@@ -33,6 +35,7 @@ export class ResearchAgent {
     this.sessionManager = new SessionManager(memoryManager.storage); // Reuse storage
     this.cronManager = new CronManager();
     this.eventManager = new EventManager();
+    this.qualityManager = new QualityManager(llm);
     
     // Pass managers to SkillManager for injection into SkillContext
     this.skillManager = skillManager || new SkillManager(llm, memoryManager, process.cwd());
@@ -642,6 +645,21 @@ Title:`;
       log(`[Agent] Completed Literature Review`, { duration, tokens, operation: 'literature_review' });
       
       const response = `Here is a literature review on "${topic}":\n\n${result.summary}\n\n**Sources:**\n${result.papers.map((p: any) => `- ${p.title} (${p.year})`).join('\n')}`;
+      
+      // Perform Quality Check
+      const quality = await this.qualityManager.evaluateTask(
+          `Literature Review on "${topic}"`,
+          result.summary,
+          { papersCount: result.papers.length }
+      );
+      
+      if (!quality.passed) {
+          log(`[Quality] Warning: Score ${quality.score}/100. ${quality.reasoning}`);
+          const warning = `\n\n> ⚠️ **Quality Check**: This review scored ${quality.score}/100. ${quality.suggestions[0] || ''}`;
+          this.sessionManager.addMessage(session.id, 'assistant', response + warning);
+          return response + warning;
+      }
+
       this.sessionManager.addMessage(session.id, 'assistant', response);
       return response;
     } catch (e) {

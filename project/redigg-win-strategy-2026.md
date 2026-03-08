@@ -395,25 +395,6 @@
 - **时间窗口再确认**: 6-12 个月（连续 9 轮验证确认）
 - **执行优先级确认**: Landing Page 今天搭建，种子用户 3/16 开始邀请
 
-**Round 35 新增洞察** (2026-03-08 19:00): ✅
-
-- **Elicit 连续 12 轮验证**（新纪录）: 数据持续稳定（500 万/1.38 亿/54.5 万），市场地位稳固
-  - 连续 12 轮验证确认：Elicit 市场地位稳固，数据壁垒高
-  - 价值主张提炼："AI for Scientific Research" / "10x more evidence-based" / "Discover the unknown"
-  - 核心优势确认：Scale (1000 篇/20000 数据点)/Accuracy/Transparency/More than chat
-  - 机构采用扩展：7 大行业（Pharma/Academia/Medtech/Policy/Consumer Goods/Industrials/Software），包括 NASA、CDC、NIH 等政府机构
-  - 最新动态：API 发布 5 天，开发者生态早期
-- **Litmaps 整合完成确认**: ✅ 页面连续第 2 轮稳定，ResearchRabbit 整合已完成
-  - 用户数：350,000+ researchers worldwide（150+ 国家）
-  - 核心功能：Discover/Visualize/Share/Monitor 四大模块
-  - 用户评价强调"network enhances thinking process"（可视化是核心差异化）
-  - 整合周期：约 3 个月（Round 27 宣布收购，Round 34-35 整合完成）
-- **时间窗口再确认**: 6-12 个月（连续 12 轮验证确认）
-  - Elicit API 生态形成需要时间（开发者采用、工具链完善）
-  - Litmaps 整合完成但可视化非 Redigg 核心差异化
-  - 本地 + 云端混合仍是独特优势（隐私敏感用户）
-- **执行优先级确认**: Landing Page 尽快搭建，种子用户 3/16 开始邀请
-
 **Round 34 新增洞察** (2026-03-08 18:00): ✅
 
 - **Elicit 连续 11 轮验证**（新纪录）: 数据持续稳定（500 万/1.38 亿/54.5 万），市场地位稳固

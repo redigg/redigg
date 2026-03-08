@@ -1,0 +1,2 @@
+[console_scripts]
+redigg-agent = cli.main:cli

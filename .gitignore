@@ -1,3 +1,6 @@
+# Coverage
+coverage/
+
 # OpenClaw workspace files (not part of redigg project)
 .openclaw/
 AGENTS.md

@@ -190,29 +190,60 @@ export class ResearchAgent {
             step.status = 'in_progress';
             sendPlan({ steps: plan.steps });
             
-            try {
-                log(`[Agent] Executing step: ${step.description}`);
-                const result = await this.executeStep(step, userId, session, log);
-                
-                step.status = 'completed';
-                step.result = result;
-                
-                if (step.tool === 'Chat') {
-                    reply = result;
+            let retryCount = 0;
+            const maxRetries = 2;
+            let success = false;
+
+            while (retryCount <= maxRetries && !success) {
+                try {
+                    if (retryCount > 0) {
+                        log(`[Agent] Retry ${retryCount}/${maxRetries} for step: ${step.description}`);
+                    } else {
+                        log(`[${step.tool}] ${step.description}`);
+                    }
+                    
+                    const result = await this.executeStep(step, userId, session, log);
+                    
+                    step.status = 'completed';
+                    step.result = result;
+                    success = true;
+                    
+                    if (step.tool === 'Chat') {
+                        reply = result;
+                    }
+                } catch (e) {
+                    retryCount++;
+                    const errorMsg = String(e);
+                    logger.error(`Step failed (Attempt ${retryCount}): ${step.description}`, e);
+                    
+                    if (retryCount > maxRetries) {
+                        step.status = 'failed';
+                        step.error = errorMsg;
+                        log(`[Error] Step failed permanently: ${step.description}`);
+                    } else {
+                        log(`[Warning] Step failed, retrying... (${errorMsg})`);
+                        // Wait a bit before retry
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
                 }
-            } catch (e) {
-                step.status = 'failed';
-                step.error = String(e);
-                logger.error(`Step failed: ${step.description}`, e);
-                log(`[Agent] Step failed: ${step.description}`);
             }
             sendPlan({ steps: plan.steps });
         }
         
         if (!reply) {
             // If no chat step, summarize results
-            // For now, just say "Task completed."
-            reply = "I have completed the requested tasks.";
+            const completedSteps = plan.steps.filter(s => s.status === 'completed');
+            const failedSteps = plan.steps.filter(s => s.status === 'failed');
+            
+            let summary = "I have completed the requested tasks.\n\n";
+            if (completedSteps.length > 0) {
+                summary += "**Completed:**\n" + completedSteps.map(s => `- ${s.description}`).join('\n') + "\n";
+            }
+            if (failedSteps.length > 0) {
+                summary += "\n**Failed:**\n" + failedSteps.map(s => `- ${s.description}: ${s.error}`).join('\n');
+            }
+            
+            reply = summary;
             this.sessionManager.addMessage(session.id, 'assistant', reply);
         }
         
@@ -598,16 +629,7 @@ Instructions:
             result.added.forEach((m: any) => {
                 log(`[Evolution] New Memory: "${m.content}" (${m.type}/${m.tier})`);
             });
-
-            // If a new memory is created, we can append a small note to the chat history or just rely on the logs.
-            // The user requested: "create a chat, tell user we have new memory"
-            // So we will add a system/agent message.
-            
-            if (result.added.length > 0) {
-                 const memoryContent = result.added[0].content;
-                 const note = `(I've noted: "${memoryContent}")`;
-                 this.sessionManager.addMessage(session.id, 'assistant', note);
-            }
+            // Silent execution: no chat message for memory updates
         }
         if (result && result.updated && result.updated.length > 0) {
              log(`[Evolution] Updated ${result.updated.length} memories.`);
@@ -658,7 +680,7 @@ Title:`;
     
     try {
       const result = await this.skillManager.executeSkill(
-        'literature_review', 
+        'academic_survey_self_improve', 
         userId, 
         { topic },
         (type, content) => log(`[Skill] ${content}`)

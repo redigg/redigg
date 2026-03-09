@@ -1,4 +1,4 @@
-import EventEmitter from 'eventemitter3';
+import { EventEmitter } from 'eventemitter3';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('EventManager');

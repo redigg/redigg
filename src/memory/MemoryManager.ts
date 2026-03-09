@@ -1,4 +1,4 @@
-import { SQLiteStorage } from '../../storage/sqlite.js';
+import { SQLiteStorage } from '../storage/sqlite.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface Memory {

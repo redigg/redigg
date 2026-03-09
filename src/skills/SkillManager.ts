@@ -4,7 +4,6 @@ import { MemoryManager } from '../memory/MemoryManager.js';
 import { createLogger } from '../utils/logger.js';
 import path from 'path';
 import fs from 'fs/promises';
-import PdfGeneratorSkill from '../../skills/research/pdf-generator/index.js';
 
 const logger = createLogger('SkillManager');
 
@@ -26,7 +25,7 @@ export class SkillManager {
     this.memoryManager = memoryManager;
     this.workspace = workspace;
     this.skillsDir = path.join(workspace, 'skills');
-    this.registerSkill(new PdfGeneratorSkill());
+    // this.registerSkill(new PdfGeneratorSkill());
   }
 
   public setManagers(managers: SkillContext['managers']) {
@@ -99,15 +98,11 @@ export class SkillManager {
 
   private async loadSkill(skillPath: string): Promise<Skill | null> {
     const implPath = path.join(skillPath, 'index.ts');
+    const skillId = path.basename(skillPath);
+
+    // 1. Try loading executable skill (index.ts)
     try {
         await fs.access(implPath);
-    } catch (e) {
-        // If index.ts does not exist, it might be a non-TS skill or just a placeholder.
-        // We skip it without error.
-        return null;
-    }
-
-    try {
         // Use pathToFileURL to handle ESM import properly on all platforms
         const { pathToFileURL } = await import('url');
         // Add a timestamp query param to bust the cache when reloading
@@ -128,11 +123,61 @@ export class SkillManager {
                 return skillInstance;
             }
         }
-    } catch (e) {
-        logger.error(`Failed to load skill from ${implPath}: ${e}`);
+    } catch (e: any) {
+        // If index.ts missing or load failed, fall through to check SKILL.md
+        // But only log error if it existed but failed to load
+        if (e.code !== 'ENOENT') {
+             logger.error(`Failed to load skill from ${implPath}: ${e}`);
+        }
     }
+
+    // 2. Try loading declarative skill (SKILL.md)
+    const skillMdPath = path.join(skillPath, 'SKILL.md');
+    try {
+        const content = await fs.readFile(skillMdPath, 'utf-8');
+        const frontmatter = this.parseFrontmatter(content);
+        
+        if (frontmatter.name) {
+            const skill: Skill = {
+                id: skillId,
+                name: frontmatter.name,
+                description: frontmatter.description || 'No description provided.',
+                tags: ['vendor', 'declarative'],
+                execute: async (ctx, params) => {
+                    return {
+                        success: true,
+                        message: `This is a declarative skill (${frontmatter.name}). It provides tools or capabilities but cannot be executed directly.`
+                    };
+                }
+            };
+            
+            this.skills.set(skill.id, skill);
+            logger.info(`Registered declarative skill: ${skill.id}`);
+            return skill;
+        }
+    } catch (e) {
+        // Ignore if SKILL.md missing
+    }
+
     return null;
   }
+
+  private parseFrontmatter(content: string): { name?: string; description?: string } {
+      const match = content.match(/^---\n([\s\S]*?)\n---/);
+      if (!match) return {};
+      
+      const yaml = match[1];
+      const result: any = {};
+      
+      const nameMatch = yaml.match(/^name:\s*(.*)$/m);
+      if (nameMatch) result.name = nameMatch[1].trim();
+      
+      const descMatch = yaml.match(/^description:\s*(.*)$/m);
+      if (descMatch) result.description = descMatch[1].trim();
+      
+      return result;
+  }
+
 
   private async loadPack(packPath: string, packId: string) {
     logger.info(`Loading skill pack: ${packId}`);

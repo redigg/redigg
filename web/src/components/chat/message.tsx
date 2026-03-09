@@ -26,13 +26,15 @@ interface ChatMessageProps {
 
 // Helper to parse log content and return structured activity
 const parseActivity = (log: string) => {
-    // Simple heuristics based on log content from ResearchAgent
-    if (log.includes('[Evolution]')) return { icon: Brain, label: 'Memory Evolution', color: 'text-purple-500', bg: 'bg-purple-50', border: 'border-purple-100' };
-    if (log.includes('Searching for paper') || log.includes('Literature Review')) return { icon: Search, label: 'Researching', color: 'text-blue-500', bg: 'bg-blue-50', border: 'border-blue-100' };
-    if (log.includes('Analyzing paper') || log.includes('Reading content')) return { icon: FileText, label: 'Reading Paper', color: 'text-amber-500', bg: 'bg-amber-50', border: 'border-amber-100' };
-    if (log.includes('Analyzing codebase') || log.includes('Listing files')) return { icon: Code, label: 'Analyzing Code', color: 'text-cyan-500', bg: 'bg-cyan-50', border: 'border-cyan-100' };
-    if (log.includes('Generating PDF')) return { icon: FileText, label: 'Generating PDF', color: 'text-red-500', bg: 'bg-red-50', border: 'border-red-100' };
-    if (log.includes('Plan created')) return { icon: Sparkles, label: 'Planning', color: 'text-indigo-500', bg: 'bg-indigo-50', border: 'border-indigo-100' };
+    // Standardized log prefixes from ResearchAgent
+    if (log.includes('[Evolution]')) return { icon: Brain, label: 'Evolution', color: 'text-purple-500', bg: 'bg-purple-50', border: 'border-purple-100' };
+    if (log.includes('[Search]') || log.includes('LiteratureReview')) return { icon: Search, label: 'Researching', color: 'text-blue-500', bg: 'bg-blue-50', border: 'border-blue-100' };
+    if (log.includes('[PaperAnalysis]') || log.includes('Reading content')) return { icon: FileText, label: 'Reading Paper', color: 'text-amber-500', bg: 'bg-amber-50', border: 'border-amber-100' };
+    if (log.includes('[CodeAnalysis]') || log.includes('Analyzing codebase')) return { icon: Code, label: 'Analyzing Code', color: 'text-cyan-500', bg: 'bg-cyan-50', border: 'border-cyan-100' };
+    if (log.includes('[PdfGenerator]') || log.includes('Generating PDF')) return { icon: FileText, label: 'Generating PDF', color: 'text-red-500', bg: 'bg-red-50', border: 'border-red-100' };
+    if (log.includes('[Agent]') || log.includes('Plan created')) return { icon: Sparkles, label: 'Planning', color: 'text-indigo-500', bg: 'bg-indigo-50', border: 'border-indigo-100' };
+    if (log.includes('[Error]')) return { icon: Circle, label: 'Error', color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' };
+    if (log.includes('[Warning]')) return { icon: Circle, label: 'Warning', color: 'text-orange-500', bg: 'bg-orange-50', border: 'border-orange-100' };
     
     // Default
     return { icon: Circle, label: 'Processing', color: 'text-zinc-400', bg: 'bg-zinc-50', border: 'border-zinc-100' };

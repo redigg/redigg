@@ -26,7 +26,7 @@ export class SkillEvolutionSystem {
   ): Promise<{ skillId: string, code: string } | null> {
     console.log(`[SkillEvolution] Analyzing intent: "${intent}"`);
 
-    // 1. Check if we need a new skill
+    // 1. Check if we need a new skill OR update an existing one
     const existingSkills = this.skillManager.getAllSkills();
     const prompt = `
       User Intent: "${intent}"
@@ -35,28 +35,26 @@ export class SkillEvolutionSystem {
       Existing Skills:
       ${existingSkills.map(s => `- ${s.id}: ${s.description}`).join('\n')}
       
-      Do we need a new skill to handle this intent? 
-      If yes, provide a unique skill ID (snake_case, hyphens allowed) and a description.
-      If no, return "NO_NEW_SKILL".
+      Analyze the request:
+      1. Do we need a NEW skill? (Return "NEW_SKILL")
+      2. Should we UPDATE an existing skill? (Return "UPDATE_SKILL")
+      3. Is no action needed? (Return "NO_ACTION")
       
       Output format: 
       {
+        "action": "NEW_SKILL" | "UPDATE_SKILL" | "NO_ACTION",
         "id": "skill-id",
         "name": "Skill Name",
         "description": "Skill Description",
-        "tags": ["tag1", "tag2"]
+        "tags": ["tag1", "tag2"],
+        "reasoning": "Why this action is needed"
       }
     `;
 
     const analysisResponse = await this.llm.chat([
-      { role: 'system', content: 'You are a skill architect. Analyze if a new skill is needed.' },
+      { role: 'system', content: 'You are a skill architect. Analyze if a new skill is needed or an existing one should be improved.' },
       { role: 'user', content: prompt }
     ]);
-
-    if (analysisResponse.content.includes('NO_NEW_SKILL')) {
-      console.log('[SkillEvolution] No new skill needed.');
-      return null;
-    }
 
     let skillMeta;
     try {
@@ -66,12 +64,28 @@ export class SkillEvolutionSystem {
       return null;
     }
 
+    if (skillMeta.action === 'NO_ACTION') {
+      console.log('[SkillEvolution] No action needed.');
+      return null;
+    }
+
     if (!skillMeta.id) return null;
 
     // 2. Generate Skill Code
-    console.log(`[SkillEvolution] Generating code for skill: ${skillMeta.id}`);
+    console.log(`[SkillEvolution] Generating code for skill: ${skillMeta.id} (${skillMeta.action})`);
+    
+    // If updating, load existing code
+    let existingCode = '';
+    if (skillMeta.action === 'UPDATE_SKILL') {
+        const existingSkillPath = path.join(this.skillsDir, skillMeta.id, 'index.ts');
+        if (fs.existsSync(existingSkillPath)) {
+            existingCode = fs.readFileSync(existingSkillPath, 'utf-8');
+        }
+    }
+
     const codePrompt = `
-      Generate a TypeScript class for a new Redigg Skill.
+      Generate a TypeScript class for a Redigg Skill.
+      Action: ${skillMeta.action}
       
       Skill Metadata:
       - ID: ${skillMeta.id}
@@ -80,6 +94,9 @@ export class SkillEvolutionSystem {
       - Tags: ${JSON.stringify(skillMeta.tags)}
       
       User Intent: "${intent}"
+      Feedback: "${feedback || ''}"
+      
+      ${existingCode ? `Existing Code:\n\`\`\`typescript\n${existingCode}\n\`\`\`` : ''}
       
       Context Interfaces:
       export interface SkillContext {
@@ -97,6 +114,7 @@ export class SkillEvolutionSystem {
       4. Return a structured 'SkillResult'.
       5. The class MUST be exported as default: 'export default class ...'
       6. Do NOT import external libraries other than 'path', 'fs' unless absolutely necessary.
+      7. If updating, preserve existing functionality unless explicitly asked to change. Improve the logic based on intent.
       
       Output ONLY the TypeScript code.
     `;

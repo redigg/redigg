@@ -83,7 +83,7 @@ export class PageIndex {
 
         const db = this.memoryManager.storage.getDb();
         // Get all descendants using LIKE query on index_path
-        const descendants = db.prepare('SELECT * FROM memories WHERE index_path LIKE ? ORDER BY index_path').all(`${root.id}%`);
+        const descendants = db.prepare('SELECT * FROM memories WHERE index_path LIKE ? ORDER BY index_path').all(`${root.id}%`) as any[];
         
         // Reconstruct tree in memory
         const nodeMap = new Map<string, PageNode>();

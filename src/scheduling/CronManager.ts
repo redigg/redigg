@@ -38,8 +38,8 @@ export class CronManager {
         console.error(`[Cron] Task ${name} failed:`, err);
       }
     }, {
-      scheduled: false // Don't start immediately
-    });
+      scheduled: false
+    } as any);
 
     const task: ScheduledTask = {
       id,

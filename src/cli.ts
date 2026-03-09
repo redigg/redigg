@@ -5,6 +5,7 @@ import { ResearchAgent } from './agent/ResearchAgent.js';
 import { MemoryEvolutionSystem } from './memory/evolution/MemoryEvolutionSystem.js';
 import { MockLLMClient, LLMClient, LLMResponse } from './llm/LLMClient.js';
 import chalk from 'chalk';
+import ora from 'ora';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 
@@ -133,7 +134,13 @@ async function main() {
     const input = process.argv.slice(2).join(' ');
     console.log(chalk.cyan(`\nYou: ${input}`));
     try {
-      const response = await agent.chat(userId, input);
+      const spinner = ora('Thinking...').start();
+      const response = await agent.chat(userId, input, (type, content) => {
+        if (type === 'log') {
+          spinner.text = content.toString();
+        }
+      });
+      spinner.stop();
       console.log(chalk.green('Agent:'), response);
     } catch (error) {
       console.error(chalk.red('Error:'), error);
@@ -180,7 +187,13 @@ async function main() {
       }
 
       try {
-        const response = await agent.chat(userId, input);
+        const spinner = ora('Thinking...').start();
+        const response = await agent.chat(userId, input, (type, content) => {
+          if (type === 'log') {
+            spinner.text = content.toString();
+          }
+        });
+        spinner.stop();
         console.log(chalk.green('Agent:'), response);
       } catch (error) {
         console.error(chalk.red('Error:'), error);

@@ -1,14 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from './components/ui/button';
-import { Input } from './components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { ChatMessage as ChatMessageComponent } from './components/chat/message';
 import { ChatInput } from './components/chat/input';
-import { ScrollToBottom } from './components/chat/scroll-to-bottom'; // Assuming this component is created or will be
-import { Send, Bot, User, Terminal, FileText, Brain, Code, Sparkles, Database, MessageSquare, Plus, Trash2, ChevronDown, PanelLeftClose, PanelLeftOpen, ChevronLeft, Folder } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { ScrollToBottom } from './components/chat/scroll-to-bottom';
+import { Bot, Sparkles, MessageSquare, Plus, Trash2, ChevronDown, PanelLeftClose, PanelLeftOpen, FileText, Code, Database, Brain } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,
@@ -96,11 +93,49 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'session' | 'memory', id: string } | null>(null);
+  
+  // Notification State
+  const [unseenMemoriesCount, setUnseenMemoriesCount] = useState(0);
+  const [unseenPapersCount, setUnseenPapersCount] = useState(0);
+  const [unseenSessionIds, setUnseenSessionIds] = useState<Set<string>>(new Set());
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const isAutoScrollEnabled = useRef(true);
+
+  const [lastViewedMemoryId, setLastViewedMemoryId] = useState<string | null>(localStorage.getItem('lastViewedMemoryId'));
+  const [lastViewedPaperId, setLastViewedPaperId] = useState<string | null>(localStorage.getItem('lastViewedPaperId'));
+
+  // Use refs to keep linter happy for now as they might be used later
+  useEffect(() => {
+    if (lastViewedMemoryId) {}
+    if (lastViewedPaperId) {}
+  }, [lastViewedMemoryId, lastViewedPaperId]);
+
+  // Track scroll position to determine if we should auto-scroll
+  useEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+        const { scrollHeight, scrollTop, clientHeight } = container;
+        // If user is within 100px of bottom, enable auto-scroll
+        const distance = scrollHeight - scrollTop - clientHeight;
+        isAutoScrollEnabled.current = distance < 100;
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Auto-scroll if enabled
+    if (isAutoScrollEnabled.current) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else {
+        // Edge case: If it's the very first message or loading history, we might want to force scroll?
+        // But logic above handles "default true".
+    }
     
     // Simple token estimation: 1 token ~= 4 chars
     const allContent = messages.map(m => m.content).join('');
@@ -133,7 +168,30 @@ function App() {
     const fetchMemories = () => {
         fetch('/api/memories?userId=web-user')
         .then(res => res.json())
-        .then(data => setMemories(data))
+        .then(data => {
+            // Sort by created_at desc
+            const sortedData = data.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+            setMemories(sortedData);
+            
+            // Calculate unseen counts
+            const papers = sortedData.filter((m: any) => m.type === 'paper');
+            const otherMemories = sortedData.filter((m: any) => m.type !== 'paper');
+            
+            const lastViewedMemoryCount = parseInt(localStorage.getItem('lastViewedMemoryCount') || '0');
+            const lastViewedPaperCount = parseInt(localStorage.getItem('lastViewedPaperCount') || '0');
+            
+            if (otherMemories.length > lastViewedMemoryCount) {
+                setUnseenMemoriesCount(otherMemories.length - lastViewedMemoryCount);
+            } else {
+                setUnseenMemoriesCount(0);
+            }
+            
+            if (papers.length > lastViewedPaperCount) {
+                setUnseenPapersCount(papers.length - lastViewedPaperCount);
+            } else {
+                setUnseenPapersCount(0);
+            }
+        })
         .catch(err => console.error('Failed to fetch memories:', err));
     };
 
@@ -146,74 +204,176 @@ function App() {
                 // Load most recent session
                 loadSession(data[0].id);
             }
+            
+            // Check for unseen sessions (updated_at > lastRead)
+            // We need to store lastRead per session in localStorage
+            // Format: { [sessionId]: timestamp }
+            try {
+                const lastReadMap = JSON.parse(localStorage.getItem('sessionLastReadMap') || '{}');
+                const newUnseen = new Set<string>();
+                
+                data.forEach((session: Session) => {
+                    const lastRead = lastReadMap[session.id] ? new Date(lastReadMap[session.id]) : new Date(0);
+                    const updated = new Date(session.updated_at);
+                    // Add a small buffer or check equality if updated_at is reliable
+                    if (updated > lastRead && session.id !== currentSessionId) {
+                         newUnseen.add(session.id);
+                    }
+                });
+                setUnseenSessionIds(newUnseen);
+            } catch (e) {
+                console.error('Error parsing session read state', e);
+            }
         })
         .catch(err => console.error('Failed to fetch sessions:', err));
     };
 
     fetchMemories();
     fetchSessions();
-  }, []);
+    
+    // Poll for updates (Memories & Sessions) to update notification dots
+    const pollInterval = setInterval(() => {
+        fetchMemories();
+        // We only poll sessions if we want to see dots appear for *other* sessions while chatting
+        // Since `loadSession` is polled separately for the current session, this is for the sidebar list.
+        fetchSessions(); 
+    }, 10000); // Poll every 10s for sidebar updates
+    
+    return () => clearInterval(pollInterval);
+  }, []); // Only run once on mount (and setup polling)
+
+  // Update last read when switching sessions
+  useEffect(() => {
+      if (currentSessionId) {
+          // Mark current session as read
+          setUnseenSessionIds(prev => {
+              const next = new Set(prev);
+              next.delete(currentSessionId);
+              return next;
+          });
+          
+          // Update localStorage
+          const lastReadMap = JSON.parse(localStorage.getItem('sessionLastReadMap') || '{}');
+          lastReadMap[currentSessionId] = new Date().toISOString();
+          localStorage.setItem('sessionLastReadMap', JSON.stringify(lastReadMap));
+      }
+  }, [currentSessionId, messages]); // Update when messages change too (user is viewing them)
+  
+  // Handler for clearing memory notifications
+  const handleTabChange = (value: string) => {
+      const now = new Date().toISOString();
+      if (value === 'memory') {
+          localStorage.setItem('lastViewedMemoryTimestamp', now);
+          const memoriesList = memories.filter(m => m.type !== 'paper');
+          const count = memoriesList.length;
+          localStorage.setItem('lastViewedMemoryCount', count.toString());
+          if (memoriesList.length > 0) {
+              const latestId = memoriesList[0].id; // sorted desc
+              localStorage.setItem('lastViewedMemoryId', latestId);
+              setLastViewedMemoryId(latestId);
+          }
+          setUnseenMemoriesCount(0);
+      } else if (value === 'papers') {
+          localStorage.setItem('lastViewedPaperTimestamp', now);
+          const papersList = memories.filter(m => m.type === 'paper');
+          const count = papersList.length;
+          localStorage.setItem('lastViewedPaperCount', count.toString());
+          if (papersList.length > 0) {
+              const latestId = papersList[0].id; // sorted desc
+              localStorage.setItem('lastViewedPaperId', latestId);
+              setLastViewedPaperId(latestId);
+          }
+          setUnseenPapersCount(0);
+      }
+  };
+
+
 
   // Auto-refresh chat history to catch async events (like memory updates)
   useEffect(() => {
-    if (!currentSessionId || isConnecting) return;
+    if (!currentSessionId) return; // Removed isConnecting check to allow polling while processing
 
     const interval = setInterval(() => {
-        // Only fetch if not connecting to avoid race conditions or jitter
-        fetch(`/api/sessions/${currentSessionId}/history`)
-            .then(res => res.json())
-            .then(history => {
-                // If history length changed, update messages
-                // We need to map them first to compare
-                // But wait, if we replace messages, we might lose local state like expanded logs if we are not careful.
-                // However, we only care about *new* messages.
-                
-                // Simple check: if server has more messages than local
-                if (history.length > messages.length) {
-                    const mappedMessages: ChatMessage[] = history.map((msg: any) => ({
-                        id: msg.id,
-                        role: msg.role === 'assistant' ? 'agent' : msg.role,
-                        content: msg.content,
-                        timestamp: new Date(msg.timestamp),
-                        logs: [] // Logs might be lost if we don't persist them in DB properly or if we reload. 
-                                 // For now, persistent logs are not fully implemented in DB schema maybe?
-                                 // Actually, agent.chat doesn't save logs to DB, only messages.
-                                 // So reloading will wipe logs of *previous* messages.
-                                 // We should preserve existing messages and only append new ones.
-                    }));
-                    
-                    // Merge: keep existing messages (with logs) and append new ones
-                    setMessages(prev => {
-                        // Find messages in history that are NOT in prev
-                        const existingIds = new Set(prev.map(m => m.id));
-                        const newMsgs = mappedMessages.filter(m => !existingIds.has(m.id));
-                        
-                        if (newMsgs.length > 0) {
-                            return [...prev, ...newMsgs];
-                        }
-                        return prev;
-                    });
-                }
-            })
-            .catch(err => console.error('Background sync failed:', err));
+        loadSession(currentSessionId);
     }, 3000); // Poll every 3 seconds
 
     return () => clearInterval(interval);
-  }, [currentSessionId, isConnecting, messages.length]);
+  }, [currentSessionId, isConnecting]); // isConnecting is still a dep but ignored in logic
 
   const loadSession = async (sessionId: string) => {
       setCurrentSessionId(sessionId);
       try {
           const res = await fetch(`/api/sessions/${sessionId}/history`);
           const history = await res.json();
-          const mappedMessages: ChatMessage[] = history.map((msg: any) => ({
-              id: msg.id,
-              role: msg.role === 'assistant' ? 'agent' : msg.role,
-              content: msg.content,
-              timestamp: new Date(msg.timestamp),
-              logs: []
-          }));
-          setMessages(mappedMessages);
+          
+          // Reconstruct messages, merging logs into the *preceding* agent message or creating a placeholder
+          const reconstructedMessages: ChatMessage[] = [];
+          
+          for (const msg of history) {
+              if (msg.role === 'log') {
+                  // Find the last agent message to attach logs to
+                  // Or if no agent message, create a pending one?
+                  // Actually, logs usually come *before* or *during* the agent's reply.
+                  // But in our current flow, agent message is created *after* reply? 
+                  // No, agent message is added to DB at the end.
+                  // Logs are added *during*.
+                  // So in DB history: [User Msg, Log1, Log2, Agent Msg]
+                  
+                  // We want to display logs inside the Agent Message.
+                  // So we need to buffer logs until we hit an agent message?
+                  // Or attach them to the *next* agent message?
+                  
+                  // Wait, if we are loading history, we see: User -> Log -> Log -> Agent
+                  // We should probably create a "Pending/Agent" message when we see the first log after a user message.
+                  
+                  let lastMsg = reconstructedMessages[reconstructedMessages.length - 1];
+                  if (!lastMsg || lastMsg.role !== 'agent') {
+                      // Create a new agent placeholder
+                      const placeholder: ChatMessage = {
+                          id: `temp-${msg.id}`, // Use log id as base
+                          role: 'agent',
+                          content: '',
+                          logs: [msg.content],
+                          timestamp: new Date(msg.timestamp)
+                      };
+                      reconstructedMessages.push(placeholder);
+                  } else {
+                      // Append to existing agent message
+                      lastMsg.logs = [...(lastMsg.logs || []), msg.content];
+                  }
+              } else {
+                  // Normal message
+                  // If we have a "placeholder" agent message (content empty) and this is an agent message, merge them?
+                  if (msg.role === 'assistant') {
+                       let lastMsg = reconstructedMessages[reconstructedMessages.length - 1];
+                       if (lastMsg && lastMsg.role === 'agent' && !lastMsg.content) {
+                           // This was our placeholder. Update it.
+                           lastMsg.id = msg.id;
+                           lastMsg.content = msg.content;
+                           lastMsg.timestamp = new Date(msg.timestamp); // Update timestamp to finish time
+                           // logs are already there
+                       } else {
+                           reconstructedMessages.push({
+                              id: msg.id,
+                              role: 'agent',
+                              content: msg.content,
+                              timestamp: new Date(msg.timestamp),
+                              logs: []
+                          });
+                       }
+                  } else {
+                      reconstructedMessages.push({
+                          id: msg.id,
+                          role: msg.role === 'assistant' ? 'agent' : msg.role,
+                          content: msg.content,
+                          timestamp: new Date(msg.timestamp),
+                          logs: []
+                      });
+                  }
+              }
+          }
+          
+          setMessages(reconstructedMessages);
       } catch (err) {
           console.error('Failed to load session history:', err);
       }
@@ -278,20 +438,6 @@ function App() {
     navigator.clipboard.writeText(content);
   };
 
-  const handleRegenerate = async (msgId: string) => {
-      const msgIndex = messages.findIndex(m => m.id === msgId);
-      if (msgIndex <= 0) return;
-      
-      const lastUserMsg = messages[msgIndex - 1];
-      if (lastUserMsg.role !== 'user') return;
-      
-      // Remove all messages after the user message
-      setMessages(prev => prev.slice(0, msgIndex));
-      
-      // Trigger send with the last user message content
-      handleSend(lastUserMsg.content);
-  };
-
   const handleSend = async (text: string = input, attachments: any[] = [], webSearch: boolean = false) => {
     if (!text.trim() && attachments.length === 0) return;
 
@@ -351,23 +497,33 @@ function App() {
     // Force a re-render/scroll before starting the stream
     setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 10);
+    }, 50); // Increased delay slightly to ensure render
 
     try {
       // Use the actual text content for the API call
       // const messageText = isRegenerating ? text : userMsg.content; // userMsg.content has extra display info now
       const messageText = text;
       
-      let url = `/api/chat/stream?message=${encodeURIComponent(messageText)}&userId=web-user${currentSessionId ? `&sessionId=${currentSessionId}` : ''}`;
-      
-      if (attachments.length > 0) {
-          url += `&attachments=${encodeURIComponent(JSON.stringify(attachments))}`;
-      }
-      if (webSearch) {
-          url += `&webSearch=true`;
+      const res = await fetch('/api/chat/async', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+              message: messageText,
+              userId: 'web-user',
+              sessionId: currentSessionId,
+              webSearch,
+              attachments
+          })
+      });
+
+      if (!res.ok) {
+          throw new Error(`Server returned ${res.status}`);
       }
 
-      const eventSource = new EventSource(url);
+      setIsConnecting(false); // We are done "connecting" to the POST. Now just polling/listening.
+      
+      // Start listening to SSE events for this session
+      const eventSource = new EventSource(`/api/sessions/${currentSessionId!}/events`);
 
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -382,45 +538,53 @@ function App() {
           } else {
             setMessages(prev => prev.map(msg => 
               msg.id === agentMsgId 
-                ? { ...msg, content: msg.content + content }
+                ? { ...msg, content: msg.content + content } 
                 : msg
             ));
           }
         } else if (data.type === 'log') {
+          // If log content contains __STATS__, parse it
+          let content = data.content;
+          let stats = undefined;
+          if (content && typeof content === 'string' && content.includes('__STATS__')) {
+              const parts = content.split('__STATS__');
+              content = parts[0];
+              try {
+                  stats = JSON.parse(parts[1]);
+              } catch (e) {}
+          }
+
           setMessages(prev => prev.map(msg => 
             msg.id === agentMsgId 
-              ? { ...msg, logs: [...(msg.logs || []), data.content] }
+              ? { ...msg, logs: [...(msg.logs || []), content], stats: stats || msg.stats }
               : msg
           ));
         } else if (data.type === 'done') {
           eventSource.close();
-          setIsConnecting(false);
           // Refresh sessions to get updated title/timestamp
-          fetch('/api/sessions?userId=web-user')
+          fetch(`/api/sessions?userId=web-user`)
             .then(res => res.json())
             .then(data => setSessions(data));
-        } else if (data.type === 'stats') {
-          setMessages(prev => prev.map(msg => 
-            msg.id === agentMsgId 
-              ? { ...msg, stats: data.content }
-              : msg
-          ));
         } else if (data.type === 'error') {
           console.error('SSE Error:', data.content);
           eventSource.close();
-          setIsConnecting(false);
+        } else if (data.type === 'ping') {
+            // Keep alive
         }
       };
 
       eventSource.onerror = (err) => {
         console.error('EventSource failed:', err);
         eventSource.close();
-        setIsConnecting(false);
+        // Fallback to polling handled by useEffect
       };
 
     } catch (err) {
-      console.error('Failed to setup SSE:', err);
+      console.error('Failed to send message:', err);
       setIsConnecting(false);
+      
+      // Remove the placeholder user message on error
+      setMessages(prev => prev.filter(m => m.id !== userMsg.id));
     }
   };
 
@@ -454,24 +618,33 @@ function App() {
         </div>
 
         <div className="flex-1 overflow-hidden flex flex-col min-h-0 min-w-[20rem]">
-          <Tabs defaultValue="chats" className="flex-1 flex flex-col min-h-0">
+          <Tabs defaultValue="chats" className="flex-1 flex flex-col min-h-0" onValueChange={handleTabChange}>
             <div className="px-4 pt-4 shrink-0">
               <TabsList className="w-full bg-zinc-100 p-1 mb-2 grid grid-cols-4 h-auto">
-                  <TabsTrigger value="chats" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm" title="Chat">
+                  <TabsTrigger value="chats" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm relative" title="Chat">
                     <MessageSquare className="h-3.5 w-3.5" />
                     <span className="text-xs font-medium">Chat</span>
+                    {unseenSessionIds.size > 0 && (
+                        <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500 border border-white"></span>
+                    )}
                   </TabsTrigger>
                   <TabsTrigger value="skills" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm" title="Skill">
                     <Sparkles className="h-3.5 w-3.5" />
                     <span className="text-xs font-medium">Skill</span>
                   </TabsTrigger>
-                  <TabsTrigger value="memory" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm" title="Mem">
+                  <TabsTrigger value="memory" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm relative" title="Mem">
                     <Brain className="h-3.5 w-3.5" />
                     <span className="text-xs font-medium">Mem</span>
+                    {unseenMemoriesCount > 0 && (
+                        <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500 border border-white"></span>
+                    )}
                   </TabsTrigger>
-                  <TabsTrigger value="papers" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm" title="Ref">
+                  <TabsTrigger value="papers" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm relative" title="Ref">
                     <FileText className="h-3.5 w-3.5" />
                     <span className="text-xs font-medium">Ref</span>
+                    {unseenPapersCount > 0 && (
+                        <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500 border border-white"></span>
+                    )}
                   </TabsTrigger>
                 </TabsList>
             </div>
@@ -492,7 +665,12 @@ function App() {
                           )}
                           onClick={() => loadSession(session.id)}
                         >
-                          <div className="font-medium text-sm line-clamp-1">{session.title || 'New Chat'}</div>
+                          <div className="font-medium text-sm line-clamp-1 flex items-center gap-2">
+                              {session.title || 'New Chat'}
+                              {unseenSessionIds.has(session.id) && (
+                                  <span className="h-2 w-2 rounded-full bg-red-500 shrink-0"></span>
+                              )}
+                          </div>
                           <div className="text-[10px] opacity-70 mt-1">{new Date(session.updated_at).toLocaleString()}</div>
                           <div 
                               className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-red-100 text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
@@ -534,7 +712,7 @@ function App() {
                                 {/* Top: Packs List (as Tabs) */}
                                 <div className="border-b border-zinc-200 mb-2">
                                     <div className="flex overflow-x-auto scrollbar-hide">
-                                        {Object.entries(groupedSkills).map(([packId, packSkills]) => {
+                                        {Object.entries(groupedSkills).map(([packId, _]) => {
                                             const pack = skillPacks.find(p => p.id === packId);
                                             // Capitalize pack name and rename 'infra' to 'System', 'core' to 'Agent'
                                             let packName = pack ? pack.name : (packId === 'other' ? 'Other' : packId);
@@ -667,9 +845,36 @@ function App() {
                                  return filteredMemories.length > 0 ? (
                                  <div className="space-y-2">
                                      {filteredMemories.slice(0, 20).map(m => (
-                                     <div key={m.id} className="text-sm p-2.5 bg-white rounded-lg border border-zinc-100 hover:border-indigo-200 transition-colors relative group pr-8">
-                                         <div className="font-medium text-zinc-900 leading-snug">{m.content}</div>
-                                         <div className="flex items-center gap-2 mt-1.5">
+                                    <div key={m.id} className="text-sm p-2.5 bg-white rounded-lg border border-zinc-100 hover:border-indigo-200 transition-colors relative group pr-8">
+                                        <div className="font-medium text-zinc-900 leading-snug">
+                                            {m.content}
+                                            {/* Show New Tag if created_at is newer than last viewed session time OR simply if it's one of the new items */}
+                                            {/* Logic: We have unseen count. The top N items are new. */}
+                                            {/* But wait, filteredMemories might not be the raw list. */}
+                                            {/* Better logic: Compare m.id with lastViewedMemoryId? No, IDs are random UUIDs. */}
+                                            {/* Compare timestamps? We don't store timestamp of last view, only count/ID. */}
+                                            {/* Let's assume the list is sorted by time desc. If we have N unseen, the first N are new. */}
+                                            {/* BUT filters might hide some. */}
+                                            {/* Robust logic: If m.created_at > lastViewedTimestamp? We need to store timestamp. */}
+                                            
+                                            {/* Let's use the ID method if we store the ID of the *top* item when we last viewed. */}
+                                            {/* If we see an item that is newer than that ID? UUIDs don't have order. */}
+                                            
+                                            {/* Alternative: Store 'lastViewedTimestamp' in localStorage. */}
+                                            {(() => {
+                                                const lastViewedTime = localStorage.getItem('lastViewedMemoryTimestamp');
+                                                const isNew = !lastViewedTime || new Date(m.created_at) > new Date(lastViewedTime);
+                                                if (isNew) {
+                                                    return (
+                                                        <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-red-100 text-red-800">
+                                                            NEW
+                                                        </span>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
+                                        </div>
+                                        <div className="flex items-center gap-2 mt-1.5">
                                          <span className={cn(
                                              "text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-sm border",
                                              m.type === 'preference' ? "bg-purple-50 text-purple-600 border-purple-100" :
@@ -707,7 +912,21 @@ function App() {
                      <div className="space-y-3">
                        {memories.filter(m => m.type === 'paper').slice(0, 10).map(m => (
                          <div key={m.id} className="text-sm p-3 bg-white rounded-lg border border-zinc-100 hover:border-indigo-200 transition-colors relative group pr-8">
-                           <div className="font-medium text-zinc-900 line-clamp-2 leading-snug">{m.metadata?.title || m.content.replace('Paper: ', '')}</div>
+                           <div className="font-medium text-zinc-900 line-clamp-2 leading-snug">
+                               {m.metadata?.title || m.content.replace('Paper: ', '')}
+                               {(() => {
+                                   const lastViewedTime = localStorage.getItem('lastViewedPaperTimestamp');
+                                   const isNew = !lastViewedTime || new Date(m.created_at) > new Date(lastViewedTime);
+                                   if (isNew) {
+                                       return (
+                                           <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-red-100 text-red-800">
+                                               NEW
+                                           </span>
+                                       );
+                                   }
+                                   return null;
+                               })()}
+                           </div>
                            <div className="flex items-center gap-2 mt-2">
                               <div className="text-[10px] text-zinc-500 bg-zinc-100 px-1.5 py-0.5 rounded-full line-clamp-1 max-w-[120px]">
                                  {m.metadata?.authors?.join(', ') || 'Unknown Author'}
@@ -868,7 +1087,7 @@ function App() {
                     key={msg.id}
                     role={msg.role}
                     content={msg.content}
-                    isThinking={isConnecting && msg.id === messages[messages.length - 1].id && msg.role === 'agent' && !msg.content}
+                    isThinking={msg.role === 'agent' && !msg.content && index === messages.length - 1}
                     logs={msg.logs}
                     stats={msg.stats}
                     attachments={msg.attachments}

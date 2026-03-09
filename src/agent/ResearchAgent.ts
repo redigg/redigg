@@ -132,6 +132,8 @@ export class ResearchAgent {
     const log = (content: string, stats?: any) => {
       const payload = stats ? `${content}__STATS__${JSON.stringify(stats)}` : content;
       onProgress?.('log', payload);
+      // Persist log to session history
+      this.sessionManager.addMessage(session.id, 'log', payload);
     };
 
     // Send plan update
@@ -230,7 +232,7 @@ export class ResearchAgent {
          // Trigger evolution for planned execution results too?
          // Maybe just for the final reply if it exists.
          if (reply) {
-             this.handlePostProcessing(session, userId, message, reply, log, onProgress);
+             await this.handlePostProcessing(session, userId, message, reply, log, onProgress);
          }
     }
 
@@ -244,8 +246,11 @@ User Request: "${message}"
 
 Available Tools:
 - LiteratureReview(topic): Search for papers/web.
-- CodeAnalysis(path): Analyze project structure/code.
-- MemorySearch(query): Search past memories.
+- PaperAnalysis(title): Analyze a specific paper in depth.
+248→- ConceptExplainer(concept): Explain a scientific concept.
+249→- PdfGenerator(title, content): Generate a PDF report.
+250→- CodeAnalysis(path): Analyze project structure/code.
+251→- MemorySearch(query): Search past memories.
 - FileOps(operation): Organize files.
 - AgentOrchestration(operation): Create/manage sub-agents.
 - Evolution(intent): Create new skills.
@@ -277,6 +282,12 @@ Return a JSON plan:
       switch (step.tool) {
           case 'LiteratureReview':
               return this.executeLiteratureReview(session, userId, step.params.topic, log);
+          case 'ConceptExplainer':
+              const ceResult = await this.skillManager.executeSkill('concept_explainer', userId, { concept: step.params.concept });
+              return ceResult.formatted_output;
+          case 'PdfGenerator':
+              const pdfResult = await this.skillManager.executeSkill('pdf_generator', userId, { title: step.params.title, content: step.params.content });
+              return pdfResult.formatted_output;
           case 'CodeAnalysis':
                const caResult = await this.skillManager.executeSkill('code_analysis', userId, { path: step.params.path || '.', operation: 'structure' });
                return `Project Structure:\n${caResult.structure}`;
@@ -317,14 +328,15 @@ Return a JSON plan:
       onProgress?: any
   ) {
     // Evolve Memory (Async)
-    this.memoryEvo.evolve(userId, message, reply).then(result => {
+    try {
+        const result = await this.memoryEvo.evolve(userId, message, reply, (msg) => log(msg));
         if (result && result.added && result.added.length > 0) {
-            log(`[Evolution] Extracted ${result.added.length} new memories.`);
+            // log(`[Evolution] Extracted ${result.added.length} new memories.`); // Redundant as memoryEvo logs it now
         }
-        this.memoryManager.consolidateMemories(userId).catch(e => logger.error('Consolidation failed', e));
-    }).catch(err => {
+        await this.memoryManager.consolidateMemories(userId).catch(e => logger.error('Consolidation failed', e));
+    } catch (err) {
       logger.error('Memory evolution failed:', err);
-    });
+    }
   }
 
   public async executeLegacyLogic(
@@ -338,6 +350,31 @@ Return a JSON plan:
     const lowerMsg = message.toLowerCase();
 
     // 1. Research Skills / Web Search
+    if (lowerMsg.includes('analyze paper') || lowerMsg.includes('summary of paper') || lowerMsg.includes('critique paper')) {
+        const title = message.replace(/\b(analyze paper|summary of paper|critique paper|about|on)\b/gi, '').trim();
+        if (title.length > 3) {
+            log(`[Agent] Analyzing paper: "${title}"`);
+            const result = await this.skillManager.executeSkill('paper_analysis', userId, { paper_title: title });
+            this.sessionManager.addMessage(session.id, 'assistant', result.formatted_output);
+            return result.formatted_output;
+        }
+    }
+
+    if (lowerMsg.startsWith('explain') || lowerMsg.includes('what is') || lowerMsg.includes('concept of')) {
+        // Simple heuristic: if it looks like a concept question
+        // But "what is your name" is conversational.
+        if (!lowerMsg.includes('your name') && !lowerMsg.includes('the time')) {
+             const concept = message.replace(/\b(explain|what is|concept of|tell me about)\b/gi, '').trim();
+             // Let's rely on LLM decision engine usually, but here we can force it if explicitly asked "explain X"
+             if (lowerMsg.startsWith('explain')) {
+                 log(`[Agent] Explaining concept: "${concept}"`);
+                 const result = await this.skillManager.executeSkill('concept_explainer', userId, { concept });
+                 this.sessionManager.addMessage(session.id, 'assistant', result.formatted_output);
+                 return result.formatted_output;
+             }
+        }
+    }
+
     if (lowerMsg.includes('literature review') || lowerMsg.includes('search papers') || message.includes('[WEB SEARCH REQUEST]')) {
       let topic = message.replace(/\b(do a|perform a|literature review|search papers|about|on)\b/gi, '').trim().replace(/\s+/g, ' ');
       
@@ -552,8 +589,10 @@ Instructions:
     // Save response to session
     this.sessionManager.addMessage(session.id, 'assistant', reply);
 
-    // Evolve Memory (Async)
-    this.memoryEvo.evolve(userId, message, reply).then(result => {
+    // Evolve Memory (Async - now awaited to ensure logs are streamed)
+    try {
+        const result = await this.memoryEvo.evolve(userId, message, reply, (msg) => log(msg));
+        
         if (result && result.added && result.added.length > 0) {
             log(`[Evolution] Extracted ${result.added.length} new memories.`);
             result.added.forEach((m: any) => {
@@ -567,21 +606,7 @@ Instructions:
             if (result.added.length > 0) {
                  const memoryContent = result.added[0].content;
                  const note = `(I've noted: "${memoryContent}")`;
-                 // We don't want to create a whole new bubble if possible, or maybe we do.
-                 // Let's add a separate message for now.
                  this.sessionManager.addMessage(session.id, 'assistant', note);
-                 // We also need to send this to the client if it's connected via stream, but `chat` method returns the *first* reply.
-                 // The client polls or listens to events. The `addMessage` saves it to DB.
-                 // If using SSE, we should push this event.
-                 // But `chat` function finishes and returns `reply`.
-                 
-                 // If we want to push this to the UI *after* the main reply, we need the SSE handler passed in `onProgress` to handle a "message" event?
-                 // Currently `onProgress` handles tokens and logs.
-                 
-                 // Let's just log it for now as requested by the specific instruction "log it out".
-                 // Wait, instruction says "create a chat, tell user".
-                 // Since `chat` returns a string, we can't easily append another message to the return value without confusing the caller.
-                 // But we can save it to history. The UI might pick it up on refresh or if it listens to "new message".
             }
         }
         if (result && result.updated && result.updated.length > 0) {
@@ -592,7 +617,7 @@ Instructions:
         }
 
         // Trigger memory consolidation immediately after new interaction
-        this.memoryManager.consolidateMemories(userId).then(() => {
+        await this.memoryManager.consolidateMemories(userId).then(() => {
              // logger.debug('Post-chat consolidation complete');
         }).catch(e => {
              logger.error('Post-chat consolidation failed', e);
@@ -600,16 +625,15 @@ Instructions:
 
         // After response and memory evolution, generate a title for the session if it's still generic
         if (session.messages.length <= 4 && (session.title || '').length > 20) { // Early in convo or long default title
-            this.generateSessionTitle(session, message, reply).then(title => {
-                if (title) {
-                    session.title = title;
-                    onProgress?.('token', `[TITLE_GENERATED]${title}`);
-                }
-            });
+            const title = await this.generateSessionTitle(session, message, reply);
+            if (title) {
+                session.title = title;
+                onProgress?.('token', `[TITLE_GENERATED]${title}`);
+            }
         }
-    }).catch(err => {
+    } catch (err) {
       logger.error('Memory evolution failed:', err);
-    });
+    }
 
     return reply;
   }
@@ -644,7 +668,7 @@ Title:`;
       
       log(`[Agent] Completed Literature Review`, { duration, tokens, operation: 'literature_review' });
       
-      const response = `Here is a literature review on "${topic}":\n\n${result.summary}\n\n**Sources:**\n${result.papers.map((p: any) => `- ${p.title} (${p.year})`).join('\n')}`;
+      const response = `Here is a literature review on "${topic}":\n\n${result.summary}\n\n**Sources:**\n${result.papers.map((p: any) => `- [${p.title}](${p.url || '#'}) (${p.year})`).join('\n')}`;
       
       // Perform Quality Check
       const quality = await this.qualityManager.evaluateTask(

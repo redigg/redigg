@@ -15,7 +15,10 @@ import { agentCardHandler, jsonRpcHandler, restHandler, UserBuilder } from '@a2a
 import { ResearchAgent } from '../agent/ResearchAgent.js';
 import { createLogger } from '../utils/logger.js';
 
+import { EventEmitter } from 'events';
+
 const logger = createLogger('Gateway');
+const sessionEvents = new EventEmitter(); // Bus for streaming events to SSE clients
 
 // Configure multer for file uploads
 const uploadDir = path.join(process.cwd(), 'data', 'uploads');
@@ -155,6 +158,7 @@ export class A2AGateway {
     
     // Simple Chat API for Web Dashboard
     this.app.use(express.json());
+    this.app.use('/files', express.static(path.join(process.cwd(), 'workspace/output')));
     
     // File Upload API
     this.app.post('/api/upload', upload.single('file'), (req, res) => {
@@ -291,7 +295,71 @@ export class A2AGateway {
         }
     });
 
-    // SSE Chat API
+    // Async Chat API
+    this.app.post('/api/chat/async', (req, res) => {
+        let { message, userId = 'web-user', sessionId, webSearch, attachments } = req.body;
+        
+        if (!message && (!attachments || attachments.length === 0)) {
+            res.status(400).json({ error: 'Message or attachments required' });
+            return;
+        }
+
+        // Process attachments context
+        if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+            message += `\n\n[ATTACHMENTS]\nThe user has uploaded the following files:\n${attachments.map((f: any) => `- ${f.name} (ID: ${f.id})`).join('\n')}\nYou can refer to these files in your response.`;
+        }
+
+        // Process web search context
+        if (webSearch) {
+            message = `[WEB SEARCH REQUEST] ${message}\nPlease perform a literature review or web search to answer this question.`;
+        }
+
+        logger.info(`Async Chat request: ${message} (Session: ${sessionId || 'auto'})`);
+
+        // Start agent in background
+        this.agent.chat(userId, message, (type, content) => {
+            // Logs are now persisted by agent itself to DB, so we don't need to do anything here
+            // BUT we want to broadcast via SSE/WebSocket for real-time updates.
+            if (sessionId) {
+                sessionEvents.emit(`session:${sessionId}`, { type, content });
+            }
+        }, sessionId).catch(err => {
+            logger.error('Async chat error:', err);
+            if (sessionId) {
+                sessionEvents.emit(`session:${sessionId}`, { type: 'error', content: String(err) });
+            }
+        }).finally(() => {
+            if (sessionId) {
+                sessionEvents.emit(`session:${sessionId}`, { type: 'done' });
+            }
+        });
+
+        res.status(202).json({ status: 'accepted', message: 'Processing started' });
+    });
+
+    // Real-time Event Stream for a Session
+    this.app.get('/api/sessions/:sessionId/events', (req, res) => {
+        const { sessionId } = req.params;
+        
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        const handler = (data: any) => {
+            res.write(`data: ${JSON.stringify(data)}\n\n`);
+        };
+
+        sessionEvents.on(`session:${sessionId}`, handler);
+
+        // Send initial ping
+        res.write(`data: ${JSON.stringify({ type: 'ping' })}\n\n`);
+
+        req.on('close', () => {
+            sessionEvents.off(`session:${sessionId}`, handler);
+        });
+    });
+
+    // SSE Chat API (Deprecated for direct use, but kept for compatibility or real-time if needed)
     this.app.get('/api/chat/stream', async (req, res) => {
         let message = req.query.message as string;
         const userId = (req.query.userId as string) || 'web-user';

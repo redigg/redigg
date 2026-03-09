@@ -1,4 +1,4 @@
-import { Bot, User, Sparkles, Copy, RefreshCw, Paperclip } from "lucide-react";
+import { Bot, User, Sparkles, Copy, RefreshCw, Paperclip, FileText, Code, Search, Circle, Brain } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -23,6 +23,20 @@ interface ChatMessageProps {
   onCopy?: (content: string) => void;
   onRegenerate?: () => void;
 }
+
+// Helper to parse log content and return structured activity
+const parseActivity = (log: string) => {
+    // Simple heuristics based on log content from ResearchAgent
+    if (log.includes('[Evolution]')) return { icon: Brain, label: 'Memory Evolution', color: 'text-purple-500', bg: 'bg-purple-50', border: 'border-purple-100' };
+    if (log.includes('Searching for paper') || log.includes('Literature Review')) return { icon: Search, label: 'Researching', color: 'text-blue-500', bg: 'bg-blue-50', border: 'border-blue-100' };
+    if (log.includes('Analyzing paper') || log.includes('Reading content')) return { icon: FileText, label: 'Reading Paper', color: 'text-amber-500', bg: 'bg-amber-50', border: 'border-amber-100' };
+    if (log.includes('Analyzing codebase') || log.includes('Listing files')) return { icon: Code, label: 'Analyzing Code', color: 'text-cyan-500', bg: 'bg-cyan-50', border: 'border-cyan-100' };
+    if (log.includes('Generating PDF')) return { icon: FileText, label: 'Generating PDF', color: 'text-red-500', bg: 'bg-red-50', border: 'border-red-100' };
+    if (log.includes('Plan created')) return { icon: Sparkles, label: 'Planning', color: 'text-indigo-500', bg: 'bg-indigo-50', border: 'border-indigo-100' };
+    
+    // Default
+    return { icon: Circle, label: 'Processing', color: 'text-zinc-400', bg: 'bg-zinc-50', border: 'border-zinc-100' };
+};
 
 export function ChatMessage({ role, content, isThinking, logs, stats, attachments, onCopy, onRegenerate }: ChatMessageProps) {
     // State for copy feedback
@@ -93,7 +107,7 @@ export function ChatMessage({ role, content, isThinking, logs, stats, attachment
                         </button>
                         
                         {(isExpanded || isThinking) && (
-                            <div className="mt-2 text-xs text-zinc-500 font-mono max-h-60 overflow-y-auto space-y-1">
+                            <div className="mt-3 space-y-2">
                                 {logs.map((log, i) => {
                                     // Parse stats if available
                                     let displayLog = log;
@@ -105,30 +119,37 @@ export function ChatMessage({ role, content, isThinking, logs, stats, attachment
                                             logStats = JSON.parse(parts[1]);
                                         } catch (e) {}
                                     }
+                                    
+                                    const activity = parseActivity(displayLog);
+                                    const ActivityIcon = activity.icon;
 
                                     return (
-                                        <div key={i} className="flex flex-col gap-1 mb-1.5 last:mb-0">
-                                            <div className="flex gap-2 items-start">
-                                                <span className="text-zinc-300 select-none mt-0.5">›</span>
-                                                <span>{displayLog}</span>
+                                        <div key={i} className="group flex items-start gap-3 text-xs relative pl-2 pb-2 last:pb-0">
+                                            {/* Connector Line */}
+                                            {i !== logs.length - 1 && (
+                                                <div className="absolute left-[15px] top-6 bottom-0 w-px bg-zinc-100 group-last:hidden"></div>
+                                            )}
+                                            
+                                            <div className={cn(
+                                                "shrink-0 h-6 w-6 rounded-full flex items-center justify-center border shadow-sm z-10",
+                                                activity.bg, activity.border
+                                            )}>
+                                                <ActivityIcon className={cn("h-3 w-3", activity.color)} />
                                             </div>
-                                            {logStats && (
-                                                <div className="pl-5 flex items-center gap-2 text-[10px] text-zinc-400">
-                                                    <span className="bg-zinc-100 px-1.5 py-0.5 rounded border border-zinc-200">
-                                                        {(logStats.duration / 1000).toFixed(2)}s
-                                                    </span>
-                                                    {logStats.tokens > 0 && (
-                                                        <span className="bg-zinc-100 px-1.5 py-0.5 rounded border border-zinc-200">
-                                                            {logStats.tokens} tokens
-                                                        </span>
-                                                    )}
-                                                    {logStats.operation && (
-                                                        <span className="uppercase tracking-wider font-semibold text-zinc-300 bg-zinc-50 border border-zinc-100 px-1 rounded">
-                                                            {logStats.operation}
+                                            
+                                            <div className="flex-1 pt-0.5 min-w-0">
+                                                <div className="flex items-baseline justify-between gap-2">
+                                                    <span className="font-medium text-zinc-700">{activity.label}</span>
+                                                    {logStats && (
+                                                        <span className="text-[10px] text-zinc-400 font-mono">
+                                                            {(logStats.duration / 1000).toFixed(2)}s
                                                         </span>
                                                     )}
                                                 </div>
-                                            )}
+                                                <div className="text-zinc-500 mt-0.5 leading-relaxed break-words">
+                                                    {displayLog.replace(/\[.*?\]/g, '').trim()}
+                                                </div>
+                                            </div>
                                         </div>
                                     );
                                 })}
@@ -143,7 +164,7 @@ export function ChatMessage({ role, content, isThinking, logs, stats, attachment
                         remarkPlugins={[remarkGfm, remarkBreaks, remarkMath]}
                         rehypePlugins={[rehypeKatex]}
                         components={{
-                            pre: ({node, className, children}: any) => {
+                            pre: ({children}: any) => {
                                 // The children of 'pre' is usually a 'code' element in standard markdown
                                 const codeElement = children as any;
                                 const codeProps = codeElement?.props || {};
@@ -163,7 +184,7 @@ export function ChatMessage({ role, content, isThinking, logs, stats, attachment
                                     </div>
                                 )
                             },
-                            code: ({node, className, children, ...props}: any) => {
+                            code: ({className, children, ...props}: any) => {
                                 // If this code element is inside a pre, we don't want to render it again
                                 // because the 'pre' handler above already took care of the content.
                                 // ReactMarkdown renders <pre><code>...</code></pre>

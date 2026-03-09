@@ -1,5 +1,5 @@
-import { MemoryManager } from '../../MemoryManager.js';
-import { LLMClient } from '../../../llm/LLMClient.js';
+import { MemoryManager } from '../MemoryManager.js';
+import { LLMClient } from '../../llm/LLMClient.js';
 
 export interface ExtractedMemory {
   type: 'preference' | 'fact' | 'context' | 'paper';
@@ -17,8 +17,21 @@ export class MemoryEvolutionSystem {
   }
 
   // Analyze interaction and extract new memories
-  public async evolve(userId: string, userQuery: string, agentResponse: string): Promise<{ added: any[], updated: any[] }> {
-    console.log(`[MemoryEvolution] Analyzing interaction for user ${userId}...`);
+  public async evolve(
+    userId: string, 
+    userQuery: string, 
+    agentResponse: string,
+    onProgress?: (message: string) => void
+  ): Promise<{ added: any[], updated: any[] }> {
+    const log = (msg: string) => {
+      if (onProgress) {
+        onProgress(msg);
+      } else {
+        console.log(msg);
+      }
+    };
+
+    log(`[Evolution] Analyzing interaction for user ${userId}...`);
 
     const prompt = `
       Analyze the following interaction between a User and an AI Assistant.
@@ -26,7 +39,9 @@ export class MemoryEvolutionSystem {
       1. User's preferences, research interests, or factual constraints (type: preference/fact/context).
       2. Specific research papers or materials mentioned (type: paper).
 
-      For 'paper' type, please include a 'metadata' object with: title, authors (array), url (optional), summary (optional).
+      For 'paper' type:
+      - Extract the Title, Authors, and URL (if present in markdown link or text).
+      - Metadata object: { title, authors (array), url (string), summary (string) }.
 
       Output ONLY a JSON object with a "memories" array. Each item should have "type", "content", and optional "metadata".
 
@@ -44,13 +59,13 @@ export class MemoryEvolutionSystem {
       const added = [];
       
       if (extracted && extracted.length > 0) {
-        console.log(`[MemoryEvolution] Extracted ${extracted.length} new memories.`);
+        log(`[Evolution] Extracted ${extracted.length} new memories.`);
         for (const mem of extracted) {
           await this.memoryManager.addMemory(userId, mem.type, mem.content, mem.metadata);
           added.push(mem);
         }
       } else {
-        console.log('[MemoryEvolution] No new memories extracted.');
+        log('[Evolution] No new memories extracted.');
       }
 
       return { added, updated: [] };

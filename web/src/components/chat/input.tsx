@@ -1,7 +1,7 @@
-import { Send, Paperclip, Mic, X } from "lucide-react";
+import { Send, Paperclip, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 interface ChatInputProps {

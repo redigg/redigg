@@ -30,7 +30,9 @@ class OpenAIClient implements LLMClient {
       model: this.model,
       messages: [{ role: 'user', content: prompt }],
     });
-    return { content: response.choices[0].message.content || '' };
+    const content = response.choices[0].message.content || '';
+    console.log('[LLM Complete Output]:', content);
+    return { content };
   }
 
   async chat(messages: { role: string; content: string }[]): Promise<LLMResponse> {
@@ -38,7 +40,9 @@ class OpenAIClient implements LLMClient {
       model: this.model,
       messages: messages as any,
     });
-    return { content: response.choices[0].message.content || '' };
+    const content = response.choices[0].message.content || '';
+    console.log('[LLM Chat Output]:', content);
+    return { content };
   }
 
   async chatStream(messages: { role: string; content: string }[], handler: LLMStreamHandler): Promise<void> {
@@ -53,10 +57,12 @@ class OpenAIClient implements LLMClient {
       for await (const chunk of stream) {
         const content = chunk.choices[0]?.delta?.content || '';
         if (content) {
+          process.stdout.write(content); // Stream to console for debugging
           fullText += content;
           handler.onToken?.(content);
         }
       }
+      process.stdout.write('\n'); // End of stream newline
       handler.onComplete?.(fullText);
     } catch (error) {
       handler.onError?.(error);

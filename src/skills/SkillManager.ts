@@ -4,6 +4,7 @@ import { MemoryManager } from '../memory/MemoryManager.js';
 import { createLogger } from '../utils/logger.js';
 import path from 'path';
 import fs from 'fs/promises';
+import PdfGeneratorSkill from '../../skills/research/pdf-generator/index.js';
 
 const logger = createLogger('SkillManager');
 
@@ -25,6 +26,7 @@ export class SkillManager {
     this.memoryManager = memoryManager;
     this.workspace = workspace;
     this.skillsDir = path.join(workspace, 'skills');
+    this.registerSkill(new PdfGeneratorSkill());
   }
 
   public setManagers(managers: SkillContext['managers']) {

@@ -193,6 +193,7 @@ export class ResearchAgent {
             let retryCount = 0;
             const maxRetries = 2;
             let success = false;
+            const stepStartTime = Date.now();
 
             while (retryCount <= maxRetries && !success) {
                 try {
@@ -204,6 +205,11 @@ export class ResearchAgent {
                     
                     const result = await this.executeStep(step, userId, session, log);
                     
+                    const duration = Date.now() - stepStartTime;
+                    // Estimate tokens based on result length if string
+                    const tokens = typeof result === 'string' ? Math.ceil(result.length / 4) : 0;
+                    log(`[${step.tool}] Step completed`, { duration, tokens });
+
                     step.status = 'completed';
                     step.result = result;
                     success = true;
@@ -214,14 +220,15 @@ export class ResearchAgent {
                 } catch (e) {
                     retryCount++;
                     const errorMsg = String(e);
+                    const duration = Date.now() - stepStartTime;
                     logger.error(`Step failed (Attempt ${retryCount}): ${step.description}`, e);
                     
                     if (retryCount > maxRetries) {
                         step.status = 'failed';
                         step.error = errorMsg;
-                        log(`[Error] Step failed permanently: ${step.description}`);
+                        log(`[Error] Step failed permanently: ${step.description}`, { duration });
                     } else {
-                        log(`[Warning] Step failed, retrying... (${errorMsg})`);
+                        log(`[Warning] Step failed, retrying... (${errorMsg})`, { duration });
                         // Wait a bit before retry
                         await new Promise(resolve => setTimeout(resolve, 1000));
                     }
@@ -278,10 +285,10 @@ User Request: "${message}"
 Available Tools:
 - LiteratureReview(topic): Search for papers/web.
 - PaperAnalysis(title): Analyze a specific paper in depth.
-248→- ConceptExplainer(concept): Explain a scientific concept.
-249→- PdfGenerator(title, content): Generate a PDF report.
-250→- CodeAnalysis(path): Analyze project structure/code.
-251→- MemorySearch(query): Search past memories.
+- ConceptExplainer(concept): Explain a scientific concept.
+- PdfGenerator(title, content): Generate a PDF report.
+- CodeAnalysis(path): Analyze project structure/code.
+- MemorySearch(query): Search past memories.
 - FileOps(operation): Organize files.
 - AgentOrchestration(operation): Create/manage sub-agents.
 - Evolution(intent): Create new skills.
@@ -291,7 +298,12 @@ Return a JSON plan:
 {
   "intent": "single" | "multi_step",
   "steps": [
-    { "id": "1", "description": "...", "tool": "ToolName", "params": { ... } }
+    { 
+      "id": "1", 
+      "description": "Concise action description (e.g., 'Searching arXiv for AI Agents')", 
+      "tool": "ToolName", 
+      "params": { ... } 
+    }
   ]
 }
 `;

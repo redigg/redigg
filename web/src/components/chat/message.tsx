@@ -27,7 +27,16 @@ interface ChatMessageProps {
 // Helper to parse log content and return structured activity
 const parseActivity = (log: string) => {
     // Standardized log prefixes from ResearchAgent
-    if (log.includes('[Evolution]')) return { icon: Brain, label: 'Evolution', color: 'text-purple-500', bg: 'bg-purple-50', border: 'border-purple-100' };
+    // Hide evolution logs if they are just raw memory content to avoid clutter
+    // Actually, we want to hide logs that are just "Evolution: New Memory: ..." to avoid spam, 
+    // but show "Extracted X new memories"
+    if (log.includes('[Evolution]')) {
+        if (log.includes('New Memory:') || log.includes('Updated Memory:')) {
+            return { icon: Brain, label: 'Evolution', color: 'text-purple-500', bg: 'bg-purple-50', border: 'border-purple-100', hidden: true };
+        }
+        return { icon: Brain, label: 'Evolution', color: 'text-purple-500', bg: 'bg-purple-50', border: 'border-purple-100' };
+    }
+    
     if (log.includes('[Search]') || log.includes('LiteratureReview')) return { icon: Search, label: 'Researching', color: 'text-blue-500', bg: 'bg-blue-50', border: 'border-blue-100' };
     if (log.includes('[PaperAnalysis]') || log.includes('Reading content')) return { icon: FileText, label: 'Reading Paper', color: 'text-amber-500', bg: 'bg-amber-50', border: 'border-amber-100' };
     if (log.includes('[CodeAnalysis]') || log.includes('Analyzing codebase')) return { icon: Code, label: 'Analyzing Code', color: 'text-cyan-500', bg: 'bg-cyan-50', border: 'border-cyan-100' };
@@ -123,6 +132,7 @@ export function ChatMessage({ role, content, isThinking, logs, stats, attachment
                                     }
                                     
                                     const activity = parseActivity(displayLog);
+                                    if (activity.hidden) return null;
                                     const ActivityIcon = activity.icon;
 
                                     return (

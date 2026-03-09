@@ -520,7 +520,7 @@ function App() {
           throw new Error(`Server returned ${res.status}`);
       }
 
-      setIsConnecting(false); // We are done "connecting" to the POST. Now just polling/listening.
+      setIsConnecting(true); // Keep connecting true during SSE stream
       
       // Start listening to SSE events for this session
       const eventSource = new EventSource(`/api/sessions/${currentSessionId!}/events`);
@@ -561,6 +561,8 @@ function App() {
           ));
         } else if (data.type === 'done') {
           eventSource.close();
+          setIsConnecting(false); // Explicitly set connecting to false when done
+          
           // Refresh sessions to get updated title/timestamp
           fetch(`/api/sessions?userId=web-user`)
             .then(res => res.json())
@@ -568,6 +570,7 @@ function App() {
         } else if (data.type === 'error') {
           console.error('SSE Error:', data.content);
           eventSource.close();
+          setIsConnecting(false);
         } else if (data.type === 'ping') {
             // Keep alive
         }

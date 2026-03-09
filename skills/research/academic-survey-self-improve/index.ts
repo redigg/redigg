@@ -10,20 +10,32 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
   async execute(context: SkillContext, params: SkillParams): Promise<SkillResult> {
     const { topic, depth = 'brief' } = params;
     context.log('thinking', `Starting academic survey on: ${topic}`);
+    if (context.updateProgress) {
+        await context.updateProgress(10, 'Initializing search', { topic });
+    }
 
     const scholar = new ScholarTool();
     let papers = await scholar.searchPapers(topic, 5);
 
     if (papers.length === 0) {
       context.log('thinking', 'No papers found. Attempting to broaden search...');
+      if (context.updateProgress) {
+          await context.updateProgress(30, 'No results found, refining query...', { originalTopic: topic });
+      }
       const betterQuery = await this.refineQuery(context, topic);
       if (betterQuery !== topic) {
           context.log('thinking', `Refined query to: ${betterQuery}`);
+          if (context.updateProgress) {
+              await context.updateProgress(40, `Searching with refined query: ${betterQuery}`);
+          }
           papers = await scholar.searchPapers(betterQuery, 5);
       }
     }
 
     if (papers.length === 0) {
+      if (context.updateProgress) {
+          await context.updateProgress(100, 'Survey failed: No papers found');
+      }
       return { 
         success: false, 
         message: 'No papers found even after refinement.',
@@ -32,9 +44,16 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
     }
 
     context.log('thinking', `Found ${papers.length} papers. Analyzing...`);
+    if (context.updateProgress) {
+        await context.updateProgress(60, `Analyzing ${papers.length} papers`, { papers });
+    }
 
     // Summarize
     const summary = await this.summarizePapers(context, topic, papers);
+    
+    if (context.updateProgress) {
+        await context.updateProgress(100, 'Survey complete');
+    }
 
     return {
       success: true,

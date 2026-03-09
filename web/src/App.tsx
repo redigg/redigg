@@ -34,6 +34,7 @@ interface ChatMessage {
   role: 'user' | 'agent';
   content: string;
   logs?: string[];
+  todos?: any[];
   attachments?: any[];
   timestamp: Date;
   stats?: {
@@ -93,6 +94,30 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'session' | 'memory', id: string } | null>(null);
+  
+  // Auto Mode State
+  const [autoModeMap, setAutoModeMap] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('sessionAutoModeMap') || '{}');
+    } catch {
+      return {};
+    }
+  });
+  const [pendingAutoMode, setPendingAutoMode] = useState(false);
+
+  const handleAutoModeChange = (checked: boolean) => {
+    if (currentSessionId) {
+        setAutoModeMap(prev => {
+            const next = { ...prev, [currentSessionId]: checked };
+            localStorage.setItem('sessionAutoModeMap', JSON.stringify(next));
+            return next;
+        });
+    } else {
+        setPendingAutoMode(checked);
+    }
+  };
+
+  const currentAutoMode = currentSessionId ? (autoModeMap[currentSessionId] || false) : pendingAutoMode;
   
   // Notification State
   const [unseenMemoriesCount, setUnseenMemoriesCount] = useState(0);
@@ -309,7 +334,17 @@ function App() {
           // Reconstruct messages, merging logs into the *preceding* agent message or creating a placeholder
           const reconstructedMessages: ChatMessage[] = [];
           
+          let isAutoActive = false;
+
           for (const msg of history) {
+              // Check for auto research log to determine active state
+              if (msg.role === 'log' && msg.content.includes('[AutoResearch]')) {
+                  // If we see recent auto research logs, we can infer it *might* be active
+                  // But history is past. We need to know if it is CURRENTLY active.
+                  // The best way is to check the last message. If it's a log from AutoResearch
+                  // and no final completion, it's active.
+              }
+
               if (msg.role === 'log') {
                   // Find the last agent message to attach logs to
                   // Or if no agent message, create a pending one?
@@ -358,7 +393,8 @@ function App() {
                               role: 'agent',
                               content: msg.content,
                               timestamp: new Date(msg.timestamp),
-                              logs: []
+                              logs: [],
+                              attachments: msg.metadata?.attachments
                           });
                        }
                   } else {
@@ -367,16 +403,134 @@ function App() {
                           role: msg.role === 'assistant' ? 'agent' : msg.role,
                           content: msg.content,
                           timestamp: new Date(msg.timestamp),
-                          logs: []
+                          logs: [],
+                          attachments: msg.metadata?.attachments
                       });
                   }
               }
           }
           
           setMessages(reconstructedMessages);
+
+          // Check if the last message indicates an ongoing auto-research process
+          // Heuristic: Last message is an agent message with logs containing [AutoResearch] 
+          // AND the content does NOT say "Auto-research completed".
+          const lastMsg = reconstructedMessages[reconstructedMessages.length - 1];
+          if (lastMsg && lastMsg.role === 'agent') {
+              const lastLog = lastMsg.logs?.[lastMsg.logs.length - 1] || '';
+              const isAutoLog = lastMsg.logs?.some(l => l.includes('[AutoResearch]'));
+              const isCompleted = lastMsg.content.includes('Auto-research completed');
+              
+              if (isAutoLog && !isCompleted && !lastMsg.content) {
+                  // It's likely still running or was interrupted.
+                  // Since we don't have persistent backend state for "running",
+                  // we can't be 100% sure if the backend process is *still* alive just from DB history.
+                  // BUT, if we are loading this session, we can assume the user wants to resume monitoring.
+                  // If the backend process died, the SSE connection won't send updates, but the UI state is "connected".
+                  
+                  // However, `loadSession` is just fetching data. It doesn't reconnect SSE.
+                  // We need to explicitly reconnect SSE if we think it's active.
+                  
+                  // If the session was created recently (e.g. < 5 mins ago) and incomplete, reconnect.
+                  const lastUpdate = new Date(lastMsg.timestamp).getTime();
+                  const now = Date.now();
+                  if (now - lastUpdate < 5 * 60 * 1000) {
+                      // Auto-reconnect
+                      connectToSession(sessionId);
+                  }
+              }
+          }
       } catch (err) {
           console.error('Failed to load session history:', err);
       }
+  };
+
+  const connectToSession = (sessionId: string) => {
+      if (abortControllerRef.current) {
+          abortControllerRef.current.abort(); // Close existing
+      }
+      
+      setIsConnecting(true);
+      
+      const eventSource = new EventSource(`/api/sessions/${sessionId}/events`);
+      
+      abortControllerRef.current = {
+          abort: () => {
+              eventSource.close();
+          }
+      } as any;
+
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        // ... (reuse the logic from handleSend? Refactor needed)
+        // For now, let's copy the logic or extract it.
+        handleSSEMessage(data, sessionId);
+      };
+      
+      eventSource.onerror = (err) => {
+          console.error('Reconnection EventSource failed:', err);
+          eventSource.close();
+          setIsConnecting(false);
+      };
+  };
+
+  const handleSSEMessage = (data: any, sessionId: string) => {
+        // Find the last agent message (placeholder or real)
+        // If we reconnected, we might not have the exact "agentMsgId" in closure.
+        // We need to find the *latest* agent message in state.
+        
+        if (data.type === 'token') {
+          const content = data.content;
+          if (content && content.startsWith('[TITLE_GENERATED]')) {
+             // ...
+          } else {
+            setMessages(prev => {
+                const lastIdx = prev.length - 1;
+                const lastMsg = prev[lastIdx];
+                if (lastMsg && lastMsg.role === 'agent') {
+                    const newMsg = { ...lastMsg, content: lastMsg.content + content };
+                    return [...prev.slice(0, lastIdx), newMsg];
+                }
+                return prev;
+            });
+          }
+        } else if (data.type === 'log') {
+             // ...
+             setMessages(prev => {
+                const lastIdx = prev.length - 1;
+                const lastMsg = prev[lastIdx];
+                if (lastMsg && lastMsg.role === 'agent') {
+                    let content = data.content;
+                    let stats = undefined;
+                    if (content && typeof content === 'string' && content.includes('__STATS__')) {
+                        const parts = content.split('__STATS__');
+                        content = parts[0];
+                        try { stats = JSON.parse(parts[1]); } catch (e) {}
+                    }
+                    const newMsg = { ...lastMsg, logs: [...(lastMsg.logs || []), content], stats: stats || lastMsg.stats };
+                    return [...prev.slice(0, lastIdx), newMsg];
+                }
+                return prev;
+            });
+        }
+        // ... (implement other types similarly for reconnection context)
+        // For simplicity in this iteration, we just rely on `loadSession` polling for history updates 
+        // if we are not "actively" generating new tokens but just waiting for logs.
+        // But logs come via SSE.
+        
+        // Actually, the `handleSend` SSE logic is complex because it updates specific IDs.
+        // When reconnecting, we don't have those IDs.
+        // A better approach for "Resume" is:
+        // 1. Load history (which gets logs).
+        // 2. Poll history periodically (which gets new logs from DB).
+        // 3. Only use SSE for *real-time* tokens if we are actively generating text.
+        // The AutoResearch mode mostly generates *Logs* and *Files*, then a final text.
+        // So polling `loadSession` might be enough for the "monitoring" phase!
+        
+        // Let's stick to the polling mechanism we already added:
+        // useEffect(() => { ... loadSession ... }, 3000);
+        // This naturally handles "reopening" the page.
+        // We just need to make sure the "Stop" button appears if it looks active.
   };
 
   const createNewSession = async () => {
@@ -438,7 +592,23 @@ function App() {
     navigator.clipboard.writeText(content);
   };
 
-  const handleSend = async (text: string = input, attachments: any[] = [], webSearch: boolean = false) => {
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const handleStop = () => {
+      if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+          abortControllerRef.current = null;
+      }
+      setIsConnecting(false);
+      
+      // Also notify backend to stop
+      if (currentSessionId) {
+          fetch(`/api/sessions/${currentSessionId}/stop`, { method: 'POST' })
+            .catch(err => console.error('Failed to stop session:', err));
+      }
+  };
+
+  const handleSend = async (text: string = input, attachments: any[] = [], webSearch: boolean = false, autoMode: boolean = false) => {
     if (!text.trim() && attachments.length === 0) return;
 
     // Check if we are regenerating (text is passed but not from input)
@@ -512,7 +682,8 @@ function App() {
               userId: 'web-user',
               sessionId: currentSessionId,
               webSearch,
-              attachments
+              attachments,
+              autoMode
           })
       });
 
@@ -524,6 +695,25 @@ function App() {
       
       // Start listening to SSE events for this session
       const eventSource = new EventSource(`/api/sessions/${currentSessionId!}/events`);
+      
+      // Store controller for stopping. 
+      // Note: EventSource doesn't use AbortController directly, but we can wrap it.
+      // Or we just store the EventSource instance to close it.
+      // But we also need to tell the backend to stop processing?
+      // For now, let's just close the connection on the frontend.
+      // The backend might continue running, but the UI stops.
+      // Ideally, we send a cancellation request.
+      
+      // We can use AbortController to wrap the whole "session" concept in our mind, 
+      // but practically we just need to close the EventSource.
+      // Let's repurpose the ref to hold the stop function.
+      abortControllerRef.current = {
+          abort: () => {
+              eventSource.close();
+              // Optional: Send cancellation to backend
+              // fetch(`/api/sessions/${currentSessionId}/cancel`, { method: 'POST' });
+          }
+      } as any;
 
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -559,6 +749,33 @@ function App() {
               ? { ...msg, logs: [...(msg.logs || []), content], stats: stats || msg.stats }
               : msg
           ));
+        } else if (data.type === 'plan') {
+          // data.content is { steps: [] }
+          const plan = data.content;
+          setMessages(prev => prev.map(msg => 
+            msg.id === agentMsgId 
+              ? { ...msg, todos: plan.steps }
+              : msg
+          ));
+        } else if (data.type === 'todo') {
+            // Update or add a single todo item
+            const todoItem = data.content;
+            setMessages(prev => prev.map(msg => {
+                if (msg.id === agentMsgId) {
+                    const existingTodos = msg.todos || [];
+                    const index = existingTodos.findIndex((t: any) => t.id === todoItem.id);
+                    if (index >= 0) {
+                        // Update existing
+                        const newTodos = [...existingTodos];
+                        newTodos[index] = { ...newTodos[index], ...todoItem };
+                        return { ...msg, todos: newTodos };
+                    } else {
+                        // Add new
+                        return { ...msg, todos: [...existingTodos, todoItem] };
+                    }
+                }
+                return msg;
+            }));
         } else if (data.type === 'done') {
           eventSource.close();
           setIsConnecting(false); // Explicitly set connecting to false when done
@@ -1092,6 +1309,7 @@ function App() {
                     content={msg.content}
                     isThinking={msg.role === 'agent' && !msg.content && index === messages.length - 1}
                     logs={msg.logs}
+                    todos={msg.todos}
                     stats={msg.stats}
                     attachments={msg.attachments}
                     onCopy={() => handleCopy(msg.content)}
@@ -1129,10 +1347,13 @@ function App() {
             <div className="max-w-3xl mx-auto w-full">
                 <ChatInput 
                     onSubmit={handleSend} 
+                    onStop={handleStop}
                     isLoading={isConnecting} 
                     placeholder="Ask a question about your research..." 
                     value={input}
                     onChange={setInput}
+                    autoMode={currentAutoMode}
+                    onAutoModeChange={handleAutoModeChange}
                 />
                 <div className="flex justify-center mt-3">
                     <Context 

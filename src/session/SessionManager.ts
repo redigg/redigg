@@ -16,6 +16,7 @@ export interface Session {
   messages: Message[];
   created_at: Date;
   updated_at: Date;
+  status: 'active' | 'stopped';
   metadata?: any;
 }
 
@@ -37,13 +38,16 @@ export class SessionManager {
       for (const row of rows) {
         const messages = db.prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(row.id) as any[];
         
+        const meta = row.metadata ? JSON.parse(row.metadata) : {};
+
         const session: Session = {
           id: row.id,
           userId: row.user_id,
           title: row.title,
           created_at: new Date(row.created_at),
           updated_at: new Date(row.updated_at),
-          metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+          status: meta.status || row.status || 'active',
+          metadata: meta,
           messages: messages.map(m => ({
             id: m.id,
             role: m.role,
@@ -64,31 +68,59 @@ export class SessionManager {
     const session: Session = {
       id: uuidv4(),
       userId,
-      title,
+      title: title || 'New Chat',
       messages: [],
       created_at: new Date(),
       updated_at: new Date(),
+      status: 'active',
     };
     
     // Save to DB
     try {
       const db = this.storage.getDb();
+      // Ensure status column exists or add migration (assuming it might not exist yet, but for now let's just use metadata or assume column added)
+      // Since I can't easily migrate DB schema here without more context, I'll store status in metadata for persistence if column doesn't exist
+      // But user asked to persist it. Let's try to add it to SQL.
+      // If SQL fails, we catch error.
+      
+      // Actually, let's just use metadata for 'status' to avoid schema migration issues for now if possible?
+      // No, let's try to use a proper field if I could, but `metadata` is safer for now.
+      // Wait, `Session` interface has `status`.
+      // Let's modify `loadSessions` to read from metadata if column missing?
+      // Or just assume I can add column?
+      // Given I am an agent, I should probably stick to `metadata` for `status` if I can't guarantee schema change.
+      // BUT, I already modified the interface.
+      
+      // Let's check if I can modify the table.
+      // The `SQLiteStorage` likely initializes the table.
+      // I don't see `SQLiteStorage` code.
+      
+      // Let's assume I can store it in metadata for persistence, but keep it as a first-class property in memory.
+      // Or I can add a quick migration in `createSession` or `constructor`.
+      
+      // Let's just update the INSERT to include status if the column exists, or fallback.
+      // Actually, safest bet is to store it in `metadata` in DB, but expose as `status` in object.
+      
+      // Reverting the SQL change idea. Let's store in metadata for DB persistence.
+      const metadata = { status: 'active' };
+      
       db.prepare(`
-        INSERT INTO sessions (id, user_id, title, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO sessions (id, user_id, title, created_at, updated_at, metadata)
+        VALUES (?, ?, ?, ?, ?, ?)
       `).run(
         session.id, 
         session.userId, 
         session.title, 
         session.created_at.toISOString(), 
-        session.updated_at.toISOString()
+        session.updated_at.toISOString(),
+        JSON.stringify(metadata)
       );
+      this.sessions.set(session.id, session);
+      this.activeSessions.set(userId, session.id);
     } catch (e) {
       console.error('Failed to persist session:', e);
     }
 
-    this.sessions.set(session.id, session);
-    this.activeSessions.set(userId, session.id);
     return session;
   }
 
@@ -154,7 +186,7 @@ export class SessionManager {
       `);
 
       const runTransaction = db.transaction(() => {
-        insertMsg.run(
+        const result = insertMsg.run(
             message.id,
             sessionId,
             message.role,
@@ -228,5 +260,45 @@ export class SessionManager {
     } catch (e) {
         console.error('Failed to delete session from DB:', e);
     }
+  }
+
+  public stopSession(sessionId: string) {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.status = 'stopped';
+      session.updated_at = new Date();
+      
+      // Update DB
+      try {
+          const db = this.storage.getDb();
+          const metadata = { ...session.metadata, status: 'stopped' };
+          session.metadata = metadata;
+          
+          db.prepare('UPDATE sessions SET updated_at = ?, metadata = ? WHERE id = ?')
+            .run(session.updated_at.toISOString(), JSON.stringify(metadata), sessionId);
+      } catch (e) {
+          console.error('Failed to stop session:', e);
+      }
+    }
+  }
+
+  public isSessionStopped(sessionId: string): boolean {
+      const session = this.sessions.get(sessionId);
+      return session ? session.status === 'stopped' : false;
+  }
+
+  public activateSession(sessionId: string) {
+      const session = this.sessions.get(sessionId);
+      if (session) {
+          session.status = 'active';
+          // Persist if needed
+          try {
+              const db = this.storage.getDb();
+              const metadata = { ...session.metadata, status: 'active' };
+              session.metadata = metadata;
+              db.prepare('UPDATE sessions SET metadata = ? WHERE id = ?')
+                .run(JSON.stringify(metadata), sessionId);
+          } catch(e) {}
+      }
   }
 }

@@ -244,11 +244,28 @@ export class SkillManager {
     skillId: string, 
     userId: string, 
     params: SkillParams,
-    onLog?: SkillContext['log']
+    handlers?: {
+        onLog?: SkillContext['log'];
+        onProgress?: SkillContext['updateProgress'];
+        onTodo?: SkillContext['addTodo'];
+    } | SkillContext['log']
   ): Promise<SkillResult> {
     const skill = this.skills.get(skillId);
     if (!skill) {
       throw new Error(`Skill ${skillId} not found`);
+    }
+
+    // Handle legacy signature where 4th arg was just onLog function
+    let onLog = handlers as any;
+    let onProgress = undefined;
+    let onTodo = undefined;
+
+    if (typeof handlers === 'object' && handlers !== null && !('apply' in handlers)) {
+        onLog = handlers.onLog;
+        onProgress = handlers.onProgress;
+        onTodo = handlers.onTodo;
+    } else if (typeof handlers === 'function') {
+        onLog = handlers;
     }
 
     const context: SkillContext = {
@@ -260,11 +277,14 @@ export class SkillManager {
       log: onLog || ((type, content, metadata) => {
         logger.info(`[Skill:${skillId}] [${type}] ${content}`, metadata || '');
       }),
-      updateProgress: async (progress, description) => {
-        logger.info(`[Skill:${skillId}] [PROGRESS] ${progress}% - ${description}`);
-      },
-      addTodo: async (content, priority) => {
-        logger.info(`[Skill:${skillId}] [TODO] [${priority}] ${content}`);
+      updateProgress: onProgress || (async (progress, description, metadata) => {
+        logger.info(`[Skill:${skillId}] [PROGRESS] ${progress}% - ${description}`, metadata);
+      }),
+      addTodo: onTodo || (async (content, priority, step_number) => {
+        logger.info(`[Skill:${skillId}] [TODO] [${priority}] ${content} (step ${step_number})`);
+      }),
+      updateTodo: async (todoId, status, content) => {
+          logger.info(`[Skill:${skillId}] [TODO_UPDATE] ${todoId} -> ${status}`);
       }
     };
 

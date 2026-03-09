@@ -1,4 +1,4 @@
-import { Bot, User, Sparkles, Copy, RefreshCw, Paperclip, FileText, Code, Search, Circle, Brain } from "lucide-react";
+import { User, Sparkles, Copy, RefreshCw, Paperclip, FileText, Code, Search, Circle, Brain, CheckCircle2, Loader2, ListTodo } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -10,12 +10,16 @@ import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { CodeBlock, CodeBlockCopyButton } from "@/components/ui/code-block";
 import { type BundledLanguage } from "shiki";
+import { InlineCitation, InlineCitationCard, InlineCitationCardTrigger, InlineCitationCardBody, InlineCitationCarousel, InlineCitationCarouselHeader, InlineCitationCarouselPrev, InlineCitationCarouselNext, InlineCitationCarouselIndex, InlineCitationCarouselContent, InlineCitationCarouselItem, InlineCitationSource } from "@/components/ai-elements/inline-citation";
+import { Reasoning, ReasoningTrigger } from "@/components/ai/reasoning";
+import { CollapsibleContent } from "@/components/ui/collapsible";
 
 interface ChatMessageProps {
   role: "user" | "agent";
   content: string;
   isThinking?: boolean;
   logs?: string[];
+  todos?: any[];
   stats?: {
     duration: number;
   };
@@ -49,10 +53,9 @@ const parseActivity = (log: string) => {
     return { icon: Circle, label: 'Processing', color: 'text-zinc-400', bg: 'bg-zinc-50', border: 'border-zinc-100' };
 };
 
-export function ChatMessage({ role, content, isThinking, logs, stats, attachments, onCopy, onRegenerate }: ChatMessageProps) {
+export function ChatMessage({ role, content, isThinking, logs, todos, stats, attachments, onCopy, onRegenerate }: ChatMessageProps) {
     // State for copy feedback
     const [isCopied, setIsCopied] = useState(false);
-    const [isExpanded, setIsExpanded] = useState(false);
 
     const handleCopy = () => {
         if (onCopy) {
@@ -95,30 +98,69 @@ export function ChatMessage({ role, content, isThinking, logs, stats, attachment
                     </div>
                 )}
                 <div className="bg-zinc-100 text-zinc-900 rounded-2xl rounded-tr-sm px-4 py-2 inline-block text-left max-w-full">
-                    {content}
+                    {/* Clean up any injected prefixes if they leaked into the UI state */}
+                    {content.replace(/\[(AUTO RESEARCH|WEB SEARCH) REQUEST\]/, '').trim()}
                 </div>
             </div>
           ) : (
             <>
+                {/* Plan & Todo List */}
+                {todos && todos.length > 0 && (
+                    <div className="mb-4 bg-white border border-zinc-200 rounded-lg overflow-hidden shadow-sm w-full max-w-md">
+                        <div className="bg-zinc-50/50 px-3 py-2 border-b border-zinc-100 flex items-center gap-2">
+                            <ListTodo className="h-3.5 w-3.5 text-indigo-500" />
+                            <span className="text-xs font-semibold text-zinc-700">Plan & Progress</span>
+                        </div>
+                        <div className="p-2 space-y-1">
+                            {todos.map((todo, i) => (
+                                <div key={todo.id || i} className="group flex items-start gap-2 p-1.5 rounded-md hover:bg-zinc-50 transition-colors">
+                                    <div className="mt-0.5 shrink-0">
+                                        {todo.status === 'completed' ? (
+                                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                                        ) : todo.status === 'in_progress' ? (
+                                            <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />
+                                        ) : todo.status === 'failed' ? (
+                                            <Circle className="h-3.5 w-3.5 text-red-500 fill-red-100" />
+                                        ) : (
+                                            <Circle className="h-3.5 w-3.5 text-zinc-300" />
+                                        )}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className={cn("text-xs font-medium leading-snug", 
+                                            todo.status === 'completed' ? "text-zinc-500 line-through decoration-zinc-300" : "text-zinc-800"
+                                        )}>
+                                            {todo.description || todo.content}
+                                        </div>
+                                        {/* Show metadata like paper count */}
+                                        {todo.metadata && todo.metadata.papers && (
+                                            <div className="mt-1.5 flex flex-col gap-1">
+                                                {todo.metadata.papers.slice(0, 3).map((p: any, idx: number) => (
+                                                    <a key={idx} href={p.url || '#'} target="_blank" rel="noopener noreferrer" 
+                                                       className="flex items-center gap-1.5 text-[10px] text-blue-600 hover:underline truncate bg-blue-50/50 px-1.5 py-0.5 rounded border border-blue-100/50 hover:bg-blue-50 w-fit max-w-full">
+                                                        <FileText className="h-3 w-3 shrink-0 opacity-70" />
+                                                        <span className="truncate">{p.title}</span>
+                                                    </a>
+                                                ))}
+                                                {todo.metadata.papers.length > 3 && (
+                                                    <span className="text-[10px] text-zinc-400 px-1 italic">+{todo.metadata.papers.length - 3} more papers found...</span>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {logs && logs.length > 0 && (
                     <div className="mb-4">
-                        <button 
-                            onClick={() => setIsExpanded(!isExpanded)}
-                            className="flex items-center gap-2 text-xs font-medium text-zinc-500 hover:text-zinc-900 transition-colors bg-zinc-50 px-2 py-1 rounded-md border border-zinc-200/50"
+                        <Reasoning 
+                            isStreaming={isThinking} 
+                            duration={stats?.duration ? Math.round(stats.duration / 1000) : undefined}
                         >
-                            {isThinking ? (
-                                <span className="flex h-1.5 w-1.5 relative">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-500"></span>
-                                </span>
-                            ) : (
-                                <Bot className="h-3 w-3" />
-                            )}
-                            {isThinking ? "Thinking..." : "Thought Process"}
-                        </button>
-                        
-                        {(isExpanded || isThinking) && (
-                            <div className="mt-3 space-y-2">
+                            <ReasoningTrigger className="w-fit" />
+                            <CollapsibleContent className="mt-2 space-y-2 pl-2 border-l-2 border-zinc-100 ml-2">
                                 {logs.map((log, i) => {
                                     // Parse stats if available
                                     let displayLog = log;
@@ -136,40 +178,49 @@ export function ChatMessage({ role, content, isThinking, logs, stats, attachment
                                     const ActivityIcon = activity.icon;
 
                                     return (
-                                        <div key={i} className="group flex items-start gap-3 text-xs relative pl-2 pb-2 last:pb-0">
-                                            {/* Connector Line */}
-                                            {i !== logs.length - 1 && (
-                                                <div className="absolute left-[15px] top-6 bottom-0 w-px bg-zinc-100 group-last:hidden"></div>
-                                            )}
-                                            
+                                        <div key={i} className="group flex items-start gap-3 text-xs relative pb-2 last:pb-0">
                                             <div className={cn(
-                                                "shrink-0 h-6 w-6 rounded-full flex items-center justify-center border shadow-sm z-10",
+                                                "shrink-0 h-5 w-5 rounded-full flex items-center justify-center border shadow-sm z-10 mt-0.5",
                                                 activity.bg, activity.border
                                             )}>
-                                                <ActivityIcon className={cn("h-3 w-3", activity.color)} />
+                                                <ActivityIcon className={cn("h-2.5 w-2.5", activity.color)} />
                                             </div>
                                             
-                                            <div className="flex-1 pt-0.5 min-w-0">
+                                            <div className="flex-1 min-w-0">
                                                 <div className="flex items-baseline justify-between gap-2">
                                                     <span className="font-medium text-zinc-700">{activity.label}</span>
-                                                    {logStats && (
-                                                        <span className="text-[10px] text-zinc-400 font-mono">
-                                                            {(logStats.duration / 1000).toFixed(2)}s
-                                                        </span>
-                                                    )}
+                                                    <div className="flex items-center gap-2">
+                                                        {logStats && typeof logStats.tokens === 'number' && logStats.tokens > 0 && (
+                                                            <span className="text-[10px] text-zinc-400 font-mono">
+                                                                {logStats.tokens}t
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 <div className="text-zinc-500 mt-0.5 leading-relaxed break-words">
                                                     {displayLog.replace(/\[.*?\]/g, '').trim()}
+                                                    {/* Check for PDF link in log */}
+                                                    {displayLog.match(/\[Download PDF\]\((.*?)\)/) && (
+                                                        <a 
+                                                            href={displayLog.match(/\[Download PDF\]\((.*?)\)/)?.[1] || '#'} 
+                                                            target="_blank" 
+                                                            rel="noopener noreferrer"
+                                                            className="inline-flex items-center gap-1 ml-2 text-red-600 hover:underline font-medium"
+                                                        >
+                                                            <FileText className="h-3 w-3" />
+                                                            Download PDF
+                                                        </a>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
                                     );
                                 })}
-                            </div>
-                        )}
+                            </CollapsibleContent>
+                        </Reasoning>
                     </div>
                 )}
-                
+
                 <div className="text-left w-full">
                     <div className="prose prose-zinc prose-sm max-w-none dark:prose-invert prose-p:leading-relaxed prose-pre:bg-zinc-50 prose-pre:border prose-pre:border-zinc-200 prose-code:bg-zinc-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-code:text-zinc-800 prose-code:before:content-none prose-code:after:content-none">
                     <ReactMarkdown 
@@ -231,7 +282,52 @@ export function ChatMessage({ role, content, isThinking, logs, stats, attachment
                             h2: ({node, ...props}) => <h2 className="text-xl font-semibold mt-5 mb-3" {...props} />,
                             h3: ({node, ...props}) => <h3 className="text-lg font-medium mt-4 mb-2" {...props} />,
                             blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-zinc-300 pl-4 italic text-zinc-600 my-4" {...props} />,
-                            a: ({node, ...props}) => <a className="text-indigo-600 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                            a: ({node, ...props}) => {
+                                // Check if it's a PDF link
+                                const href = props.href || '';
+                                const isPdf = href.toLowerCase().endsWith('.pdf');
+                                if (isPdf) {
+                                    return (
+                                        <a 
+                                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-red-50 text-red-600 hover:bg-red-100 border border-red-100 transition-colors no-underline font-medium text-xs align-middle"
+                                            target="_blank" 
+                                            rel="noopener noreferrer" 
+                                            {...props}
+                                        >
+                                            <FileText className="h-3 w-3" />
+                                            {props.children}
+                                        </a>
+                                    );
+                                }
+                                // Check if it's a regular citation link (e.g. [Title](url)) that is not PDF
+                                // We can use the InlineCitation component for better UX
+                                return (
+                                    <InlineCitation>
+                                        <InlineCitationCard>
+                                            <InlineCitationCardTrigger sources={[href]}>
+                                                <span className="text-indigo-600 hover:underline cursor-pointer">{props.children}</span>
+                                            </InlineCitationCardTrigger>
+                                            <InlineCitationCardBody>
+                                                <InlineCitationCarousel>
+                                                    <InlineCitationCarouselHeader>
+                                                        <InlineCitationCarouselPrev />
+                                                        <InlineCitationCarouselNext />
+                                                        <InlineCitationCarouselIndex />
+                                                    </InlineCitationCarouselHeader>
+                                                    <InlineCitationCarouselContent>
+                                                        <InlineCitationCarouselItem>
+                                                            <InlineCitationSource
+                                                                title={String(props.children)}
+                                                                url={href}
+                                                            />
+                                                        </InlineCitationCarouselItem>
+                                                    </InlineCitationCarouselContent>
+                                                </InlineCitationCarousel>
+                                            </InlineCitationCardBody>
+                                        </InlineCitationCard>
+                                    </InlineCitation>
+                                );
+                            },
                             table: ({node, ...props}) => <div className="overflow-x-auto my-4 w-full block max-w-full"><table className="min-w-full divide-y divide-zinc-200 border border-zinc-200 rounded-lg" {...props} /></div>,
                             th: ({node, ...props}) => <th className="px-3 py-2 bg-zinc-50 text-left text-xs font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap" {...props} />,
                             td: ({node, ...props}) => <td className="px-3 py-2 align-top text-sm text-zinc-500 border-t border-zinc-100 min-w-[100px]" {...props} />,
@@ -244,6 +340,34 @@ export function ChatMessage({ role, content, isThinking, logs, stats, attachment
                         <span className="inline-block w-1.5 h-4 bg-zinc-400 animate-pulse align-middle ml-1"></span>
                     )}
                 </div>
+
+                {/* Agent Attachments (Moved to bottom) */}
+                {attachments && attachments.length > 0 && (
+                    <div className="mt-6 border-t border-zinc-100 pt-4">
+                        <div className="flex flex-wrap gap-2">
+                            {attachments.map((file, i) => (
+                                <a 
+                                    key={i} 
+                                    href={file.url} 
+                                    download={file.name}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-3 bg-white px-3 py-2.5 rounded-lg text-sm border border-zinc-200 shadow-sm hover:border-indigo-300 hover:shadow-md transition-all group no-underline"
+                                >
+                                    <div className="h-8 w-8 bg-red-50 rounded-md flex items-center justify-center text-red-500 group-hover:scale-110 transition-transform border border-red-100">
+                                        <FileText className="h-4 w-4" />
+                                    </div>
+                                    <div className="flex flex-col min-w-[120px]">
+                                        <span className="text-zinc-800 font-medium truncate max-w-[200px]">{file.name}</span>
+                                        <span className="text-[10px] text-zinc-400 flex items-center gap-1">
+                                            Generated File
+                                        </span>
+                                    </div>
+                                </a>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </>
           )}
         </div>
@@ -273,14 +397,23 @@ export function ChatMessage({ role, content, isThinking, logs, stats, attachment
                 >
                     <RefreshCw className="h-3 w-3" />
                 </Button>
+                
+                {/* Artifacts Indicator (if present) */}
+                {attachments && attachments.length > 0 && (
+                    <div className="flex items-center gap-1.5 ml-1 px-2 py-0.5 bg-red-50 text-red-600 rounded text-[10px] font-medium border border-red-100/50">
+                        <FileText className="h-3 w-3" />
+                        <span>{attachments.length} file{attachments.length > 1 ? 's' : ''} generated</span>
+                    </div>
+                )}
+                
                 <div className="flex-1" />
-                <div className="flex items-center gap-3 text-[10px] text-zinc-400">
-                    {stats?.duration && (
+                <div className="flex items-center gap-3 text-[10px] text-zinc-400 font-mono">
+                    {typeof stats?.duration === 'number' && (
                         <span>{(stats.duration / 1000).toFixed(2)}s</span>
                     )}
-                    {stats?.duration && <span className="w-0.5 h-2.5 bg-zinc-300"></span>}
+                    {typeof stats?.duration === 'number' && <span className="w-0.5 h-2.5 bg-zinc-300"></span>}
                     <span className="flex items-center gap-1">
-                        {Math.ceil(content.length / 4)} tokens
+                        {Math.ceil(content.length / 4)}t
                     </span>
                 </div>
             </div>

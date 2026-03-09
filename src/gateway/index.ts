@@ -157,7 +157,7 @@ export class A2AGateway {
     this.app.use('/a2a/rest', restHandler({ requestHandler, userBuilder: UserBuilder.noAuthentication }));
     
     // Simple Chat API for Web Dashboard
-    this.app.use(express.json());
+    this.app.use(express.json({ limit: '50mb' }));
     this.app.use('/files', express.static(path.join(process.cwd(), 'workspace/output')));
     
     // File Upload API
@@ -273,6 +273,17 @@ export class A2AGateway {
         }
     });
 
+    this.app.post('/api/sessions/:sessionId/stop', (req, res) => {
+        const { sessionId } = req.params;
+        try {
+            this.agent.sessionManager.stopSession(sessionId);
+            res.json({ success: true });
+        } catch (error) {
+            logger.error('Stop session error:', error);
+            res.status(500).json({ error: String(error) });
+        }
+    });
+
     this.app.get('/api/sessions/:sessionId/history', (req, res) => {
         const { sessionId } = req.params;
         try {
@@ -297,7 +308,7 @@ export class A2AGateway {
 
     // Async Chat API
     this.app.post('/api/chat/async', (req, res) => {
-        let { message, userId = 'web-user', sessionId, webSearch, attachments } = req.body;
+        let { message, userId = 'web-user', sessionId, webSearch, attachments, autoMode } = req.body;
         
         if (!message && (!attachments || attachments.length === 0)) {
             res.status(400).json({ error: 'Message or attachments required' });
@@ -313,6 +324,11 @@ export class A2AGateway {
         if (webSearch) {
             message = `[WEB SEARCH REQUEST] ${message}\nPlease perform a literature review or web search to answer this question.`;
         }
+        
+        // Process auto mode context
+        // if (autoMode) {
+             // We don't modify the message anymore, just pass the flag
+        // }
 
         logger.info(`Async Chat request: ${message} (Session: ${sessionId || 'auto'})`);
 
@@ -323,7 +339,7 @@ export class A2AGateway {
             if (sessionId) {
                 sessionEvents.emit(`session:${sessionId}`, { type, content });
             }
-        }, sessionId).catch(err => {
+        }, sessionId, { autoMode }).catch(err => {
             logger.error('Async chat error:', err);
             if (sessionId) {
                 sessionEvents.emit(`session:${sessionId}`, { type: 'error', content: String(err) });
@@ -406,6 +422,12 @@ export class A2AGateway {
                 } else if (type === 'log') {
                     // Send log
                     res.write(`data: ${JSON.stringify({ type: 'log', content })}\n\n`);
+                } else if (type === 'plan') {
+                    // Send plan
+                    res.write(`data: ${JSON.stringify({ type: 'plan', content })}\n\n`);
+                } else if (type === 'todo') {
+                    // Send todo
+                    res.write(`data: ${JSON.stringify({ type: 'todo', content })}\n\n`);
                 }
             }, sessionId);
             

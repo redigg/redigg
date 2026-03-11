@@ -500,14 +500,13 @@ function App() {
                 const lastIdx = prev.length - 1;
                 const lastMsg = prev[lastIdx];
                 if (lastMsg && lastMsg.role === 'agent') {
-                    let content = data.content;
+                    const rawContent = data.content;
                     let stats = undefined;
-                    if (content && typeof content === 'string' && content.includes('__STATS__')) {
-                        const parts = content.split('__STATS__');
-                        content = parts[0];
+                    if (rawContent && typeof rawContent === 'string' && rawContent.includes('__STATS__')) {
+                        const parts = rawContent.split('__STATS__');
                         try { stats = JSON.parse(parts[1]); } catch (e) {}
                     }
-                    const newMsg = { ...lastMsg, logs: [...(lastMsg.logs || []), content], stats: stats || lastMsg.stats };
+                    const newMsg = { ...lastMsg, logs: [...(lastMsg.logs || []), rawContent], stats: stats || lastMsg.stats };
                     return [...prev.slice(0, lastIdx), newMsg];
                 }
                 return prev;
@@ -734,11 +733,10 @@ function App() {
           }
         } else if (data.type === 'log') {
           // If log content contains __STATS__, parse it
-          let content = data.content;
+          const rawContent = data.content;
           let stats = undefined;
-          if (content && typeof content === 'string' && content.includes('__STATS__')) {
-              const parts = content.split('__STATS__');
-              content = parts[0];
+          if (rawContent && typeof rawContent === 'string' && rawContent.includes('__STATS__')) {
+              const parts = rawContent.split('__STATS__');
               try {
                   stats = JSON.parse(parts[1]);
               } catch (e) {}
@@ -746,7 +744,7 @@ function App() {
 
           setMessages(prev => prev.map(msg => 
             msg.id === agentMsgId 
-              ? { ...msg, logs: [...(msg.logs || []), content], stats: stats || msg.stats }
+              ? { ...msg, logs: [...(msg.logs || []), rawContent], stats: stats || msg.stats }
               : msg
           ));
         } else if (data.type === 'plan') {

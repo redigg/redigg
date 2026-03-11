@@ -177,6 +177,9 @@ export function ChatMessage({ role, content, isThinking, logs, todos, stats, att
                                     if (activity.hidden) return null;
                                     const ActivityIcon = activity.icon;
 
+                                    // Check if this log has tokens
+                                    const tokenCount = (logStats && typeof logStats.tokens === 'number') ? logStats.tokens : 0;
+
                                     return (
                                         <div key={i} className="group flex items-start gap-3 text-xs relative pb-2 last:pb-0">
                                             <div className={cn(
@@ -189,13 +192,13 @@ export function ChatMessage({ role, content, isThinking, logs, todos, stats, att
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-baseline justify-between gap-2">
                                                     <span className="font-medium text-zinc-700">{activity.label}</span>
-                                                    <div className="flex items-center gap-2">
-                                                        {logStats && typeof logStats.tokens === 'number' && logStats.tokens > 0 && (
+                                                    {tokenCount > 0 && (
+                                                        <div className="flex items-center gap-2">
                                                             <span className="text-[10px] text-zinc-400 font-mono">
-                                                                {logStats.tokens}t
+                                                                {tokenCount} tokens
                                                             </span>
-                                                        )}
-                                                    </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 <div className="text-zinc-500 mt-0.5 leading-relaxed break-words">
                                                     {displayLog.replace(/\[.*?\]/g, '').trim()}
@@ -413,7 +416,7 @@ export function ChatMessage({ role, content, isThinking, logs, todos, stats, att
                     )}
                     {typeof stats?.duration === 'number' && <span className="w-0.5 h-2.5 bg-zinc-300"></span>}
                     <span className="flex items-center gap-1">
-                        {Math.ceil(content.length / 4)}t
+                        {Math.ceil(content.length / 4)} tokens
                     </span>
                 </div>
             </div>

@@ -84,7 +84,7 @@ graph TD
 
 ### 3.1 总体架构 (System Architecture)
 
-Redigg 基于 **OpenClaw** 框架构建，采用了分层架构设计，强调**模块化**、**可扩展性**和**自进化**能力。
+Redigg 基于**完全自研**的 Agent 框架构建，采用了分层架构设计，强调**模块化**、**可扩展性**和**自进化**能力。
 
 ```mermaid
 graph TB
@@ -110,7 +110,7 @@ graph TB
         Memory[Memory Manager]
     end
 
-    subgraph Infra [基础设施层 - OpenClaw Base]
+    subgraph Infra [基础设施层 - Agent Base]
         direction TB
         Gateway[Gateway / Router]
         Skills[Skill Registry]
@@ -139,14 +139,14 @@ graph TB
 ### 3.2 核心模块详解
 
 #### 3.2.1 基础设施层 (Infrastructure Layer)
-基于原生 OpenClaw 提供的稳健底座：
+基于自研的稳健底座：
 - **Gateway**: 统一接入网关，处理多通道（Web/IM/API）的会话路由和鉴权。
 - **Skill Registry**: 技能注册中心，管理所有原子能力（如 Search, Fetch, Analyze）。
 - **Tool Executor**: 安全的沙箱执行环境，确保 Agent 操作的安全性。
 - **Storage**: 混合存储架构，SQLite 存储结构化数据，Vector DB 存储语义向量。
 
 #### 3.2.2 核心层 (Core Layer)
-Redigg 对 OpenClaw 内核进行的深度定制：
+Redigg 的深度定制内核：
 - **Enhanced Agent**: 具备更强推理能力的 Agent 实体，支持 Long-Context 和多步规划。
 - **Memory Manager**: 负责短期对话上下文和长期记忆的读写调度。
 - **Context Manager**: 动态管理 Token 窗口，确保关键信息不丢失。
@@ -222,7 +222,7 @@ Redigg 独有的进化机制：
 ## 四、技术实现
 
 ### 4.1 技术栈
-- **核心框架**: OpenClaw, Node.js ≥ 22, TypeScript 5.0+
+- **核心框架**: Node.js ≥ 22, TypeScript 5.0+
 - **存储**: SQLite (better-sqlite3, 用户记忆), JSON (配置)
 - **LLM 支持**: OpenAI, Claude, Qwen, Kimi, Minimax
 - **多通道支持**: Feishu (当前), Telegram/Discord/WhatsApp (规划中)
@@ -278,8 +278,6 @@ Redigg 独有的进化机制：
 ### A. 外部链接
 - **GitHub**: [https://github.com/redigg/redigg](https://github.com/redigg/redigg)
 - **官网**: [https://redigg.com](https://redigg.com)
-- **OpenClaw**: [https://github.com/openclaw/openclaw](https://github.com/openclaw/openclaw)
-- **文档**: [https://docs.openclaw.ai](https://docs.openclaw.ai)
 
 ### B. 版本历史
 

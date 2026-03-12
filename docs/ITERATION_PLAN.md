@@ -297,8 +297,6 @@ interface SharedLearning {
 ---
 
 ## 📚 参考资料
-
-- [OpenClaw 文档](https://docs.openclaw.ai)
 - [A2A 协议规范](https://github.com/a2a-js/sdk)
 - [sqlite-vec](https://github.com/asg017/sqlite-vec)
 - [LangGraph Planner 模式](https://langchain-ai.github.io/langgraph/)

@@ -176,7 +176,7 @@
 ### 已确定
 | 组件 | 技术 | 理由 |
 |------|------|------|
-| 运行时 | Node.js 22+ | OpenClaw 兼容 |
+| 运行时 | Node.js 22+ | Agent 框架 |
 | 存储 | SQLite + sqlite-vec | 轻量 + 向量支持 |
 | LLM | OpenAI API | 稳定 + 高质量 |
 | 前端 | React + Vite | 快速开发 |
@@ -236,8 +236,7 @@
 3. [CrewAI](https://github.com/joaomdmoura/crewai) - 角色分工
 
 ### 技术文档
-1. [OpenClaw Docs](https://docs.openclaw.ai)
-2. [A2A Protocol](https://github.com/a2a-js/sdk)
+1. [A2A Protocol](https://github.com/a2a-js/sdk)
 3. [sqlite-vec](https://github.com/asg017/sqlite-vec)
 
 ---

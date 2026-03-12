@@ -1,6 +1,6 @@
 # Redigg
 
-Redigg is an autonomous research agent platform based on OpenClaw.
+Redigg is an autonomous research agent platform.
 
 ## Setup
 
@@ -41,7 +41,7 @@ Supports executing modular skills with context and memory access.
 
 ### A2A Gateway
 Implemented in `src/infra/a2a/gateway.ts`.
-Allows Redigg to be used as an autonomous agent node by OpenClaw or other A2A-compliant systems.
+Allows Redigg to be used as an autonomous agent node by A2A-compliant systems.
 
 - [x] Agent Card (Discovery)
 - [x] JSON-RPC Interface
@@ -66,4 +66,4 @@ In the CLI, try:
     - The agent will use injected memories to personalize the response.
 
 ## Reference
-OpenClaw reference code is available in `reference/openclaw`.
+Legacy code references are available in `reference/`.

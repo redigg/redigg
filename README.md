@@ -7,7 +7,6 @@
   
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
   [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
-  [![OpenClaw](https://img.shields.io/badge/Powered%20by-OpenClaw-orange)](https://github.com/openclaw)
 
   [English](#english) | [中文](#chinese)
 </div>
@@ -18,7 +17,7 @@
 ## 🇬🇧 English
 
 ### 📖 Introduction
-Redigg is an advanced autonomous research agent designed to accelerate scientific discovery. Built on the OpenClaw architecture, it acts as a tireless research assistant that can autonomously search for literature, analyze papers, explain complex concepts, and generate comprehensive PDF reports. It features a self-evolving memory system that learns from every interaction.
+Redigg is an advanced autonomous research agent designed to accelerate scientific discovery. It acts as a tireless research assistant that can autonomously search for literature, analyze papers, explain complex concepts, and generate comprehensive PDF reports. It features a self-evolving memory system that learns from every interaction.
 
 ### ✨ Key Features
 - **Autonomous Research**: Performs deep literature reviews, finding and summarizing relevant papers from the web.
@@ -81,7 +80,7 @@ This will start the Gateway on `http://localhost:4000` (serving the Dashboard).
 ## 🇨🇳 中文 (Chinese)
 
 ### 📖 简介
-Redigg 是一个专为加速科学发现而设计的先进自主研究智能体。基于 OpenClaw 架构构建，它就像一位不知疲倦的研究助手，能够自主搜索文献、分析论文、解释复杂概念，并生成专业的 PDF 报告。它具备自进化记忆系统，能够从每一次交互中学习并变得更强。
+Redigg 是一个专为加速科学发现而设计的先进自主研究智能体。它就像一位不知疲倦的研究助手，能够自主搜索文献、分析论文、解释复杂概念，并生成专业的 PDF 报告。它具备自进化记忆系统，能够从每一次交互中学习并变得更强。
 
 ### ✨ 核心功能
 - **自主研究**: 进行深度的文献综述，从网络上搜索并总结相关论文。

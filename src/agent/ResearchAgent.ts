@@ -232,7 +232,7 @@ export class ResearchAgent {
                         log(`[${step.tool}] ${step.description}`);
                     }
                     
-                    const result = await this.executeStep(step, userId, session, log, onProgress, accumulatedArtifacts);
+                    const result = await this.executeStep(step, userId, session, log, onProgress, accumulatedArtifacts, plan.steps);
                     
                     // Accumulate artifacts
                     if (result.artifacts && result.artifacts.length > 0) {
@@ -371,9 +371,10 @@ Rules:
       step: any, 
       userId: string, 
       session: Session, 
-      log: (c: string) => void,
+      log: (c: string, stats?: any) => void,
       onProgress?: (type: 'token' | 'log' | 'plan' | 'todo', content: any) => void,
-      accumulatedArtifacts: any[] = []
+      accumulatedArtifacts: any[] = [],
+      planSteps: any[] = []
   ): Promise<{ output: string, artifacts: any[], usage?: { promptTokens: number, completionTokens: number } }> {
       let output = '';
       let artifacts: any[] = [];
@@ -388,7 +389,13 @@ Rules:
               output = ceResult.formatted_output;
               break;
           case 'PdfGenerator':
-              const pdfResult = await this.skillManager.executeSkill('pdf_generator', userId, { title: step.params.title, content: step.params.content }, (type, content) => log(`[Skill] ${content}`));
+              const pdfContent = this.resolvePdfGeneratorContent(session, step.params.content, planSteps);
+              const pdfResult = await this.skillManager.executeSkill(
+                  'pdf_generator',
+                  userId,
+                  { title: step.params.title, content: pdfContent },
+                  (type, content) => log(`[Skill] ${content}`)
+              );
               output = pdfResult.formatted_output;
               if (pdfResult.url && pdfResult.file_path) {
                   // Ensure URL is valid (gateway url + relative path)
@@ -427,7 +434,7 @@ Rules:
               // User requested continuous mode until stopped manually.
               log(`[AutoResearch] Starting continuous optimization loop for "${topic}". Will run until stopped.`);
               
-              let currentContent = `Initial draft for ${topic}.`;
+              let currentContent = await this.buildAutoResearchInitialDraft(session, userId, topic, log, onProgress);
               let round = 0;
               
               while (true) {
@@ -542,6 +549,108 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
       }
 
       return { output, artifacts, usage };
+  }
+
+  private resolvePdfGeneratorContent(session: Session, plannedContent: unknown, planSteps: any[] = []): string {
+      const normalizedPlannedContent = typeof plannedContent === 'string' ? plannedContent.trim() : '';
+      if (this.isUsablePdfContent(normalizedPlannedContent)) {
+          return normalizedPlannedContent;
+      }
+
+      const previousStepContent = [...planSteps]
+          .filter(candidate => candidate.status === 'completed' && typeof candidate.result === 'string')
+          .map(candidate => String(candidate.result).trim())
+          .reverse()
+          .find(candidate => this.isUsablePdfContent(candidate));
+
+      if (previousStepContent) {
+          return previousStepContent;
+      }
+
+      const lastAssistantContent = [...this.sessionManager.getHistory(session.id, 20)]
+          .reverse()
+          .find(message => message.role === 'assistant' && this.isUsablePdfContent(message.content))
+          ?.content
+          ?.trim();
+
+      if (lastAssistantContent) {
+          return lastAssistantContent;
+      }
+
+      return normalizedPlannedContent || 'Generated based on literature review findings.';
+  }
+
+  private isUsablePdfContent(content: string): boolean {
+      const normalized = content.trim();
+      if (normalized.length < 120) {
+          return false;
+      }
+
+      const lower = normalized.toLowerCase();
+      const placeholderPhrases = [
+          'generated based on literature review findings',
+          'use the previous output',
+          'use previous output',
+          'same as above',
+          'previous step output',
+          'summarizing the key findings',
+          'based on the literature review findings'
+      ];
+
+      return !placeholderPhrases.some(phrase => lower.includes(phrase));
+  }
+
+  private async buildAutoResearchInitialDraft(
+      session: Session,
+      userId: string,
+      topic: string,
+      log: (c: string, stats?: any) => void,
+      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo', content: any) => void
+  ): Promise<string> {
+      log(`[AutoResearch] Building initial survey draft with academic_survey_self_improve...`);
+
+      try {
+          const result = await this.skillManager.executeSkill(
+              'academic_survey_self_improve',
+              userId,
+              { topic, depth: 'standard' },
+              {
+                  onLog: (_type: any, content: string) => log(`[AutoResearch][Seed] ${content}`),
+                  onProgress: async (progress: number, description: string, metadata?: any) => {
+                      log(`[AutoResearch][Seed] ${progress}% - ${description}`, metadata);
+                  },
+                  onTodo: async (content: string, priority: string) => {
+                      onProgress?.('todo', {
+                          id: `auto-seed-${Date.now()}`,
+                          status: 'pending',
+                          content,
+                          priority
+                      });
+                  }
+              }
+          );
+
+          const initialContent = typeof result.formatted_output === 'string' && result.formatted_output.trim()
+              ? result.formatted_output
+              : typeof result.summary === 'string'
+                  ? result.summary
+                  : '';
+
+          if (initialContent.trim()) {
+              log('[AutoResearch] Initial survey draft ready.', {
+                  papers: Array.isArray(result.papers) ? result.papers.length : 0,
+                  sections: Array.isArray(result.sections) ? result.sections.length : 0,
+                  quality: result.quality_report?.overallScore ?? null
+              });
+              return initialContent;
+          }
+
+          throw new Error('Survey skill returned empty content.');
+      } catch (error) {
+          logger.error('[AutoResearch] Failed to build initial survey draft:', error);
+          log('[AutoResearch] Falling back to placeholder draft because survey seed generation failed.');
+          return `Initial draft for ${topic}.`;
+      }
   }
   
   private async handlePostProcessing(

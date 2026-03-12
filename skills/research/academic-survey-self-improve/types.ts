@@ -45,12 +45,25 @@ export interface RetrievalResult {
   };
 }
 
+export interface EvidenceCard {
+  citation: number;
+  title: string;
+  year: number;
+  source?: Paper['source'];
+  paperTypeSignals: string[];
+  evidenceFocus: string[];
+  keyContribution: string;
+  groundedClaim: string;
+  limitationHint: string;
+}
+
 export interface SectionDraft {
   sectionId: string;
   title: string;
   content: string;
   paperCount: number;
   citations: number[];
+  evidenceCards: EvidenceCard[];
 }
 
 export interface SectionReview {

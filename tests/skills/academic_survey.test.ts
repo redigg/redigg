@@ -103,6 +103,8 @@ describe('AcademicSurveySelfImproveSkill', () => {
     expect(result.outline.topicProfile.anchorTerms).toEqual(expect.arrayContaining(['agent']));
     expect(result.outline.sections[0].queryPlan.length).toBeGreaterThanOrEqual(3);
     expect(result.sections).toHaveLength(3);
+    expect(result.sections[0].evidenceCards.length).toBeGreaterThan(0);
+    expect(result.sections[0].evidenceCards[0].groundedClaim).toContain('Test Paper');
     expect(result.quality_report).not.toBeNull();
     expect(result.quality_report.overallScore).toBe(84);
     expect(result.formatted_output).toContain('## References');

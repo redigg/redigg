@@ -70,10 +70,16 @@ async function reviewSection(
   topic: string,
   section: SectionDraft
 ): Promise<ReviewResponse> {
+  const evidenceSummary = section.evidenceCards
+    .map((card) => `[${card.citation}] ${card.title} | focus: ${card.evidenceFocus.join(', ') || 'general'} | claim: ${card.groundedClaim}`)
+    .join('\n');
   const prompt = `
 [SURVEY_SECTION_REVIEW]
 Topic: ${topic}
 Review the following survey section.
+
+Available evidence cards:
+${evidenceSummary || 'No evidence cards available.'}
 
 ${section.content}
 
@@ -108,11 +114,17 @@ async function rewriteSection(
   section: SectionDraft,
   suggestions: string[]
 ): Promise<string | null> {
+  const evidenceSummary = section.evidenceCards
+    .map((card) => `[${card.citation}] ${card.title}\n- Grounded claim: ${card.groundedClaim}\n- Limitation hint: ${card.limitationHint}`)
+    .join('\n');
   const prompt = `
 [SURVEY_SECTION_REWRITE]
 Topic: ${topic}
 Improve the following survey section using these suggestions:
 ${suggestions.join('\n') || 'Improve clarity and evidence grounding.'}
+
+You must stay within the following evidence cards:
+${evidenceSummary || 'No evidence cards available.'}
 
 ${section.content}
 

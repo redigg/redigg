@@ -1,5 +1,5 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
-import type { OutlineSection, TopicProfile } from './types.js';
+import type { EvidenceCard, OutlineSection, TopicProfile } from './types.js';
 
 const BROAD_ANCHOR_TERMS = new Set([
   'research',
@@ -284,6 +284,48 @@ export function filterPapersByAnchors(
   return fallback.length > 0 ? fallback : papers;
 }
 
+export function buildEvidenceCards(
+  papers: Paper[],
+  citations: number[],
+  section: OutlineSection,
+  topicProfile?: TopicProfile
+): EvidenceCard[] {
+  return papers.map((paper, index) => {
+    const assessment = topicProfile ? assessPaperAnchors(paper, topicProfile, section) : null;
+    const text = normalizeMatchText([paper.title, paper.summary].filter(Boolean).join(' '));
+    const paperTypeSignals = assessment?.paperTypeSignals?.length
+      ? assessment.paperTypeSignals
+      : detectPaperTypeSignals(text);
+    const evidenceFocus = Array.from(new Set([
+      ...(assessment?.facetMatches || []),
+      ...(section.focusFacets || []),
+      ...paperTypeSignals
+    ])).slice(0, 4);
+    const summarySentences = splitIntoSentences(paper.summary);
+    const keyContribution = pickSentence(
+      summarySentences,
+      ['benchmark', 'evaluation', 'system', 'workflow', 'framework', 'survey', 'method', 'agent', 'discovery']
+    ) || summarySentences[0] || fallbackContribution(paper);
+    const limitationHint = pickSentence(
+      summarySentences,
+      ['limit', 'challenge', 'future', 'open', 'reliability', 'bias', 'constraint']
+    ) || fallbackLimitationHint(section, paperTypeSignals);
+    const groundedClaim = buildGroundedClaim(paper, keyContribution, evidenceFocus);
+
+    return {
+      citation: citations[index] ?? index + 1,
+      title: paper.title,
+      year: paper.year,
+      source: paper.source,
+      paperTypeSignals,
+      evidenceFocus,
+      keyContribution,
+      groundedClaim,
+      limitationHint
+    };
+  });
+}
+
 function mergePaperRecords(primary: Paper, secondary: Paper): Paper {
   const preferred = scorePaperRecord(secondary) > scorePaperRecord(primary) ? secondary : primary;
   const fallback = preferred === primary ? secondary : primary;
@@ -366,6 +408,25 @@ function normalizeMatchText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function splitIntoSentences(content?: string): string[] {
+  return (content || '')
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+}
+
+function pickSentence(sentences: string[], keywords: string[]): string | null {
+  for (const sentence of sentences) {
+    const normalized = normalizeMatchText(sentence);
+    if (keywords.some((keyword) => normalized.includes(normalizeMatchText(keyword)))) {
+      return sentence;
+    }
+  }
+
+  return null;
+}
+
 function tokenizeForMatch(value: string): string[] {
   return normalizeMatchText(value)
     .split(' ')
@@ -383,6 +444,30 @@ function normalizeMatchToken(token: string): string {
   }
 
   return token;
+}
+
+function fallbackContribution(paper: Paper): string {
+  const sourceText = paper.summary && paper.summary !== 'No summary'
+    ? paper.summary
+    : `${paper.title} contributes representative evidence for this topic.`;
+  return sourceText.replace(/\s+/g, ' ').trim();
+}
+
+function fallbackLimitationHint(section: OutlineSection, paperTypeSignals: string[]): string {
+  if (paperTypeSignals.includes('benchmark') || paperTypeSignals.includes('evaluation')) {
+    return `Further work is needed to test whether current ${section.title.toLowerCase()} practices transfer across tasks and domains.`;
+  }
+
+  if (paperTypeSignals.includes('system') || paperTypeSignals.includes('workflow')) {
+    return `The literature still leaves open questions about robustness, orchestration cost, and deployment constraints for ${section.title.toLowerCase()}.`;
+  }
+
+  return `The literature still leaves unresolved questions about coverage, generalization, and evidence quality for ${section.title.toLowerCase()}.`;
+}
+
+function buildGroundedClaim(paper: Paper, keyContribution: string, evidenceFocus: string[]): string {
+  const focus = evidenceFocus.length > 0 ? evidenceFocus.slice(0, 2).join(' and ') : 'the topic';
+  return `${paper.title} provides evidence on ${focus}: ${keyContribution}`.replace(/\s+/g, ' ').trim();
 }
 
 function scorePaperRecord(paper: Paper): number {

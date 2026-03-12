@@ -31,7 +31,8 @@ export default class HeartbeatSkill implements Skill {
         if (ctx.managers?.skill) {
              skillStats = (ctx.managers.skill as any).getSkillStats();
              if (skillStats && skillStats.totalSkills > 0) {
-                 ctx.log('result', `[Evolution] Active Skills: ${skillStats.totalSkills} (${skillStats.totalPacks} packs)`);
+                 ctx.log('result', `[Heartbeat] Memory consolidation: Moved ${memoryStats.moved}, Promoted ${memoryStats.promoted}, Pruned ${memoryStats.pruned}`);
+                 ctx.log('result', `[Heartbeat] Active Skills: ${skillStats.totalSkills} (${skillStats.totalPacks} packs)`);
              }
         }
     } catch (e) {

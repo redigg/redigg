@@ -61,11 +61,13 @@ describe('ResearchAgent - Planning', () => {
     const onProgress = vi.fn();
     
     // Mock fetch for ScholarTool
-    global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        text: async () => `
-          <feed>
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('arxiv.org')) {
+        return new Response(`
+          <feed xmlns="http://www.w3.org/2005/Atom">
             <entry>
+              <id>http://arxiv.org/abs/1234.5678</id>
               <title>LLM Reasoning Paper</title>
               <summary>A paper about LLM reasoning.</summary>
               <author><name>Author A</name></author>
@@ -73,8 +75,10 @@ describe('ResearchAgent - Planning', () => {
               <link title="pdf" href="http://arxiv.org/pdf/1234.5678" />
             </entry>
           </feed>
-        `
-    } as any);
+        `, { status: 200, headers: { 'Content-Type': 'application/xml' } });
+      }
+      return new Response(JSON.stringify({ results: [], data: [] }), { status: 200 });
+    });
     
     await agent.chat('user1', 'Search for papers on LLM Reasoning', onProgress);
 

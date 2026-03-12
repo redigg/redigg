@@ -23,11 +23,36 @@ describe('SkillManager', () => {
     llm = new MockLLMClient();
     skillManager = new SkillManager(llm, memoryManager);
     
+    // Mock fetch for ScholarTool
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('arxiv.org')) {
+        return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2101.00001v1</id>
+    <title>Test Paper</title>
+    <summary>Test Summary</summary>
+    <author><name>Test Author</name></author>
+    <published>2021-01-01T00:00:00Z</published>
+  </entry>
+</feed>`, { status: 200, headers: { 'Content-Type': 'application/xml' } });
+      }
+      if (url.includes('openalex.org')) {
+        return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      }
+      if (url.includes('semanticscholar.org')) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
+      return new Response('Not Found', { status: 404 });
+    });
+
     // Register skill
     skillManager.registerSkill(new LiteratureReviewSkill());
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (fs.existsSync(dbPath)) {
       fs.unlinkSync(dbPath);
     }

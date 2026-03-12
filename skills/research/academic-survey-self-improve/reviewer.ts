@@ -1,6 +1,6 @@
 import type { SkillContext } from '../../../src/skills/types.js';
 import type { SectionDraft, SurveyQualityReport } from './types.js';
-import { parseJsonObject, normalizeText } from './utils.js';
+import { countWords, normalizeText, parseJsonObject } from './utils.js';
 
 interface ReviewResponse {
   score: number;
@@ -8,6 +8,14 @@ interface ReviewResponse {
   issues: string[];
   suggestions: string[];
   needsRewrite?: boolean;
+}
+
+interface HardCheckResult {
+  scorePenalty: number;
+  strengths: string[];
+  issues: string[];
+  suggestions: string[];
+  forceRewrite: boolean;
 }
 
 export async function reviewSurveySections(
@@ -20,11 +28,13 @@ export async function reviewSurveySections(
 
   for (const section of sections) {
     const review = await reviewSection(context, topic, section);
+    const hardChecks = runHardChecks(section);
+    const finalReview = mergeReviewWithHardChecks(review, hardChecks);
     let finalSection = section;
     let rewriteApplied = false;
 
-    if (review.score < 75 || review.needsRewrite) {
-      const rewritten = await rewriteSection(context, topic, section, review.suggestions);
+    if (finalReview.score < 75 || finalReview.needsRewrite) {
+      const rewritten = await rewriteSection(context, topic, section, finalReview.suggestions);
       if (rewritten) {
         finalSection = {
           ...section,
@@ -37,10 +47,10 @@ export async function reviewSurveySections(
     reviewedSections.push(finalSection);
     sectionReviews.push({
       sectionId: section.sectionId,
-      score: review.score,
-      strengths: review.strengths,
-      issues: review.issues,
-      suggestions: review.suggestions,
+      score: finalReview.score,
+      strengths: finalReview.strengths,
+      issues: finalReview.issues,
+      suggestions: finalReview.suggestions,
       rewriteApplied
     });
   }
@@ -138,4 +148,132 @@ Return ONLY the revised Markdown section.
 
   const content = normalizeText(response.content);
   return content || null;
+}
+
+function runHardChecks(section: SectionDraft): HardCheckResult {
+  const issues: string[] = [];
+  const suggestions: string[] = [];
+  const strengths: string[] = [];
+  let scorePenalty = 0;
+  let forceRewrite = false;
+
+  const normalizedTitle = section.title.toLowerCase();
+  const wordCount = countWords(section.content);
+  const citationMatches = Array.from(section.content.matchAll(/\[(\d+)\]/g))
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value));
+  const usedCitations = new Set(citationMatches);
+  const availableCitations = new Set(section.evidenceCards.map((card) => card.citation));
+  const paperTypeSignals = new Set(section.evidenceCards.flatMap((card) => card.paperTypeSignals));
+
+  if (section.evidenceCards.length === 0) {
+    issues.push('No evidence cards were attached to this section.');
+    suggestions.push('Retrieve and attach grounded evidence cards before drafting this section.');
+    scorePenalty += 25;
+    forceRewrite = true;
+  } else {
+    strengths.push(`Grounded in ${section.evidenceCards.length} evidence cards`);
+  }
+
+  if (usedCitations.size === 0) {
+    issues.push('The section does not cite any supporting evidence.');
+    suggestions.push('Add inline citations that point back to the available evidence cards.');
+    scorePenalty += 18;
+    forceRewrite = true;
+  } else if (section.evidenceCards.length > 1 && usedCitations.size < 2) {
+    issues.push('The section relies on too few distinct evidence cards.');
+    suggestions.push('Use at least two distinct citations when multiple evidence cards are available.');
+    scorePenalty += 8;
+  } else {
+    strengths.push('Uses multiple evidence-backed citations');
+  }
+
+  const unknownCitations = Array.from(usedCitations).filter((citation) => !availableCitations.has(citation));
+  if (unknownCitations.length > 0) {
+    issues.push(`The section references citations not present in its evidence cards: ${unknownCitations.join(', ')}.`);
+    suggestions.push('Align every inline citation with the evidence cards attached to this section.');
+    scorePenalty += 12;
+    forceRewrite = true;
+  }
+
+  if (wordCount < 80) {
+    issues.push('The section is too short to provide a useful synthesis.');
+    suggestions.push('Expand the section with a clearer synthesis of the retrieved evidence.');
+    scorePenalty += 10;
+    forceRewrite = true;
+  }
+
+  if (normalizedTitle.includes('benchmark') || normalizedTitle.includes('evaluation')) {
+    if (!hasPaperType(paperTypeSignals, ['benchmark', 'evaluation'])) {
+      issues.push('Benchmark section lacks benchmark/evaluation evidence.');
+      suggestions.push('Include benchmark, dataset, or evaluation papers before finalizing this section.');
+      scorePenalty += 18;
+      forceRewrite = true;
+    } else {
+      strengths.push('Benchmark section includes benchmark/evaluation evidence');
+    }
+  }
+
+  if (normalizedTitle.includes('system') || normalizedTitle.includes('application')) {
+    if (!hasPaperType(paperTypeSignals, ['system', 'workflow', 'application'])) {
+      issues.push('Systems section lacks system/workflow evidence.');
+      suggestions.push('Add system, workflow, or platform papers to ground this section.');
+      scorePenalty += 18;
+      forceRewrite = true;
+    } else {
+      strengths.push('Systems section includes system/workflow evidence');
+    }
+  }
+
+  if (normalizedTitle.includes('background') || normalizedTitle.includes('scope')) {
+    if (!hasPaperType(paperTypeSignals, ['survey'])) {
+      issues.push('Background section lacks survey/review style evidence.');
+      suggestions.push('Anchor the background section with at least one survey, review, or overview paper.');
+      scorePenalty += 8;
+    } else {
+      strengths.push('Background section includes survey-style evidence');
+    }
+  }
+
+  if (normalizedTitle.includes('challenge') || normalizedTitle.includes('future')) {
+    const hasChallengeSignal = section.evidenceCards.some((card) =>
+      card.paperTypeSignals.includes('challenges') ||
+      /limit|challenge|future|reliability|ethic|open/i.test(card.limitationHint)
+    );
+    if (!hasChallengeSignal) {
+      issues.push('Challenges section lacks explicit limitation or future-work evidence.');
+      suggestions.push('Surface limitation and future-direction evidence instead of only summarizing methods.');
+      scorePenalty += 10;
+    } else {
+      strengths.push('Challenges section includes limitation-oriented evidence');
+    }
+  }
+
+  return {
+    scorePenalty,
+    strengths: uniqueTop(strengths),
+    issues: uniqueTop(issues),
+    suggestions: uniqueTop(suggestions),
+    forceRewrite
+  };
+}
+
+function mergeReviewWithHardChecks(review: ReviewResponse, hardChecks: HardCheckResult): ReviewResponse {
+  const score = Math.max(0, Math.min(100, review.score - hardChecks.scorePenalty));
+
+  return {
+    score,
+    strengths: uniqueTop([...hardChecks.strengths, ...review.strengths]),
+    issues: uniqueTop([...hardChecks.issues, ...review.issues]),
+    suggestions: uniqueTop([...hardChecks.suggestions, ...review.suggestions]),
+    needsRewrite: Boolean(review.needsRewrite || hardChecks.forceRewrite)
+  };
+}
+
+function hasPaperType(signals: Set<string>, candidates: string[]): boolean {
+  return candidates.some((candidate) => signals.has(candidate));
+}
+
+function uniqueTop(items: string[], limit: number = 6): string[] {
+  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean))).slice(0, limit);
 }

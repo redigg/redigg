@@ -12,8 +12,20 @@ vi.mock('../../src/skills/lib/ScholarTool.js', () => {
     ScholarTool: class {
       async searchPapers(topic: string) {
         return [
-          { title: 'Reasoning Paper 1', year: 2024, summary: `Summary 1 about ${topic}`, url: 'https://example.com/1', authors: ['A'] },
-          { title: 'Reasoning Paper 2', year: 2023, summary: `Summary 2 about ${topic}`, url: 'https://example.com/2', authors: ['B'] }
+          {
+            title: `A Survey of ${topic}`,
+            year: 2024,
+            summary: `This survey reviews ${topic}, organizes the field into methodological families, and discusses how planning, tool use, and evaluation interact in end-to-end research workflows.`,
+            url: 'https://example.com/1',
+            authors: ['A']
+          },
+          {
+            title: `Benchmarking ${topic} Systems`,
+            year: 2023,
+            summary: `This benchmark paper compares ${topic} systems with explicit datasets, benchmark tasks, and evaluation metrics for autonomous scientific-agent pipelines.`,
+            url: 'https://example.com/2',
+            authors: ['B']
+          }
         ];
       }
     }
@@ -104,7 +116,7 @@ describe('ResearchAgent - Skills', () => {
       if (content.includes('[SURVEY_SECTION_DRAFT]')) {
         const title = content.match(/Section title: (.+)/)?.[1]?.trim() || 'Section';
         return {
-          content: `## ${title}\n\nThis section synthesizes reasoning-in-LLM evidence for ${title.toLowerCase()} [1][2].`
+          content: `## ${title}\n\nThis section synthesizes the retrieved evidence for ${title.toLowerCase()} by comparing how survey-oriented overviews frame the research space and how benchmark-oriented studies operationalize it with concrete tasks, metrics, and workflows [1][2]. Across the literature, the consistent pattern is that scientific-agent systems rely on iterative planning, tool use, and evidence tracking rather than a single prompting trick, which makes the section central to understanding both capability and limitation boundaries [1][2]. The section also highlights that evaluation remains a bottleneck because benchmark design, reproducibility, and cross-domain transfer all remain unresolved in current systems [1][2].`
         };
       }
 
@@ -251,7 +263,7 @@ describe('ResearchAgent - Skills', () => {
       if (content.includes('[SURVEY_SECTION_DRAFT]')) {
         const title = content.match(/Section title: (.+)/)?.[1]?.trim() || 'Section';
         return {
-          content: `## ${title}\n\nThis section synthesizes grounded evidence for ${title.toLowerCase()} [1][2].`
+          content: `## ${title}\n\nThis section synthesizes grounded evidence for ${title.toLowerCase()} by combining survey-style framing with benchmark and system papers that describe how scientific-agent workflows are built, evaluated, and stress-tested in practice [1][2]. The key synthesis is that recent systems move beyond isolated prompting setups toward multi-step planning, tool invocation, and benchmark-driven evaluation loops, while still facing open issues around reliability, coverage, and domain transfer [1][2]. These observations make the section suitable for a survey-style PDF report grounded in explicit references rather than placeholder text [1][2].`
         };
       }
 

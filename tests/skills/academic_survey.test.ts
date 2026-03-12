@@ -7,8 +7,18 @@ vi.mock('../../src/skills/lib/ScholarTool.js', () => {
     ScholarTool: class {
       async searchPapers(topic: string) {
         return [
-          { title: 'Test Paper 1', year: 2024, summary: `Summary 1 about ${topic}`, authors: ['A'] },
-          { title: 'Test Paper 2', year: 2023, summary: `Summary 2 about ${topic}`, authors: ['B'] }
+          {
+            title: 'A Survey of AI Agents for Scientific Workflows',
+            year: 2024,
+            summary: `This survey reviews ${topic}, summarizes planning and tool-use workflows, and highlights open problems for evaluation.`,
+            authors: ['A']
+          },
+          {
+            title: 'Benchmarking AI Agent Systems',
+            year: 2023,
+            summary: `This benchmark paper compares ${topic} systems with datasets, metrics, and evaluation settings for autonomous research agents.`,
+            authors: ['B']
+          }
         ];
       }
     }
@@ -57,7 +67,9 @@ describe('AcademicSurveySelfImproveSkill', () => {
 
       if (content.includes('[SURVEY_SECTION_DRAFT]')) {
         const title = content.match(/Section title: (.+)/)?.[1]?.trim() || 'Section';
-        return { content: `## ${title}\n\nThis section synthesizes the evidence for ${title.toLowerCase()} [1][2].` };
+        return {
+          content: `## ${title}\n\nThis section synthesizes the retrieved evidence for ${title.toLowerCase()} by comparing how survey-style overviews frame the area and how benchmark-driven studies operationalize it in practice [1][2]. Across the literature, the recurring pattern is that agent systems combine planning, tool use, and evaluation loops rather than relying on a single prompting strategy, which makes the section central to understanding the field boundary and empirical maturity [1][2]. The evidence also shows that open questions remain around transferability, coverage, and reliable evaluation standards for scientific-agent workflows [1][2].`
+        };
       }
 
       if (content.includes('[SURVEY_SECTION_REVIEW]')) {
@@ -73,7 +85,9 @@ describe('AcademicSurveySelfImproveSkill', () => {
       }
 
       if (content.includes('[SURVEY_SECTION_REWRITE]')) {
-        return { content: '## Revised Section\n\nImproved content.' };
+        return {
+          content: '## Revised Section\n\nImproved content grounded in the available evidence cards with explicit citations [1][2].'
+        };
       }
 
       if (content.includes('broader or more effective search query')) {
@@ -104,7 +118,7 @@ describe('AcademicSurveySelfImproveSkill', () => {
     expect(result.outline.sections[0].queryPlan.length).toBeGreaterThanOrEqual(3);
     expect(result.sections).toHaveLength(3);
     expect(result.sections[0].evidenceCards.length).toBeGreaterThan(0);
-    expect(result.sections[0].evidenceCards[0].groundedClaim).toContain('Test Paper');
+    expect(result.sections[0].evidenceCards[0].groundedClaim).toContain('A Survey of AI Agents for Scientific Workflows');
     expect(result.quality_report).not.toBeNull();
     expect(result.quality_report.overallScore).toBe(84);
     expect(result.formatted_output).toContain('## References');

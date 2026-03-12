@@ -814,9 +814,7 @@ function App() {
       >
         <div className="h-16 flex items-center px-6 border-b border-zinc-100 shrink-0 justify-between whitespace-nowrap min-w-[20rem]">
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-indigo-200 shadow-lg shrink-0">
-              <span className="text-white font-bold">R</span>
-            </div>
+            <img src="/favicons/favicon-256x256.ico" alt="Redigg" className="h-8 w-8 rounded-lg shadow-indigo-200 shadow-lg shrink-0" />
             <div className="flex items-baseline gap-2">
                 <h1 className="text-xl font-bold text-zinc-900 tracking-tight">Redigg</h1>
                 <span className="text-[10px] text-zinc-400 font-mono">v0.1.0</span>
@@ -1236,9 +1234,7 @@ function App() {
             {messages.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-zinc-400 space-y-8 pb-20">
                 <div className="bg-zinc-50 p-6 rounded-2xl border border-zinc-100 shadow-sm">
-                  <div className="h-12 w-12 bg-indigo-600 rounded-xl flex items-center justify-center shadow-indigo-200 shadow-lg">
-                    <span className="text-white font-bold text-2xl">R</span>
-                  </div>
+                  <img src="/favicons/favicon-256x256.ico" alt="Redigg" className="h-16 w-16 rounded-xl shadow-indigo-200 shadow-lg" />
                 </div>
                 <div className="text-center space-y-2 max-w-md px-4">
                   <h3 className="text-xl font-semibold text-zinc-900">How can I help you research?</h3>

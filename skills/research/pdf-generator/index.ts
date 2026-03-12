@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import PDFDocument from 'pdfkit';
+import { parseAcademicMarkdown, renderAcademicPdf } from './renderer.js';
 
 export default class PdfGeneratorSkill implements Skill {
   id = 'pdf_generator';
@@ -35,51 +36,32 @@ export default class PdfGeneratorSkill implements Skill {
     const filename = (title || 'document').replace(/[^a-z0-9]/gi, '_').toLowerCase() + '_' + uuidv4().slice(0, 8);
     const pdfPath = path.join(this.workspaceDir, `${filename}.pdf`);
     
+    const parsedDocument = parseAcademicMarkdown(title, String(content));
+    const resolvedTitle = parsedDocument.title || title || 'Research Report';
+
     // Create a document
-    const doc = new PDFDocument({ margin: 50 });
+    const doc = new PDFDocument({
+      size: 'A4',
+      margins: { top: 72, bottom: 72, left: 72, right: 72 },
+      bufferPages: true
+    });
     const stream = fs.createWriteStream(pdfPath);
     doc.pipe(stream);
 
-    // Title Page
-    doc.fontSize(24).text(title || 'Research Report', { align: 'center' });
-    doc.moveDown();
-    doc.fontSize(14).text(`Author: ${author}`, { align: 'center' });
-    doc.fontSize(12).text(`Date: ${new Date().toLocaleDateString()}`, { align: 'center' });
-    doc.moveDown(2);
-
-    // Content Rendering (Simple Markdown Parser)
-    const lines = content.split('\n');
-    let inList = false;
-
-    for (const line of lines) {
-        const trimmed = line.trim();
-        
-        if (trimmed.startsWith('# ')) {
-            doc.addPage(); // New page for main chapters? Maybe just space
-            doc.fontSize(20).text(trimmed.substring(2), { underline: true });
-            doc.moveDown(0.5);
-        } else if (trimmed.startsWith('## ')) {
-            doc.fontSize(16).text(trimmed.substring(3));
-            doc.moveDown(0.5);
-        } else if (trimmed.startsWith('### ')) {
-            doc.fontSize(14).text(trimmed.substring(4));
-            doc.moveDown(0.5);
-        } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-            doc.fontSize(12).text(`• ${trimmed.substring(2)}`, { indent: 20 });
-        } else if (trimmed.match(/^\d+\./)) {
-             doc.fontSize(12).text(trimmed, { indent: 20 });
-        } else if (trimmed === '') {
-            doc.moveDown(0.5);
-        } else {
-            // Normal paragraph
-            // Handle bold **text** (simple regex replace won't work easily with pdfkit text flow without mixed fonts)
-            // For now, just render plain text
-            doc.fontSize(12).text(line, { align: 'justify' });
-        }
-    }
+    renderAcademicPdf(doc, parsedDocument, {
+      title: resolvedTitle,
+      author: String(author),
+      generatedAt: new Date()
+    });
 
     // Finalize PDF file
+    const finished = new Promise<void>((resolve, reject) => {
+      stream.on('finish', () => resolve());
+      stream.on('error', reject);
+      doc.on('error', reject);
+    });
     doc.end();
+    await finished;
 
     if (ctx.updateProgress) await ctx.updateProgress(100, `PDF Generated.`);
 
@@ -91,6 +73,7 @@ export default class PdfGeneratorSkill implements Skill {
       success: true,
       file_path: pdfPath,
       url: relativeUrl,
+      title: resolvedTitle,
       formatted_output: `### PDF Generated\n\n[Download PDF](${relativeUrl})`
     };
   }

@@ -33,7 +33,11 @@ export class ScholarTool {
         throw new Error(`arXiv API failed: ${response.statusText}`);
       }
 
-      const xmlData = await response.text();
+      // Ensure we treat response as UTF-8
+      const buffer = await response.arrayBuffer();
+      const decoder = new TextDecoder('utf-8');
+      const xmlData = decoder.decode(buffer);
+      
       const result = this.parser.parse(xmlData);
 
       if (!result.feed || !result.feed.entry) {

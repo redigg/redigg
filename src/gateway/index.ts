@@ -177,12 +177,15 @@ export class A2AGateway {
     let webDistPath = path.join(process.cwd(), 'web', 'dist'); // Local dev or if run from root
     if (!fs.existsSync(webDistPath)) {
         // Try finding it relative to the executable/module
-        // In dist/gateway/index.js, we go up two levels to get to dist/, then we might need to go to web/dist?
-        // Actually, if we ship 'web/dist' in the package, it will be in the package root.
-        // __dirname is .../dist/gateway
-        webDistPath = path.resolve(__dirname, '..', '..', 'web', 'dist');
+        // In dist/src/gateway/index.js:
+        // __dirname = .../dist/src/gateway
+        // .. -> .../dist/src
+        // .. -> .../dist
+        // .. -> .../ (package root)
+        // web/dist -> .../web/dist
+        webDistPath = path.resolve(__dirname, '..', '..', '..', 'web', 'dist');
     }
-
+    
     if (fs.existsSync(webDistPath)) {
         logger.info(`Serving frontend from ${webDistPath}`);
         this.app.use(express.static(webDistPath));

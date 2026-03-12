@@ -24,6 +24,43 @@ const PAPER_TYPE_PATTERNS: Record<string, RegExp> = {
   challenges: /\b(challenge|limitation|future direction|open problem|ethic|reliability)\b/i
 };
 
+const FACET_TO_PAPER_TYPES: Record<string, string[]> = {
+  survey: ['survey'],
+  review: ['survey'],
+  overview: ['survey'],
+  perspective: ['survey'],
+  benchmark: ['benchmark', 'evaluation'],
+  benchmarking: ['benchmark', 'evaluation'],
+  evaluation: ['benchmark', 'evaluation'],
+  dataset: ['benchmark', 'evaluation'],
+  metric: ['benchmark', 'evaluation'],
+  leaderboard: ['benchmark', 'evaluation'],
+  system: ['system'],
+  platform: ['system'],
+  framework: ['system', 'methods'],
+  workflow: ['workflow', 'system'],
+  pipeline: ['workflow', 'system'],
+  orchestration: ['workflow', 'system'],
+  methods: ['methods'],
+  method: ['methods'],
+  architecture: ['methods', 'system'],
+  planning: ['methods', 'workflow'],
+  reasoning: ['methods'],
+  application: ['application', 'system'],
+  applications: ['application', 'system'],
+  deployment: ['application', 'system'],
+  'case study': ['application'],
+  limitations: ['challenges'],
+  limitation: ['challenges'],
+  challenges: ['challenges'],
+  challenge: ['challenges'],
+  ethics: ['challenges'],
+  'future directions': ['challenges'],
+  'future direction': ['challenges'],
+  'open challenges': ['challenges'],
+  'open problems': ['challenges']
+};
+
 export interface AnchorAssessment {
   anchorCoverage: number;
   technicalAnchorCoverage: number;
@@ -109,19 +146,50 @@ export function countWords(content: string): number {
   return content.trim().split(/\s+/).filter(Boolean).length;
 }
 
-export function scorePaperForSection(paper: Paper, keywords: string[]): number {
+export function scorePaperForSection(
+  paper: Paper,
+  keywords: string[],
+  topicProfile?: TopicProfile,
+  section?: OutlineSection
+): number {
   const haystack = `${paper.title} ${paper.summary}`.toLowerCase();
-  const score = keywords.reduce((acc, keyword) => {
+  const keywordScore = keywords.reduce((acc, keyword) => {
     if (!keyword) return acc;
     const escaped = keyword.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const matches = haystack.match(new RegExp(escaped, 'g'));
     return acc + (matches?.length || 0);
   }, 0);
 
-  return score
+  let score = keywordScore
     + (paper.year || 0) / 10000
     + Math.min(Math.log10((paper.citationCount || 0) + 1), 2)
-    + sourceQualityBonus(paper.source);
+    + sourceQualityBonus(paper.source)
+    + Math.min((paper.relevanceScore || 0) / 10, 3);
+
+  if (topicProfile && section) {
+    const assessment = assessPaperAnchors(paper, topicProfile, section);
+    const preferredPaperTypes = inferPreferredPaperTypes(section, topicProfile);
+    const paperTypeSignals = assessment.paperTypeSignals.length > 0
+      ? assessment.paperTypeSignals
+      : detectPaperTypeSignals(haystack);
+    const preferredTypeMatches = paperTypeSignals.filter((signal) => preferredPaperTypes.has(signal));
+    const supportiveTypeMatches = paperTypeSignals.filter((signal) => topicProfile.preferredPaperTypes.includes(signal));
+    const tierBonus = assessment.tier === 'strong' ? 4 : assessment.tier === 'weak' ? 1.5 : -2.5;
+    const mismatchPenalty = preferredPaperTypes.size > 0 && paperTypeSignals.length > 0 && preferredTypeMatches.length === 0
+      ? -2.25
+      : 0;
+
+    score += assessment.anchorCoverage * 1.35;
+    score += assessment.technicalAnchorCoverage * 2.6;
+    score += assessment.aliasMatches.length * 3.1;
+    score += assessment.facetMatches.length * 2.4;
+    score += preferredTypeMatches.length * 4.5;
+    score += supportiveTypeMatches.length * 0.8;
+    score += tierBonus;
+    score += mismatchPenalty;
+  }
+
+  return Number(score.toFixed(3));
 }
 
 export function assessPaperAnchors(
@@ -260,6 +328,40 @@ function detectPaperTypeSignals(text: string): string[] {
     .map(([paperType]) => paperType);
 }
 
+function inferPreferredPaperTypes(section: OutlineSection, topicProfile: TopicProfile): Set<string> {
+  const sectionTerms = normalizeFacetTerms([
+    section.title,
+    section.description,
+    ...(section.focusFacets || []),
+    ...((topicProfile.sectionFacets?.[section.id]) || [])
+  ]);
+  const preferred = new Set<string>();
+
+  for (const term of sectionTerms) {
+    for (const [hint, paperTypes] of Object.entries(FACET_TO_PAPER_TYPES)) {
+      if (term === hint || term.includes(hint) || hint.includes(term)) {
+        for (const paperType of paperTypes) {
+          preferred.add(paperType);
+        }
+      }
+    }
+  }
+
+  if (preferred.size === 0) {
+    for (const term of normalizeFacetTerms(topicProfile.preferredPaperTypes || [])) {
+      for (const [hint, paperTypes] of Object.entries(FACET_TO_PAPER_TYPES)) {
+        if (term === hint || term.includes(hint) || hint.includes(term)) {
+          for (const paperType of paperTypes) {
+            preferred.add(paperType);
+          }
+        }
+      }
+    }
+  }
+
+  return preferred;
+}
+
 function normalizeMatchText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -267,7 +369,20 @@ function normalizeMatchText(value: string): string {
 function tokenizeForMatch(value: string): string[] {
   return normalizeMatchText(value)
     .split(' ')
+    .map(normalizeMatchToken)
     .filter((token) => token.length >= 2);
+}
+
+function normalizeMatchToken(token: string): string {
+  if (token.endsWith('ies') && token.length > 4) {
+    return `${token.slice(0, -3)}y`;
+  }
+
+  if (token.endsWith('s') && token.length > 4) {
+    return token.slice(0, -1);
+  }
+
+  return token;
 }
 
 function scorePaperRecord(paper: Paper): number {

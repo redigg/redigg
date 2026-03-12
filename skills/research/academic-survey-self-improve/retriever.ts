@@ -40,7 +40,7 @@ export async function retrieveSurveyPapers(
       sectionPapers.push(...hits);
     }
 
-    const fallbackCandidates = rankPapersForSection(seedPapers, section).slice(0, sectionLimit);
+    const fallbackCandidates = rankPapersForSection(seedPapers, section, outline.topicProfile).slice(0, sectionLimit);
     const dedupedCandidates = dedupePapers([...sectionPapers, ...fallbackCandidates]);
     const anchorFiltered = filterPapersByAnchors(
       dedupedCandidates,
@@ -48,7 +48,7 @@ export async function retrieveSurveyPapers(
       section,
       Math.max(sectionLimit, 3)
     );
-    const ranked = rankPapersForSection(anchorFiltered, section)
+    const ranked = rankPapersForSection(anchorFiltered, section, outline.topicProfile)
       .slice(0, sectionLimit);
 
     papersBySection[section.id] = ranked.length > 0 ? ranked : seedPapers.slice(0, sectionLimit);
@@ -70,7 +70,11 @@ export async function retrieveSurveyPapers(
   };
 }
 
-function rankPapersForSection(papers: Paper[], section: OutlineSection): Paper[] {
+function rankPapersForSection(
+  papers: Paper[],
+  section: OutlineSection,
+  topicProfile?: SurveyOutline['topicProfile']
+): Paper[] {
   const keywords = [
     section.title,
     section.description,
@@ -83,7 +87,8 @@ function rankPapersForSection(papers: Paper[], section: OutlineSection): Paper[]
     .filter((token) => token.length > 2);
 
   return [...papers].sort((a, b) => {
-    const scoreDiff = scorePaperForSection(b, keywords) - scorePaperForSection(a, keywords);
+    const scoreDiff = scorePaperForSection(b, keywords, topicProfile, section)
+      - scorePaperForSection(a, keywords, topicProfile, section);
     if (scoreDiff !== 0) return scoreDiff;
     return (b.year || 0) - (a.year || 0);
   });

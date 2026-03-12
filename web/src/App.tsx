@@ -47,6 +47,7 @@ interface Skill {
   name: string;
   description: string;
   packId?: string;
+  usage?: { used: number, success: number, failed: number };
 }
 
 interface SkillPack {
@@ -975,6 +976,12 @@ function App() {
                                             <div className="flex items-center gap-2 font-medium text-zinc-900 group-hover:text-indigo-600 transition-colors text-sm">
                                               <Sparkles className="h-4 w-4 text-indigo-500" />
                                               {skill.name}
+                                              {skill.usage && skill.usage.used > 0 && (
+                                                  <div className="ml-auto flex items-center gap-1.5 text-[10px] text-zinc-400 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100">
+                                                      <span className="font-mono">{skill.usage.used} runs</span>
+                                                      {(skill.usage.failed > 0) && <span className="text-red-500">({skill.usage.failed} fail)</span>}
+                                                  </div>
+                                              )}
                                             </div>
                                             <div className="text-xs text-zinc-500 mt-1 pl-6 line-clamp-2">{skill.description}</div>
                                           </button>

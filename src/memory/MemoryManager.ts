@@ -9,6 +9,8 @@ export interface Memory {
   content: string;
   metadata?: any;
   weight: number;
+  retrieval_count: number;
+  last_retrieved_at: string | null;
   last_accessed_at: string;
   created_at: string;
   updated_at: string;
@@ -40,6 +42,12 @@ export class MemoryManager {
         } catch (e) {}
         try {
             db.prepare('ALTER TABLE memories ADD COLUMN last_accessed_at TEXT').run();
+        } catch (e) {}
+        try {
+            db.prepare('ALTER TABLE memories ADD COLUMN retrieval_count INTEGER DEFAULT 0').run();
+        } catch (e) {}
+        try {
+            db.prepare('ALTER TABLE memories ADD COLUMN last_retrieved_at TEXT').run();
         } catch (e) {}
         try {
             db.prepare('ALTER TABLE memories ADD COLUMN parent_id TEXT').run();
@@ -83,11 +91,11 @@ export class MemoryManager {
     }
 
     const stmt = db.prepare(`
-      INSERT INTO memories (id, user_id, type, tier, content, metadata, weight, last_accessed_at, created_at, updated_at, parent_id, index_path)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, user_id, type, tier, content, metadata, weight, last_accessed_at, created_at, updated_at, parent_id, index_path, retrieval_count, last_retrieved_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(id, userId, type, tier, content, metadataStr, weight, now, now, now, parentId || null, indexPath);
+    stmt.run(id, userId, type, tier, content, metadataStr, weight, now, now, now, parentId || null, indexPath, 0, null);
 
     return this.getMemory(id);
   }
@@ -130,7 +138,7 @@ export class MemoryManager {
       params.push(type);
     }
     
-    query += ' ORDER BY weight DESC, created_at DESC';
+    query += ' ORDER BY weight DESC, COALESCE(last_retrieved_at, created_at) DESC';
 
     const stmt = db.prepare(query);
     const rows = stmt.all(...params);
@@ -172,12 +180,25 @@ export class MemoryManager {
       params.push(options.tier);
     }
 
-    sql += ' ORDER BY weight DESC, created_at DESC LIMIT ?';
+    sql += ' ORDER BY weight DESC, COALESCE(last_retrieved_at, created_at) DESC LIMIT ?';
     params.push(limit);
     
     const stmt = db.prepare(sql);
     const rows = stmt.all(...params);
-    return rows.map(this.parseRow);
+    const memories = rows.map(this.parseRow);
+
+    // Record retrieval for these memories
+    for (const mem of memories) {
+        await this.recordRetrieval(mem.id);
+    }
+
+    return memories;
+  }
+
+  public async recordRetrieval(id: string): Promise<void> {
+      const db = this.storage.getDb();
+      const now = new Date().toISOString();
+      db.prepare('UPDATE memories SET retrieval_count = retrieval_count + 1, last_retrieved_at = ?, updated_at = ? WHERE id = ?').run(now, now, id);
   }
 
   // Format memories for LLM context injection
@@ -194,6 +215,10 @@ export class MemoryManager {
     } else {
       memories = await this.getUserMemories(userId);
       memories = memories.slice(0, 10);
+      // Record retrieval for default memories too
+      for (const mem of memories) {
+          await this.recordRetrieval(mem.id);
+      }
     }
 
     if (memories.length === 0) return '';

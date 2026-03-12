@@ -62,6 +62,9 @@ interface Memory {
   type: string;
   tier: string;
   created_at: string;
+  updated_at: string;
+  retrieval_count: number;
+  last_retrieved_at: string | null;
   metadata?: any;
 }
 
@@ -1112,6 +1115,12 @@ function App() {
                                              {m.type}
                                          </span>
                                          <span className="text-[10px] text-zinc-400">{new Date(m.created_at).toLocaleDateString()}</span>
+                                         {m.retrieval_count > 0 && (
+                                             <span className="ml-auto flex items-center gap-1 text-[10px] font-medium text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-full border border-indigo-100" title={`Last retrieved: ${new Date(m.last_retrieved_at!).toLocaleString()}`}>
+                                                 <Sparkles className="h-2.5 w-2.5" />
+                                                 {m.retrieval_count}
+                                             </span>
+                                         )}
                                          </div>
                                          <div 
                                              className="absolute right-2 top-2 p-1.5 rounded-md hover:bg-red-100 text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
@@ -1159,6 +1168,12 @@ function App() {
                                  {m.metadata?.authors?.join(', ') || 'Unknown Author'}
                               </div>
                               <span className="text-[10px] text-zinc-400">{new Date(m.created_at).toLocaleDateString()}</span>
+                              {m.retrieval_count > 0 && (
+                                  <span className="ml-auto flex items-center gap-1 text-[10px] font-medium text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-full border border-indigo-100" title={`Last retrieved: ${new Date(m.last_retrieved_at!).toLocaleString()}`}>
+                                      <Sparkles className="h-2.5 w-2.5" />
+                                      {m.retrieval_count}
+                                  </span>
+                              )}
                            </div>
                            {m.metadata?.url && (
                              <a href={m.metadata.url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:underline mt-2 flex items-center gap-1">

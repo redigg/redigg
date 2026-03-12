@@ -548,11 +548,38 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
   ) {
     // Evolve Memory (Async)
     try {
-        const result = await this.memoryEvo.evolve(userId, message, reply, (msg) => log(msg));
-        if (result && result.added && result.added.length > 0) {
-            // log(`[Evolution] Extracted ${result.added.length} new memories.`); // Redundant as memoryEvo logs it now
+        // DISABLED: Memory Evolution via LLM to save tokens as per user request.
+        // const result = await this.memoryEvo.evolve(userId, message, reply, (msg) => log(msg));
+        // if (result && result.added && result.added.length > 0) {
+        //     log(`[Evolution] Extracted ${result.added.length} new memories.`);
+        //     result.added.forEach((m: any) => {
+        //         log(`[Evolution] New Memory: "${m.content}" (${m.type}/${m.tier})`);
+        //     });
+        //     // Silent execution: no chat message for memory updates
+        // }
+        // if (result && result.updated && result.updated.length > 0) {
+        //      log(`[Evolution] Updated ${result.updated.length} memories.`);
+        //      result.updated.forEach((m: any) => {
+        //         log(`[Evolution] Updated Memory: "${m.content}" (${m.type}/${m.tier})`);
+        //      });
+        // }
+
+        // Trigger memory consolidation immediately after new interaction
+        // This handles background organization (pruning/promotion) without extra LLM extraction calls
+        await this.memoryManager.consolidateMemories(userId).then(() => {
+             // logger.debug('Post-chat consolidation complete');
+        }).catch(e => {
+             logger.error('Post-chat consolidation failed', e);
+        });
+
+        // After response and memory evolution, generate a title for the session if it's still generic
+        if (session.messages.length <= 4 && (session.title || '').length > 20) { // Early in convo or long default title
+            const title = await this.generateSessionTitle(session, message, reply);
+            if (title) {
+                session.title = title;
+                onProgress?.('token', `[TITLE_GENERATED]${title}`);
+            }
         }
-        await this.memoryManager.consolidateMemories(userId).catch(e => logger.error('Consolidation failed', e));
     } catch (err) {
       logger.error('Memory evolution failed:', err);
     }

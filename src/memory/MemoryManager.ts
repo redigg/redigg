@@ -231,6 +231,14 @@ export class MemoryManager {
     let stats = { moved: 0, promoted: 0, pruned: 0 };
 
     // 1. Working -> Short-term (if > 1 hour old)
+    // Actually, let's relax this. Working memory is for current session context.
+    // Maybe we just keep last N items as working, rest move to short-term?
+    // Or time-based is fine.
+    
+    // NEW: Auto-archive very old working/short-term memories to a history file or delete?
+    // Let's implement a simple cleanup:
+    // If we have too many memories, summarize or delete old ones.
+    
     const workingMemories = await this.getMemoriesByTier(userId, 'working');
     // Log working memories stats if any
     if (workingMemories.length > 0) {
@@ -246,23 +254,31 @@ export class MemoryManager {
         }
     }
 
-    // 2. Short-term -> Long-term (if weight > 5)
+    // 2. Short-term -> Long-term (if weight > 3) - Lower threshold for promotion
     const shortTermMemories = await this.getMemoriesByTier(userId, 'short_term');
+    
+    // Sort by age (oldest first) to process history
+    shortTermMemories.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    
     for (const mem of shortTermMemories) {
-        if (mem.weight > 5) {
+        if (mem.weight >= 3) { // Lowered from 5
             console.log(`[Memory] Promoting ${mem.id} to long-term (high importance)`);
             await this.updateMemoryTier(mem.id, 'long_term');
             stats.promoted++;
         } else {
             // Pruning check
             const age = now.getTime() - new Date(mem.created_at).getTime();
-            if (mem.weight < 0.5 && age > 7 * 24 * 60 * 60 * 1000) {
+            // Prune if older than 3 days and low weight (was 7 days)
+            if (mem.weight < 1.0 && age > 3 * 24 * 60 * 60 * 1000) {
                  console.log(`[Memory] Pruning low-value memory ${mem.id}`);
-                 db.prepare('DELETE FROM memories WHERE id = ?').run(mem.id);
+                 await this.deleteMemory(mem.id);
                  stats.pruned++;
             }
         }
     }
+    
+    // 3. Clean up Long-term if too many? (Maybe keep max 100?)
+    // For now, let's keep it simple.
     
     return stats;
   }

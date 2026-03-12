@@ -1,11 +1,30 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 
+export interface TopicProfile {
+  originalTopic: string;
+  normalizedTopic: string;
+  anchorTerms: string[];
+  aliasPhrases: string[];
+  intentFacets: string[];
+  preferredPaperTypes: string[];
+  sectionFacets: Record<string, string[]>;
+}
+
+export interface ExpandedQuery {
+  query: string;
+  facet: string;
+  weight: number;
+  source: 'base' | 'alias' | 'facet' | 'section' | 'fallback';
+}
+
 export interface OutlineSection {
   id: string;
   title: string;
   description: string;
   searchQueries: string[];
   targetWordCount: number;
+  focusFacets?: string[];
+  queryPlan?: ExpandedQuery[];
 }
 
 export interface SurveyOutline {
@@ -13,6 +32,7 @@ export interface SurveyOutline {
   abstractDraft: string;
   taxonomy: string[];
   sections: OutlineSection[];
+  topicProfile?: TopicProfile;
 }
 
 export interface RetrievalResult {

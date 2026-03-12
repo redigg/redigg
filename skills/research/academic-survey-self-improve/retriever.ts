@@ -22,8 +22,13 @@ export async function retrieveSurveyPapers(
 
   for (const section of outline.sections) {
     const sectionPapers: Paper[] = [];
+    const plannedQueries = Array.isArray(section.queryPlan) && section.queryPlan.length > 0
+      ? section.queryPlan
+          .sort((a, b) => b.weight - a.weight)
+          .map((item) => item.query)
+      : section.searchQueries;
     const queries = Array.from(new Set([
-      ...section.searchQueries,
+      ...plannedQueries,
       `${topic} ${section.title}`,
       `${topic} ${section.description}`
     ].map((query) => query.trim()).filter(Boolean)));

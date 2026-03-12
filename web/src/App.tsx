@@ -1220,17 +1220,6 @@ function App() {
           </div>
 
           <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 scroll-smooth relative scrollbar-thin scrollbar-thumb-zinc-200 scrollbar-track-transparent">
-            <div className="sticky top-0 z-10 flex justify-end pointer-events-none p-4">
-                {config && (
-                    <div className="bg-white/80 backdrop-blur-sm border border-zinc-200 rounded-full px-3 py-1.5 text-xs text-zinc-500 shadow-sm flex items-center gap-3">
-                        <span className="flex items-center gap-1.5 font-medium text-zinc-700">
-                            {config.model}
-                            <ChevronDown className="h-3 w-3 text-zinc-400" />
-                        </span>
-                    </div>
-                )}
-            </div>
-
             {messages.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-zinc-400 space-y-8 pb-20">
                 <div className="bg-zinc-50 p-6 rounded-2xl border border-zinc-100 shadow-sm">

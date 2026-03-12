@@ -225,6 +225,13 @@ export function ChatMessage({ role, content, isThinking, logs, todos, stats, att
                 )}
 
                 <div className="text-left w-full">
+                    {/* Auto Mode Badge */}
+                    {content.startsWith('[AUTO]') && (
+                        <div className="mb-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-bold border border-indigo-200 uppercase tracking-wider">
+                            <Sparkles className="h-3 w-3 fill-indigo-500 text-indigo-500" />
+                            Auto Research
+                        </div>
+                    )}
                     <div className="prose prose-zinc prose-sm max-w-none dark:prose-invert prose-p:leading-relaxed prose-pre:bg-zinc-50 prose-pre:border prose-pre:border-zinc-200 prose-code:bg-zinc-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded-md prose-code:text-zinc-800 prose-code:before:content-none prose-code:after:content-none">
                     <ReactMarkdown 
                         remarkPlugins={[remarkGfm, remarkBreaks, remarkMath]}
@@ -336,7 +343,7 @@ export function ChatMessage({ role, content, isThinking, logs, todos, stats, att
                             td: ({node, ...props}) => <td className="px-3 py-2 align-top text-sm text-zinc-500 border-t border-zinc-100 min-w-[100px]" {...props} />,
                         }}
                     >
-                        {content}
+                        {content.replace(/^\[AUTO\]\s*/, '')}
                     </ReactMarkdown>
                     </div>
                     {!content && isThinking && (

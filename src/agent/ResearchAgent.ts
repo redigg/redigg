@@ -418,33 +418,28 @@ Rules:
                break;
           case 'AutoResearch':
               const topic = step.params.topic || 'General Research';
-              const iterations = Math.min(step.params.iterations || 3, 5); // Limit to 5
-              log(`[AutoResearch] Starting continuous optimization loop for "${topic}" (${iterations} rounds)...`);
-              
-              // Notify session that auto mode is active
-              // We can use a special log or message that the frontend parses?
-              // Or better, we just send logs. Ideally, we'd have a session status.
-              // For now, let's just log it clearly.
+              // User requested continuous mode until stopped manually.
+              log(`[AutoResearch] Starting continuous optimization loop for "${topic}". Will run until stopped.`);
               
               let currentContent = `Initial draft for ${topic}.`;
+              let round = 0;
               
-              for (let i = 1; i <= iterations; i++) {
+              while (true) {
+                  round++;
+                  
+                  // Check stop signal at start of loop
                   if (this.sessionManager.isSessionStopped(session.id)) {
                       log('[AutoResearch] Session stopped by user.');
-                      output = `Auto-research stopped by user after ${i-1} iterations.`;
+                      output = `Auto-research stopped by user after ${round-1} rounds.`;
                       break;
                   }
 
-                  // Check if session is still active/not stopped?
-                  // Currently we don't have a cancellation token passed down here.
-                  // But we can check session state if we had it.
-                  
-                  log(`[AutoResearch] Round ${i}/${iterations}: Analyzing and improving...`);
+                  log(`[AutoResearch] Round ${round}: Analyzing and improving...`);
                   
                   // 1. Plan Improvement
                   const improvePrompt = `
 You are optimizing a research report on "${topic}".
-Current Round: ${i}/${iterations}
+Current Round: ${round}
 Current Content Length: ${currentContent.length} chars.
 
 Goal: Identify ONE specific area to improve (e.g., "Add recent statistics", "Explain concept X better", "Find a case study").
@@ -454,8 +449,10 @@ Return ONLY the improvement task description.
                   const improvementTask = planRes.content.trim();
                   log(`[AutoResearch] Improvement Task: ${improvementTask}`);
                   
+                  // Check stop signal again before expensive operations
+                  if (this.sessionManager.isSessionStopped(session.id)) break;
+
                   // 2. Execute Improvement (Simulated via LLM or Skill)
-                  // For now, we use LLM to expand/refine based on the task
                   const refinePrompt = `
 You are an expert researcher.
 Topic: ${topic}
@@ -470,8 +467,8 @@ Action: Perform the task and rewrite the FULL content to include the new informa
                    currentContent = refineRes.content;
                    
                    // 3. Generate Intermediate PDF
-                   const title = `${topic} - v${i}`;
-                   log(`[AutoResearch] Generating PDF version ${i}...`);
+                   const title = `${topic} - v${round}`;
+                   log(`[AutoResearch] Generating PDF version ${round}...`);
                    const pdfRes = await this.skillManager.executeSkill('pdf_generator', userId, { title, content: currentContent }, (type, content) => log(`[Skill] ${content}`));
                    
                    if (pdfRes.url && pdfRes.file_path) {
@@ -488,10 +485,13 @@ Action: Perform the task and rewrite the FULL content to include the new informa
                         accumulatedArtifacts.push(artifact); // Add to global list
                         
                         // Send intermediate update to chat
-                        this.sessionManager.addMessage(session.id, 'assistant', `Round ${i} Complete: I have improved the document based on "${improvementTask}".\n\n[Download ${title}.pdf](${artifact.url})`, { attachments: [artifact] });
+                        this.sessionManager.addMessage(session.id, 'assistant', `[AUTO] Round ${round} Complete: I have improved the document based on "${improvementTask}".\n\n[Download ${title}.pdf](${artifact.url})`, { attachments: [artifact], auto: true });
                    }
+                   
+                   // Small delay to prevent tight loop if LLM is very fast, and allow stop signal processing
+                   await new Promise(resolve => setTimeout(resolve, 2000));
               }
-              output = `Auto-research completed after ${iterations} iterations. Final content length: ${currentContent.length}`;
+              output = `Auto-research completed/stopped. Final content length: ${currentContent.length}`;
               break;
           case 'Chat': {
               // Use direct LLM call to avoid recursion loop

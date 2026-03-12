@@ -1,5 +1,11 @@
 import { Skill, SkillContext, SkillParams, SkillResult } from '../../../src/skills/types.js';
-import { ScholarTool } from '../../../src/skills/lib/ScholarTool.js';
+import { ScholarTool, type Paper } from '../../../src/skills/lib/ScholarTool.js';
+import { createSurveyOutline } from './outline.js';
+import { retrieveSurveyPapers } from './retriever.js';
+import { writeSurveySections } from './section-writer.js';
+import { reviewSurveySections } from './reviewer.js';
+import { assembleSurvey } from './assembler.js';
+import { dedupePapers } from './utils.js';
 
 export default class AcademicSurveySelfImproveSkill implements Skill {
   id = 'academic_survey_self_improve';
@@ -10,34 +16,27 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
   async execute(context: SkillContext, params: SkillParams): Promise<SkillResult> {
     const { topic, depth = 'brief' } = params;
     context.log('thinking', `Starting academic survey on: ${topic}`);
-    if (context.updateProgress) {
-        await context.updateProgress(10, 'Initializing search', { topic });
-    }
+    await context.updateProgress?.(10, 'Initializing search', { topic, depth });
 
     const scholar = new ScholarTool();
-    let papers = await scholar.searchPapers(topic, 5);
+    let seedPapers = await scholar.searchPapers(topic, 5);
 
-    if (papers.length === 0) {
+    if (seedPapers.length === 0) {
       context.log('thinking', 'No papers found. Attempting to broaden search...');
-      if (context.updateProgress) {
-          await context.updateProgress(30, 'No results found, refining query...', { originalTopic: topic });
-      }
+      await context.updateProgress?.(20, 'No results found, refining query...', { originalTopic: topic });
       const betterQuery = await this.refineQuery(context, topic);
+
       if (betterQuery !== topic) {
-          context.log('thinking', `Refined query to: ${betterQuery}`);
-          if (context.updateProgress) {
-              await context.updateProgress(40, `Searching with refined query: ${betterQuery}`);
-          }
-          papers = await scholar.searchPapers(betterQuery, 5);
+        context.log('thinking', `Refined query to: ${betterQuery}`);
+        await context.updateProgress?.(25, `Searching with refined query: ${betterQuery}`);
+        seedPapers = await scholar.searchPapers(betterQuery, 5);
       }
     }
 
-    if (papers.length === 0) {
-      if (context.updateProgress) {
-          await context.updateProgress(100, 'Survey failed: No papers found');
-      }
-      return { 
-        success: false, 
+    if (seedPapers.length === 0) {
+      await context.updateProgress?.(100, 'Survey failed: No papers found');
+      return {
+        success: false,
         topic,
         depth,
         message: 'No papers found even after refinement.',
@@ -51,11 +50,61 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
       };
     }
 
-    context.log('thinking', `Found ${papers.length} papers. Analyzing...`);
-    if (context.updateProgress) {
-        await context.updateProgress(60, `Analyzing ${papers.length} papers`, { papers });
-    }
+    await context.updateProgress?.(35, 'Planning survey outline', { seedPaperCount: seedPapers.length });
+    const outline = await createSurveyOutline(context, topic, seedPapers, depth);
 
+    await context.updateProgress?.(50, 'Retrieving evidence for each section', { sectionCount: outline.sections.length });
+    const retrieval = await retrieveSurveyPapers(scholar, topic, outline, seedPapers, { sectionLimit: 4, perQueryLimit: 4 });
+    const papers = dedupePapers(retrieval.papers);
+    const paperIndexMap = new Map(papers.map((paper, index) => [paper.title.toLowerCase(), index + 1]));
+
+    await this.persistPapers(context, papers);
+
+    await context.updateProgress?.(70, 'Writing section drafts', {
+      sectionCount: outline.sections.length,
+      deduplicatedPapers: retrieval.searchMetadata.deduplicatedCount
+    });
+    const draftedSections = await writeSurveySections(context, topic, outline, retrieval.papersBySection, paperIndexMap);
+
+    await context.updateProgress?.(85, 'Reviewing and refining survey sections', {
+      sectionCount: draftedSections.length
+    });
+    const reviewed = await reviewSurveySections(context, topic, draftedSections);
+
+    await context.updateProgress?.(95, 'Assembling final survey document', {
+      overallScore: reviewed.qualityReport.overallScore
+    });
+    const finalSurvey = assembleSurvey(outline, reviewed.sections, papers, reviewed.qualityReport);
+
+    await context.updateProgress?.(100, 'Survey complete', {
+      wordCount: finalSurvey.wordCount,
+      citationCount: finalSurvey.citationCount,
+      overallScore: reviewed.qualityReport.overallScore
+    });
+
+    return {
+      success: true,
+      topic,
+      depth,
+      summary: finalSurvey.markdown,
+      papers,
+      sources: papers,
+      outline,
+      sections: reviewed.sections,
+      quality_report: reviewed.qualityReport,
+      formatted_output: finalSurvey.markdown,
+      final_survey: finalSurvey,
+      retrieval_metadata: retrieval.searchMetadata
+    };
+  }
+
+  private async refineQuery(context: SkillContext, originalQuery: string): Promise<string> {
+    const prompt = `The user searched for "${originalQuery}" on arXiv but found no results. Suggest a broader or more effective search query for the same intent. Return ONLY the new query string.`;
+    const response = await context.llm.chat([{ role: 'user', content: prompt }]);
+    return response.content.trim().replace(/^"|"$/g, '');
+  }
+
+  private async persistPapers(context: SkillContext, papers: Paper[]): Promise<void> {
     for (const paper of papers) {
       if (context.memory && typeof (context.memory as any).addPaper === 'function') {
         await (context.memory as any).addPaper(
@@ -67,47 +116,5 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
         );
       }
     }
-
-    // Summarize
-    const summary = await this.summarizePapers(context, topic, papers);
-    
-    if (context.updateProgress) {
-        await context.updateProgress(100, 'Survey complete');
-    }
-
-    return {
-      success: true,
-      topic,
-      depth,
-      summary,
-      papers,
-      sources: papers,
-      outline: null,
-      sections: [],
-      quality_report: null,
-      formatted_output: summary
-    };
-  }
-
-  private async refineQuery(context: SkillContext, originalQuery: string): Promise<string> {
-      const prompt = `The user searched for "${originalQuery}" on arXiv but found no results. Suggest a broader or more effective search query for the same intent. Return ONLY the new query string.`;
-      const response = await context.llm.chat([{ role: 'user', content: prompt }]);
-      return response.content.trim().replace(/^"|"$/g, '');
-  }
-
-  private async summarizePapers(context: SkillContext, topic: string, papers: any[]): Promise<string> {
-      const papersText = papers.map((p, i) => `[${i+1}] ${p.title} (${p.year})\nSummary: ${p.summary}`).join('\n\n');
-      const prompt = `
-      Perform a literature survey on the topic: "${topic}".
-      Based on the following papers found:
-      
-      ${papersText}
-      
-      Synthesize a coherent summary of the state of research. Highlight key trends, methodologies, and findings.
-      Format as Markdown.
-      `;
-      
-      const response = await context.llm.chat([{ role: 'user', content: prompt }]);
-      return response.content;
   }
 }

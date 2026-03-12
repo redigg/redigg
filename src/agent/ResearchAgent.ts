@@ -101,11 +101,13 @@ export class ResearchAgent {
             const memoryStats = result.memory;
             if (memoryStats && (memoryStats.moved > 0 || memoryStats.promoted > 0 || memoryStats.pruned > 0)) {
                 const msg = `[System Heartbeat] Memory Optimization: Moved ${memoryStats.moved} to short-term, Promoted ${memoryStats.promoted} to long-term.`;
+                logger.info(msg);
                 
-                const session = this.sessionManager.getOrCreateActiveSession('web-user');
-                if (session) {
-                    this.sessionManager.addMessage(session.id, 'assistant', msg);
-                }
+                // User requested not to send chat messages for background memory operations
+                // const session = this.sessionManager.getOrCreateActiveSession('web-user');
+                // if (session) {
+                //    this.sessionManager.addMessage(session.id, 'assistant', msg);
+                // }
             }
 
             const skillStats = result.skills;

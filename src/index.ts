@@ -104,6 +104,7 @@ export async function main(options: { port?: number } = {}) {
   const systemSkillsDir = path.join(__dirname, '..', 'skills');
 
   const skillManager = new SkillManager(llm, memoryManager, process.cwd(), undefined, systemSkillsDir);
+  await skillManager.loadSkillsFromDisk();
 
   const memoryEvo = new MemoryEvolutionSystem(memoryManager, llm);
   const agent = new ResearchAgent(memoryManager, memoryEvo, llm, skillManager);

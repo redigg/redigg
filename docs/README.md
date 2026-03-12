@@ -11,22 +11,22 @@
 
 | 文档 | 说明 | 日期 | 版本 | 状态 |
 |------|------|------|------|------|
-| [redigg-design.md](./redigg-design.md) | **产品设计文档** - 愿景、架构、技术实现 | 2026-03-07 | v1.1.0 | ✅ 完成 |
-| [contribution.md](./contribution.md) | **贡献指南** - 开发标准、代码规范、Git 流程 | 2026-03-07 | v1.1.0 | ✅ 完成 |
+| [redigg-design.md](./design/redigg-design.md) | **产品设计文档** - 愿景、架构、技术实现 | 2026-03-07 | v1.1.0 | ✅ 完成 |
+| [contribution.md](./guides/contribution.md) | **贡献指南** - 开发标准、代码规范、Git 流程 | 2026-03-07 | v1.1.0 | ✅ 完成 |
 
 ### 规划文档
 
 | 文档 | 说明 | 日期 | 版本 | 状态 |
 |------|------|------|------|------|
-| [PRODUCT_ROADMAP.md](./PRODUCT_ROADMAP.md) | **产品路线图** - Phase 1-4 战略路线、优先级、里程碑 | 2026-03-08 | v1.1.0 | 📅 规划中 |
-| [ITERATION_PLAN.md](./ITERATION_PLAN.md) | **迭代计划** - 5 阶段详细迭代方案、技术债务、KPIs | 2026-03-08 | v1.1.0 | 📅 规划中 |
-| [SCHEDULED_TASKS.md](./SCHEDULED_TASKS.md) | **定时任务规划** - Cron 任务列表、实现方案、监控指标 | 2026-03-08 | v1.1.0 | 📅 规划中 |
+| [PRODUCT_ROADMAP.md](./planning/PRODUCT_ROADMAP.md) | **产品路线图** - Phase 1-4 战略路线、优先级、里程碑 | 2026-03-08 | v1.1.0 | 📅 规划中 |
+| [ITERATION_PLAN.md](./planning/ITERATION_PLAN.md) | **迭代计划** - 5 阶段详细迭代方案、技术债务、KPIs | 2026-03-08 | v1.1.0 | 📅 规划中 |
+| [SCHEDULED_TASKS.md](./planning/SCHEDULED_TASKS.md) | **定时任务规划** - Cron 任务列表、实现方案、监控指标 | 2026-03-08 | v1.1.0 | 📅 规划中 |
 
 ### 开发指南
 
 | 文档 | 说明 | 日期 | 版本 | 状态 |
 |------|------|------|------|------|
-| [QUICK_START_V2.md](./QUICK_START_V2.md) | **快速启动指南** - 2 小时完成向量搜索+Planner+ 反馈系统 | 2026-03-08 | v1.1.0 | 📝 草稿 |
+| [QUICK_START_V2.md](./guides/QUICK_START_V2.md) | **快速启动指南** - 2 小时完成向量搜索+Planner+ 反馈系统 | 2026-03-08 | v1.1.0 | 📝 草稿 |
 
 ---
 
@@ -143,13 +143,18 @@ workspace/
 │   ├── tests/                # 测试文件
 │   └── docs/                 # 📚 项目文档
 │       ├── README.md         # 文档索引 (从这里开始)
-│       ├── redigg-design.md  # 产品设计文档
-│       ├── contribution.md   # 贡献指南
-│       ├── PRODUCT_ROADMAP.md # 产品路线图
-│       ├── ITERATION_PLAN.md  # 迭代计划
-│       ├── SCHEDULED_TASKS.md # 定时任务规划
-│       └── QUICK_START_V2.md  # 快速启动指南
-└── ...                       # 其他 OpenClaw workspace 文件
+│       ├── design/           # 设计文档
+│       │   └── redigg-design.md
+│       ├── planning/         # 规划文档
+│       │   ├── PRODUCT_ROADMAP.md
+│       │   ├── ITERATION_PLAN.md
+│       │   └── SCHEDULED_TASKS.md
+│       ├── guides/           # 开发指南
+│       │   ├── contribution.md
+│       │   └── QUICK_START_V2.md
+│       └── archive/          # 归档文档
+│           └── README_OLD.md
+└── ...                       # 其他 workspace 文件
 ```
 
 ---

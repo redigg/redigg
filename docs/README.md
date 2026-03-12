@@ -12,6 +12,7 @@
 | 文档 | 说明 | 日期 | 版本 | 状态 |
 |------|------|------|------|------|
 | [redigg-design.md](./design/redigg-design.md) | **产品设计文档** - 愿景、架构、技术实现 | 2026-03-07 | v1.1.0 | ✅ 完成 |
+| [redigg-frontend-architecture.md](./design/redigg-frontend-architecture.md) | **前端架构文档** - 前端技术栈、目录结构、状态管理 | 2026-03-08 | v1.0.0 | ✅ 完成 |
 | [contribution.md](./guides/contribution.md) | **贡献指南** - 开发标准、代码规范、Git 流程 | 2026-03-07 | v1.1.0 | ✅ 完成 |
 
 ### 规划文档
@@ -19,6 +20,7 @@
 | 文档 | 说明 | 日期 | 版本 | 状态 |
 |------|------|------|------|------|
 | [PRODUCT_ROADMAP.md](./planning/PRODUCT_ROADMAP.md) | **产品路线图** - Phase 1-4 战略路线、优先级、里程碑 | 2026-03-08 | v1.1.0 | 📅 规划中 |
+| [redigg-frontend-prd.md](./planning/redigg-frontend-prd.md) | **前端 PRD** - 前端需求、功能列表、交互设计 | 2026-03-08 | v1.0.0 | ✅ 完成 |
 | [ITERATION_PLAN.md](./planning/ITERATION_PLAN.md) | **迭代计划** - 5 阶段详细迭代方案、技术债务、KPIs | 2026-03-08 | v1.1.0 | 📅 规划中 |
 | [SCHEDULED_TASKS.md](./planning/SCHEDULED_TASKS.md) | **定时任务规划** - Cron 任务列表、实现方案、监控指标 | 2026-03-08 | v1.1.0 | 📅 规划中 |
 
@@ -46,6 +48,19 @@
 
 ---
 
+### redigg-frontend-architecture.md
+**前端架构文档** - 前端技术细节
+
+**包含内容**:
+- 技术选型 (React, Vite, Tailwind, Lucide)
+- 目录结构规范
+- 组件设计与状态管理
+- API 集成模式
+
+**适用场景**: 前端开发、代码 Review
+
+---
+
 ### contribution.md
 **贡献指南** - 开发标准和流程规范
 
@@ -69,10 +84,21 @@
 - Phase 1-4 战略路线
 - P0/P1/P2 优先级排序
 - 成功指标 (KPIs)
-- 实验计划
-- 里程碑时间线
 
 **适用场景**: 产品规划、资源分配、进度追踪
+
+---
+
+### redigg-frontend-prd.md
+**前端 PRD** - 详细的前端需求说明书
+
+**包含内容**:
+- 用户角色与核心流程
+- 功能需求 (聊天、技能、记忆管理)
+- 界面原型描述
+- 非功能需求
+
+**适用场景**: 需求评审、开发排期
 
 ---
 

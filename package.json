@@ -1,8 +1,11 @@
 {
-  "name": "redigg",
+  "name": "@redigg/redigg",
   "version": "0.1.0",
-  "description": "Redigg: Autonomous Research Agent Platform based on OpenClaw",
+  "description": "Autonomous Research Agent for Scientific Discovery",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "dist/src/index.js",
   "bin": {
     "redigg": "./dist/src/bin.js"

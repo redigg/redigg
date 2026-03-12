@@ -40,7 +40,7 @@ Redigg is an advanced autonomous research agent designed to accelerate scientifi
 #### Option 1: Install via NPM (Recommended)
 
 ```bash
-npm install -g redigg
+npm install -g @redigg/redigg
 redigg start
 ```
 This will start the Gateway on `http://localhost:4000` (serving the Dashboard).
@@ -103,7 +103,7 @@ Redigg 是一个专为加速科学发现而设计的先进自主研究智能体�
 #### 方式 1: 通过 NPM 安装 (推荐)
 
 ```bash
-npm install -g redigg
+npm install -g @redigg/redigg
 redigg start
 ```
 这将在 `http://localhost:4000` 启动网关和界面。

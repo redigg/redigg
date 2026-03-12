@@ -34,7 +34,7 @@ export default class SchedulingSkill implements Skill {
         case 'list_tasks':
           const tasks = finalCron.getAllTasks();
           return { 
-              tasks: tasks.map(t => ({ 
+              tasks: tasks.map((t: any) => ({ 
                   id: t.id, 
                   name: t.name, 
                   cron: t.cronExpression, 
@@ -62,7 +62,7 @@ export default class SchedulingSkill implements Skill {
                       skillId,
                       'scheduled-task', // generic user id for system tasks
                       skillParams,
-                      (type, content) => console.log(`[ScheduledTask:${name}] [${type}] ${content}`)
+                      (type: any, content: any) => console.log(`[ScheduledTask:${name}] [${type}] ${content}`)
                   );
               } catch (e) {
                   console.error(`[ScheduledTask:${name}] Failed:`, e);

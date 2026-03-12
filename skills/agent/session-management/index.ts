@@ -41,7 +41,7 @@ export default class SessionSkill implements Skill {
           const history = manager.getHistory(sessionId, limit);
           return { 
               sessionId,
-              history: history.map(m => ({ role: m.role, content: m.content, time: m.timestamp })) 
+              history: history.map((m: any) => ({ role: m.role, content: m.content, time: m.timestamp })) 
           };
 
         case 'clear_history':

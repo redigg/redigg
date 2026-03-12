@@ -334,8 +334,6 @@ function App() {
           // Reconstruct messages, merging logs into the *preceding* agent message or creating a placeholder
           const reconstructedMessages: ChatMessage[] = [];
           
-          let isAutoActive = false;
-
           for (const msg of history) {
               // Check for auto research log to determine active state
               if (msg.role === 'log' && msg.content.includes('[AutoResearch]')) {
@@ -417,7 +415,6 @@ function App() {
           // AND the content does NOT say "Auto-research completed".
           const lastMsg = reconstructedMessages[reconstructedMessages.length - 1];
           if (lastMsg && lastMsg.role === 'agent') {
-              const lastLog = lastMsg.logs?.[lastMsg.logs.length - 1] || '';
               const isAutoLog = lastMsg.logs?.some(l => l.includes('[AutoResearch]'));
               const isCompleted = lastMsg.content.includes('Auto-research completed');
               
@@ -474,7 +471,7 @@ function App() {
       };
   };
 
-  const handleSSEMessage = (data: any, sessionId: string) => {
+  const handleSSEMessage = (data: any, _sessionId: string) => {
         // Find the last agent message (placeholder or real)
         // If we reconnected, we might not have the exact "agentMsgId" in closure.
         // We need to find the *latest* agent message in state.

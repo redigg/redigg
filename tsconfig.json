@@ -4,7 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -19,6 +19,6 @@
       "@app/*": ["src/app/*"]
     }
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "reference"]
+  "include": ["src/**/*", "skills/**/*"],
+  "exclude": ["node_modules", "dist", "reference", "skills/vendor"]
 }

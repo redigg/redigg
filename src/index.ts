@@ -71,7 +71,14 @@ class OpenAIClient implements LLMClient {
   }
 }
 
-async function main() {
+import { fileURLToPath } from 'url';
+
+import { SkillManager } from './skills/SkillManager.js';
+import path from 'path';
+
+// ...
+
+export async function main(options: { port?: number } = {}) {
   logger.info('🦎 Redigg Agent System Starting...');
 
   // 1. Initialize Core Components
@@ -91,18 +98,29 @@ async function main() {
     llm = new MockLLMClient();
   }
 
+  // Calculate system skills path
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const systemSkillsDir = path.join(__dirname, '..', 'skills');
+
+  const skillManager = new SkillManager(llm, memoryManager, process.cwd(), undefined, systemSkillsDir);
+
   const memoryEvo = new MemoryEvolutionSystem(memoryManager, llm);
-  const agent = new ResearchAgent(memoryManager, memoryEvo, llm);
+  const agent = new ResearchAgent(memoryManager, memoryEvo, llm, skillManager);
   
   // Start agent background processes (heartbeat, cron)
   agent.start();
 
   // Start A2A Gateway
-  const gateway = new A2AGateway(agent, 4000);
+  const port = options.port || parseInt(process.env.PORT || '4000');
+  const gateway = new A2AGateway(agent, port);
   gateway.start();
 }
 
-main().catch(error => {
-  logger.error('Failed to start Redigg:', error);
-  process.exit(1);
-});
+// Only run if executed directly
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    logger.error('Failed to start Redigg:', error);
+    process.exit(1);
+  });
+}

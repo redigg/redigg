@@ -19,7 +19,8 @@ export class SkillManager {
     llm: LLMClient, 
     memoryManager: MemoryManager, 
     workspace: string = process.cwd(),
-    private managers?: SkillContext['managers']
+    private managers?: SkillContext['managers'],
+    private systemSkillsDir?: string,
   ) {
     this.llm = llm;
     this.memoryManager = memoryManager;
@@ -54,11 +55,21 @@ export class SkillManager {
   }
 
   public async loadSkillsFromDisk() {
+    // Load from workspace (user skills)
+    await this.loadSkillsFromDir(this.skillsDir);
+    
+    // Load from system (built-in skills)
+    if (this.systemSkillsDir) {
+        await this.loadSkillsFromDir(this.systemSkillsDir);
+    }
+  }
+
+  private async loadSkillsFromDir(dir: string) {
     try {
-        const entries = await fs.readdir(this.skillsDir, { withFileTypes: true });
+        const entries = await fs.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
             if (entry.isDirectory()) {
-                const itemPath = path.join(this.skillsDir, entry.name);
+                const itemPath = path.join(dir, entry.name);
                 
                 // Check if it's a Pack (has PACK.md)
                 const packMdPath = path.join(itemPath, 'PACK.md');
@@ -72,37 +83,34 @@ export class SkillManager {
                     // Not a pack
                 }
                 
-                // Check if it's a Skill (has SKILL.md or just index.ts?)
-                const skillMdPath = path.join(itemPath, 'SKILL.md');
-                const indexTsPath = path.join(itemPath, 'index.ts');
-
-                try {
-                    await fs.access(skillMdPath);
-                    // It's a Skill with metadata
-                    await this.loadSkill(itemPath);
-                } catch (e) {
-                    // Maybe it's a skill without metadata?
-                    try {
-                        await fs.access(indexTsPath);
-                        await this.loadSkill(itemPath);
-                    } catch (e2) {
-                        // Not a skill
-                    }
-                }
+                // Check if it's a Skill (has SKILL.md or just index.ts/js?)
+                // ... (rest of logic)
+                await this.loadSkill(itemPath);
             }
         }
     } catch (e) {
-        logger.warn(`Failed to load skills from disk: ${e}`);
+        // If workspace skills dir missing, just warn if it's the main workspace
+        if (dir === this.skillsDir && (e as any).code !== 'ENOENT') {
+             logger.warn(`Failed to load skills from ${dir}: ${e}`);
+        }
     }
   }
 
   private async loadSkill(skillPath: string): Promise<Skill | null> {
-    const implPath = path.join(skillPath, 'index.ts');
     const skillId = path.basename(skillPath);
-
-    // 1. Try loading executable skill (index.ts)
+    let implPath = path.join(skillPath, 'index.ts');
+    
+    // Check for .js if .ts not found
     try {
         await fs.access(implPath);
+    } catch {
+        implPath = path.join(skillPath, 'index.js');
+    }
+
+    // 1. Try loading executable skill (index.ts/js)
+    try {
+        await fs.access(implPath);
+        // ... import logic
         // Use pathToFileURL to handle ESM import properly on all platforms
         const { pathToFileURL } = await import('url');
         // Add a timestamp query param to bust the cache when reloading
@@ -124,14 +132,14 @@ export class SkillManager {
             }
         }
     } catch (e: any) {
-        // If index.ts missing or load failed, fall through to check SKILL.md
-        // But only log error if it existed but failed to load
+        // If index.ts/js missing or load failed, fall through to check SKILL.md
         if (e.code !== 'ENOENT') {
              logger.error(`Failed to load skill from ${implPath}: ${e}`);
         }
     }
 
     // 2. Try loading declarative skill (SKILL.md)
+    // ...
     const skillMdPath = path.join(skillPath, 'SKILL.md');
     try {
         const content = await fs.readFile(skillMdPath, 'utf-8');

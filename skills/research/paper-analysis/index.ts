@@ -28,7 +28,7 @@ export default class PaperAnalysisSkill implements Skill {
     }
 
     const paper = papers[0];
-    ctx.log('info', `Found paper: ${paper.title} (${paper.year})`);
+    ctx.log('thinking', `Found paper: ${paper.title} (${paper.year})`);
     if (ctx.updateProgress) await ctx.updateProgress(40, `Found paper: ${paper.title}`);
 
     // 2. Analyze using LLM

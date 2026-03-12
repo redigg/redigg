@@ -1,4 +1,4 @@
-import { Skill, SkillContext, SkillParams, SkillResult } from '../../src/skills/types.js';
+import { Skill, SkillContext, SkillParams, SkillResult } from '../../../src/skills/types.js';
 
 export default class SkillManagementSkill implements Skill {
   id = 'skill_management';

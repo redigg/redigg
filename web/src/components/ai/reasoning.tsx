@@ -163,7 +163,7 @@
      )} 
      {...props} 
    > 
-     <Streamdown {...props}>{children}</Streamdown> 
+     <Streamdown>{children}</Streamdown> 
    </CollapsibleContent> 
  )) 
  

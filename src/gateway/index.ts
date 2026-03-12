@@ -17,6 +17,11 @@ import { createLogger } from '../utils/logger.js';
 
 import { EventEmitter } from 'events';
 
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const logger = createLogger('Gateway');
 const sessionEvents = new EventEmitter(); // Bus for streaming events to SSE clients
 
@@ -159,7 +164,41 @@ export class A2AGateway {
     // Simple Chat API for Web Dashboard
     this.app.use(express.json({ limit: '50mb' }));
     this.app.use('/files', express.static(path.join(process.cwd(), 'workspace/output')));
+
+    // Serve Frontend Static Files (Production Mode)
+    // Check if web/dist exists (relative to current working directory or package root)
+    // In production (npm package), dist/gateway/index.js is running.
+    // web/dist should be at ../../web/dist relative to this file?
+    // No, usually we look from process.cwd() or __dirname.
+    // If installed globally, process.cwd() is where the user runs it.
+    // So we need to find the package root.
     
+    // Attempt to find web/dist
+    let webDistPath = path.join(process.cwd(), 'web', 'dist'); // Local dev or if run from root
+    if (!fs.existsSync(webDistPath)) {
+        // Try finding it relative to the executable/module
+        // In dist/gateway/index.js, we go up two levels to get to dist/, then we might need to go to web/dist?
+        // Actually, if we ship 'web/dist' in the package, it will be in the package root.
+        // __dirname is .../dist/gateway
+        webDistPath = path.resolve(__dirname, '..', '..', 'web', 'dist');
+    }
+
+    if (fs.existsSync(webDistPath)) {
+        logger.info(`Serving frontend from ${webDistPath}`);
+        this.app.use(express.static(webDistPath));
+        
+        // SPA Fallback
+        this.app.get('*', (req, res, next) => {
+            if (req.path.startsWith('/api') || req.path.startsWith('/a2a')) {
+                return next();
+            }
+            res.sendFile(path.join(webDistPath, 'index.html'));
+        });
+    } else {
+        logger.warn(`Frontend build not found at ${webDistPath}. Dashboard may not be available.`);
+    }
+    
+    // File Upload API
     // File Upload API
     this.app.post('/api/upload', upload.single('file'), (req, res) => {
         try {

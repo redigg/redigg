@@ -1,6 +1,6 @@
 {
   "name": "@redigg/redigg",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Autonomous Research Agent for Scientific Discovery",
   "type": "module",
   "publishConfig": {

@@ -1,6 +1,6 @@
 import { ScholarTool, type Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { OutlineSection, RetrievalResult, SurveyOutline } from './types.js';
-import { dedupePapers, scorePaperForSection } from './utils.js';
+import { dedupePapers, filterPapersByAnchors, scorePaperForSection } from './utils.js';
 
 interface RetrieveOptions {
   sectionLimit?: number;
@@ -41,7 +41,14 @@ export async function retrieveSurveyPapers(
     }
 
     const fallbackCandidates = rankPapersForSection(seedPapers, section).slice(0, sectionLimit);
-    const ranked = rankPapersForSection(dedupePapers([...sectionPapers, ...fallbackCandidates]), section)
+    const dedupedCandidates = dedupePapers([...sectionPapers, ...fallbackCandidates]);
+    const anchorFiltered = filterPapersByAnchors(
+      dedupedCandidates,
+      outline.topicProfile,
+      section,
+      Math.max(sectionLimit, 3)
+    );
+    const ranked = rankPapersForSection(anchorFiltered, section)
       .slice(0, sectionLimit);
 
     papersBySection[section.id] = ranked.length > 0 ? ranked : seedPapers.slice(0, sectionLimit);
@@ -67,7 +74,8 @@ function rankPapersForSection(papers: Paper[], section: OutlineSection): Paper[]
   const keywords = [
     section.title,
     section.description,
-    ...section.searchQueries
+    ...section.searchQueries,
+    ...(section.focusFacets || [])
   ]
     .join(' ')
     .toLowerCase()

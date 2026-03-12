@@ -97,7 +97,7 @@ const ContextIcon = () => {
 export type ContextTriggerProps = ComponentProps<typeof Button>
 
 export const ContextTrigger = ({ children, ...props }: ContextTriggerProps) => {
-  const { usedTokens, maxTokens } = useContextValue()
+  const { usedTokens, maxTokens, modelId } = useContextValue()
   const usedPercent = Math.min(usedTokens / maxTokens, 1)
   const renderedPercent = new Intl.NumberFormat("en-US", {
     style: "percent",
@@ -108,6 +108,11 @@ export const ContextTrigger = ({ children, ...props }: ContextTriggerProps) => {
     <HoverCardTrigger asChild>
       {children ?? (
         <Button type="button" variant="ghost" className="h-8 px-2 gap-2 text-xs font-normal" {...props}>
+          {modelId && (
+            <span className="text-zinc-600 font-medium mr-1 bg-zinc-100 px-1.5 py-0.5 rounded text-[10px]">
+              {modelId}
+            </span>
+          )}
           <span className="text-zinc-500">{renderedPercent} Context</span>
           <ContextIcon />
         </Button>

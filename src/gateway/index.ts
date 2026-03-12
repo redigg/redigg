@@ -235,14 +235,20 @@ export class A2AGateway {
     // Skill API
     this.app.get('/api/skills', (req, res) => {
         try {
+            const skillStats = this.agent.skillManager.getSkillStats();
+            
             const skills = this.agent.skillManager.getAllSkills().map(s => {
                 // Find which pack this skill belongs to
                 const pack = this.agent.skillManager.getAllPacks().find(p => p.skills.some(sk => sk.id === s.id));
+                // Find usage stats
+                const usage = skillStats.skills.find((stat: any) => stat.id === s.id)?.usage;
+                
                 return {
                     id: s.id,
                     name: (s as any).name || s.id, 
                     description: (s as any).description || '',
-                    packId: pack?.id
+                    packId: pack?.id,
+                    usage: usage || { used: 0, success: 0, failed: 0 }
                 };
             });
             res.json(skills);

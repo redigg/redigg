@@ -8,6 +8,7 @@ import { CronManager } from '../scheduling/CronManager.js';
 import { EventManager } from '../events/EventManager.js';
 import { QualityManager } from '../quality/QualityManager.js';
 import { createLogger } from '../utils/logger.js';
+import AcademicSurveySelfImproveSkill from '../../skills/research/academic-survey-self-improve/index.js';
 
 const logger = createLogger('Agent');
 
@@ -39,6 +40,11 @@ export class ResearchAgent {
     
     // Pass managers to SkillManager for injection into SkillContext
     this.skillManager = skillManager || new SkillManager(llm, memoryManager, process.cwd());
+
+    // Keep the current survey mainline available even when disk dynamic-loading is unstable.
+    if (!this.skillManager.getSkill('academic_survey_self_improve')) {
+      this.skillManager.registerSkill(new AcademicSurveySelfImproveSkill());
+    }
     
     // Inject managers now that they are created
     this.skillManager.setManagers({

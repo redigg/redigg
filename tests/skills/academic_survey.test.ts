@@ -35,6 +35,10 @@ describe('AcademicSurveySelfImproveSkill', () => {
     expect(result.success).toBe(true);
     expect(result.summary).toBe('Survey Summary');
     expect(result.papers).toHaveLength(2);
+    expect(result.sources).toHaveLength(2);
+    expect(result.outline).toBeNull();
+    expect(result.sections).toEqual([]);
+    expect(result.quality_report).toBeNull();
     expect(mockContext.log).toHaveBeenCalledWith('thinking', expect.stringContaining('Starting academic survey'));
   });
 });

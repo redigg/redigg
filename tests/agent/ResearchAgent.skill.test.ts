@@ -4,11 +4,21 @@ import { MemoryManager } from '../../src/memory/MemoryManager.js';
 import { MemoryEvolutionSystem } from '../../src/memory/evolution/MemoryEvolutionSystem.js';
 import { MockLLMClient, LLMClient } from '../../src/llm/LLMClient.js';
 import { SQLiteStorage } from '../../src/storage/sqlite.js';
-import { SkillManager } from '../../src/skills/SkillManager.js';
-// LiteratureReviewSkill is now a default export from the skill file, not a named export
-import LiteratureReviewSkill from '../../skills/research/literature-review/index.js';
 import fs from 'fs';
 import path from 'path';
+
+vi.mock('../../src/skills/lib/ScholarTool.js', () => {
+  return {
+    ScholarTool: class {
+      async searchPapers(topic: string) {
+        return [
+          { title: 'Reasoning Paper 1', year: 2024, summary: 'Summary 1', url: 'https://example.com/1', authors: ['A'] },
+          { title: 'Reasoning Paper 2', year: 2023, summary: 'Summary 2', url: 'https://example.com/2', authors: ['B'] }
+        ];
+      }
+    }
+  };
+});
 
 describe('ResearchAgent - Skills', () => {
   let memoryManager: MemoryManager;
@@ -41,18 +51,16 @@ describe('ResearchAgent - Skills', () => {
   });
 
   it('should detect intent and execute literature review skill', async () => {
-    // Mock LLM Response for summary (used by skill)
-    vi.spyOn(llm, 'complete').mockResolvedValue({
-      content: 'This is a literature review summary.'
-    });
-
-    // Mock chat response
     const chatSpy = vi.spyOn(llm, 'chat')
         // 1. Planner Response (returns empty to force fallback to legacy logic for this test)
         .mockResolvedValueOnce({
             content: JSON.stringify({ intent: 'single', steps: [] })
         })
-        // 2. Quality Check Response
+        // 2. Survey summary response (used by academic_survey_self_improve)
+        .mockResolvedValueOnce({
+            content: 'This is a literature review summary.'
+        })
+        // 3. Quality Check Response
         .mockResolvedValueOnce({
             content: JSON.stringify({
                 score: 85,
@@ -67,6 +75,7 @@ describe('ResearchAgent - Skills', () => {
     // Check if reply contains skill output
     expect(reply).toContain('Here is a literature review on "reasoning in LLMs"');
     expect(reply).toContain('This is a literature review summary.');
+    expect(chatSpy).toHaveBeenCalled();
     
     // Verify papers were added
     const papers = await memoryManager.getUserMemories('user1', 'paper');

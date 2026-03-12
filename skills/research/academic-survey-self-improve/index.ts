@@ -38,14 +38,34 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
       }
       return { 
         success: false, 
+        topic,
+        depth,
         message: 'No papers found even after refinement.',
-        papers: []
+        summary: '',
+        papers: [],
+        sources: [],
+        outline: null,
+        sections: [],
+        quality_report: null,
+        formatted_output: ''
       };
     }
 
     context.log('thinking', `Found ${papers.length} papers. Analyzing...`);
     if (context.updateProgress) {
         await context.updateProgress(60, `Analyzing ${papers.length} papers`, { papers });
+    }
+
+    for (const paper of papers) {
+      if (context.memory && typeof (context.memory as any).addPaper === 'function') {
+        await (context.memory as any).addPaper(
+          context.userId,
+          paper.title,
+          paper.authors || [],
+          paper.url,
+          paper.summary
+        );
+      }
     }
 
     // Summarize
@@ -57,8 +77,14 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
 
     return {
       success: true,
+      topic,
+      depth,
       summary,
       papers,
+      sources: papers,
+      outline: null,
+      sections: [],
+      quality_report: null,
       formatted_output: summary
     };
   }

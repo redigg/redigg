@@ -111,12 +111,26 @@ export class SkillManager {
     // 1. Try loading executable skill (index.ts/js)
     try {
         await fs.access(implPath);
-        // ... import logic
-        // Use pathToFileURL to handle ESM import properly on all platforms
         const { pathToFileURL } = await import('url');
-        // Add a timestamp query param to bust the cache when reloading
-        const moduleUrl = `${pathToFileURL(implPath).href}?t=${Date.now()}`;
-        const module = await import(moduleUrl);
+        const moduleCandidates = [
+            pathToFileURL(implPath).href,
+            implPath.replace(/\\/g, '/'),
+        ];
+        let module: any = null;
+        let lastError: any = null;
+
+        for (const moduleSpecifier of moduleCandidates) {
+            try {
+                module = await import(/* @vite-ignore */ moduleSpecifier);
+                break;
+            } catch (error: any) {
+                lastError = error;
+            }
+        }
+
+        if (!module) {
+            throw lastError;
+        }
         
         if (module.default) {
             const skillInstance = new module.default();

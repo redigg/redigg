@@ -168,142 +168,151 @@ export class ResearchAgent {
       session = this.sessionManager.getOrCreateActiveSession(userId);
     }
     
-    // Ensure session is active
+    // Ensure session is active and running
     this.sessionManager.activateSession(session.id);
+    this.sessionManager.setSessionStatus(session.id, 'running');
     
-    // Update session title if it's the first user message
-    if (session.messages.length === 0) {
-        session.title = message.slice(0, 30) + (message.length > 30 ? '...' : '');
-    }
-
-    this.sessionManager.addMessage(session.id, 'user', message);
-
-    // 1. Plan
-    logger.info(`Creating plan for user ${userId}...`);
-    log(`[Agent] Planning response...`);
-    
-    // Check if message is simple conversational
-    const isConversational = /^(hello|hi|hey|thanks|thank you|bye|goodbye|ok|okay|yes|no|cool|great|wow|who are you|what are you)\b/i.test(message.trim().replace(/[!.?]+$/, ''));
-    
-    let plan = { intent: 'single', steps: [] as any[] };
-    
-    let planningMessage = message;
-    // Removed string-based auto mode check in favor of explicit option
-    
-    if (!isConversational || options?.autoMode) {
-        try {
-            // Check for explicit auto-research request
-            const forceAuto = options?.autoMode || false;
-
-            plan = await this.createPlan(planningMessage, log, forceAuto);
-            
-            if (plan.steps.length > 0) {
-                sendPlan({ steps: plan.steps });
-            }
-        } catch (e) {
-            logger.error('Planning failed, falling back to legacy logic', e);
+    try {
+        // Update session title if it's the first user message
+        if (session.messages.length === 0) {
+            session.title = message.slice(0, 30) + (message.length > 30 ? '...' : '');
         }
-    }
 
-    let reply = '';
-    let accumulatedArtifacts: any[] = [];
+        this.sessionManager.addMessage(session.id, 'user', message);
 
-    // 2. Execute Plan or Fallback
-    if (plan.intent === 'multi_step' || (plan.intent === 'single' && plan.steps.length > 0)) {
-        for (const step of plan.steps) {
-            if (this.sessionManager.isSessionStopped(session.id)) {
-                log('[Agent] Session stopped by user.');
-                return 'Session stopped by user.';
+        // 1. Plan
+        logger.info(`Creating plan for user ${userId}...`);
+        log(`[Agent] Planning response...`);
+        
+        // Check if message is simple conversational
+        const isConversational = /^(hello|hi|hey|thanks|thank you|bye|goodbye|ok|okay|yes|no|cool|great|wow|who are you|what are you)\b/i.test(message.trim().replace(/[!.?]+$/, ''));
+        
+        let plan = { intent: 'single', steps: [] as any[] };
+        
+        let planningMessage = message;
+        // Removed string-based auto mode check in favor of explicit option
+        
+        if (!isConversational || options?.autoMode) {
+            try {
+                // Check for explicit auto-research request
+                const forceAuto = options?.autoMode || false;
+
+                plan = await this.createPlan(planningMessage, log, forceAuto);
+                
+                if (plan.steps.length > 0) {
+                    sendPlan({ steps: plan.steps });
+                }
+            } catch (e) {
+                logger.error('Planning failed, falling back to legacy logic', e);
             }
+        }
 
-            step.status = 'in_progress';
-            sendPlan({ steps: plan.steps });
-            
-            let retryCount = 0;
-            const maxRetries = 2;
-            let success = false;
-            const stepStartTime = Date.now();
+        let reply = '';
+        let accumulatedArtifacts: any[] = [];
 
-            while (retryCount <= maxRetries && !success) {
-                try {
-                    if (retryCount > 0) {
-                        log(`[Agent] Retry ${retryCount}/${maxRetries} for step: ${step.description}`);
-                    } else {
-                        log(`[${step.tool}] ${step.description}`);
-                    }
-                    
-                    const result = await this.executeStep(step, userId, session, log, onProgress, accumulatedArtifacts, plan.steps);
-                    
-                    // Accumulate artifacts
-                    if (result.artifacts && result.artifacts.length > 0) {
-                        accumulatedArtifacts.push(...result.artifacts);
-                    }
+        // 2. Execute Plan or Fallback
+        if (plan.intent === 'multi_step' || (plan.intent === 'single' && plan.steps.length > 0)) {
+            for (const step of plan.steps) {
+                if (this.sessionManager.isSessionStopped(session.id)) {
+                    log('[Agent] Session stopped by user.');
+                    return 'Session stopped by user.';
+                }
 
-                    const duration = Date.now() - stepStartTime;
-                    // Estimate tokens based on result length if string, or use actual usage
-                    const tokens = result.usage 
-                        ? (result.usage.completionTokens + (result.usage.promptTokens || 0)) 
-                        : (typeof result.output === 'string' ? Math.ceil(result.output.length / 4) : 0);
+                step.status = 'in_progress';
+                sendPlan({ steps: plan.steps });
+                
+                let retryCount = 0;
+                const maxRetries = 2;
+                let success = false;
+                const stepStartTime = Date.now();
+
+                while (retryCount <= maxRetries && !success) {
+                    try {
+                        if (retryCount > 0) {
+                            log(`[Agent] Retry ${retryCount}/${maxRetries} for step: ${step.description}`);
+                        } else {
+                            log(`[${step.tool}] ${step.description}`);
+                        }
                         
-                    log(`[${step.tool}] Step completed`, { duration, tokens });
+                        const result = await this.executeStep(step, userId, session, log, onProgress, accumulatedArtifacts, plan.steps);
+                        
+                        // Accumulate artifacts
+                        if (result.artifacts && result.artifacts.length > 0) {
+                            accumulatedArtifacts.push(...result.artifacts);
+                        }
 
-                    step.status = 'completed';
-                    step.result = result.output;
-                    success = true;
-                    
-                    if (step.tool === 'Chat') {
-                        reply = result.output;
-                    }
-                } catch (e) {
-                    retryCount++;
-                    const errorMsg = String(e);
-                    const duration = Date.now() - stepStartTime;
-                    logger.error(`Step failed (Attempt ${retryCount}): ${step.description}`, e);
-                    
-                    if (retryCount > maxRetries) {
-                        step.status = 'failed';
-                        step.error = errorMsg;
-                        log(`[Error] Step failed permanently: ${step.description}`, { duration });
-                    } else {
-                        log(`[Warning] Step failed, retrying... (${errorMsg})`, { duration });
-                        // Wait a bit before retry
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        const duration = Date.now() - stepStartTime;
+                        // Estimate tokens based on result length if string, or use actual usage
+                        const tokens = result.usage 
+                            ? (result.usage.completionTokens + (result.usage.promptTokens || 0)) 
+                            : (typeof result.output === 'string' ? Math.ceil(result.output.length / 4) : 0);
+                            
+                        log(`[${step.tool}] Step completed`, { duration, tokens });
+
+                        step.status = 'completed';
+                        step.result = result.output;
+                        success = true;
+                        
+                        if (step.tool === 'Chat') {
+                            reply = result.output;
+                        }
+                    } catch (e) {
+                        retryCount++;
+                        const errorMsg = String(e);
+                        const duration = Date.now() - stepStartTime;
+                        logger.error(`Step failed (Attempt ${retryCount}): ${step.description}`, e);
+                        
+                        if (retryCount > maxRetries) {
+                            step.status = 'failed';
+                            step.error = errorMsg;
+                            log(`[Error] Step failed permanently: ${step.description}`, { duration });
+                        } else {
+                            log(`[Warning] Step failed, retrying... (${errorMsg})`, { duration });
+                            // Wait a bit before retry
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                        }
                     }
                 }
-            }
-            sendPlan({ steps: plan.steps });
-        }
-        
-        if (!reply) {
-            // If no chat step, summarize results
-            const completedSteps = plan.steps.filter(s => s.status === 'completed');
-            const failedSteps = plan.steps.filter(s => s.status === 'failed');
-            
-            let summary = "I have completed the requested tasks.\n\n";
-            if (completedSteps.length > 0) {
-                summary += "**Completed:**\n" + completedSteps.map(s => `- ${s.description}`).join('\n') + "\n";
-            }
-            if (failedSteps.length > 0) {
-                summary += "\n**Failed:**\n" + failedSteps.map(s => `- ${s.description}: ${s.error}`).join('\n');
+                sendPlan({ steps: plan.steps });
             }
             
-            reply = summary;
-            const metadata = accumulatedArtifacts.length > 0 ? { attachments: accumulatedArtifacts } : undefined;
-            this.sessionManager.addMessage(session.id, 'assistant', reply, metadata);
+            if (!reply) {
+                // If no chat step, summarize results
+                const completedSteps = plan.steps.filter(s => s.status === 'completed');
+                const failedSteps = plan.steps.filter(s => s.status === 'failed');
+                
+                let summary = "I have completed the requested tasks.\n\n";
+                if (completedSteps.length > 0) {
+                    summary += "**Completed:**\n" + completedSteps.map(s => `- ${s.description}`).join('\n') + "\n";
+                }
+                if (failedSteps.length > 0) {
+                    summary += "\n**Failed:**\n" + failedSteps.map(s => `- ${s.description}: ${s.error}`).join('\n');
+                }
+                
+                reply = summary;
+                const metadata = accumulatedArtifacts.length > 0 ? { attachments: accumulatedArtifacts } : undefined;
+                this.sessionManager.addMessage(session.id, 'assistant', reply, metadata);
+            }
+            
+        } else {
+            // Legacy logic fallback
+            reply = await this.executeLegacyLogic(session, userId, message, log, onProgress) || '';
         }
-        
-    } else {
-        // Legacy logic fallback
-        reply = await this.executeLegacyLogic(session, userId, message, log, onProgress) || '';
-    }
 
-    // If we have a reply from Plan or Legacy, we are done.
-    if (reply) {
-         // Trigger evolution if needed (Post-processing)
-         await this.handlePostProcessing(session, userId, message, reply, log, onProgress);
+        // If we have a reply from Plan or Legacy, we are done.
+        if (reply) {
+            // Trigger evolution if needed (Post-processing)
+            await this.handlePostProcessing(session, userId, message, reply, log, onProgress);
+        }
+        
+        return reply || 'I was unable to generate a response.';
+    } finally {
+        // Ensure session is back to active (not running) even if error occurred
+        // BUT if it was stopped, keep it as stopped.
+        if (!this.sessionManager.isSessionStopped(session.id)) {
+            this.sessionManager.setSessionStatus(session.id, 'active');
+        }
     }
-    
-    return reply || 'I was unable to generate a response.';
   }
 
   private async createPlan(message: string, log?: (content: string, stats?: any) => void, forceAuto: boolean = false): Promise<{ intent: string, steps: any[] }> {

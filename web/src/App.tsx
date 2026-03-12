@@ -70,6 +70,7 @@ interface Session {
   title?: string;
   created_at: string;
   updated_at: string;
+  status: 'active' | 'running' | 'stopped';
 }
 
 interface Config {
@@ -881,9 +882,9 @@ function App() {
                         >
                           <div className="font-medium text-sm flex items-center gap-2 w-full min-w-0">
                               <span className="truncate flex-1">{session.title || 'New Chat'}</span>
-                              {(autoModeMap[session.id] ?? true) && (
+                              {session.status === 'running' && (
                                   <div className="shrink-0 px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[8px] font-bold border border-indigo-200 flex items-center gap-0.5">
-                                    <Sparkles className="h-2 w-2" />
+                                    <Sparkles className="h-2 w-2 animate-pulse" />
                                     <span>AUTO</span>
                                   </div>
                               )}

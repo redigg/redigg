@@ -16,7 +16,7 @@ export interface Session {
   messages: Message[];
   created_at: Date;
   updated_at: Date;
-  status: 'active' | 'stopped';
+  status: 'active' | 'running' | 'stopped';
   metadata?: any;
 }
 
@@ -278,6 +278,26 @@ export class SessionManager {
             .run(session.updated_at.toISOString(), JSON.stringify(metadata), sessionId);
       } catch (e) {
           console.error('Failed to stop session:', e);
+      }
+    }
+  }
+
+  public setSessionStatus(sessionId: string, status: Session['status']) {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.status = status;
+      session.updated_at = new Date();
+      
+      // Update DB
+      try {
+          const db = this.storage.getDb();
+          const metadata = { ...session.metadata, status };
+          session.metadata = metadata;
+          
+          db.prepare('UPDATE sessions SET updated_at = ?, metadata = ? WHERE id = ?')
+            .run(session.updated_at.toISOString(), JSON.stringify(metadata), sessionId);
+      } catch (e) {
+          console.error('Failed to set session status:', e);
       }
     }
   }

@@ -10,6 +10,7 @@ const logger = createLogger('SkillManager');
 export class SkillManager {
   private skills: Map<string, Skill> = new Map();
   private packs: Map<string, SkillPack> = new Map();
+  private stats: Map<string, { used: number, success: number, failed: number }> = new Map();
   private llm: LLMClient;
   private memoryManager: MemoryManager;
   private workspace: string;
@@ -239,11 +240,15 @@ export class SkillManager {
     return {
         totalSkills: this.skills.size,
         totalPacks: this.packs.size,
-        skills: Array.from(this.skills.values()).map(s => ({ 
-            id: s.id, 
-            name: s.name,
-            packId: (s as any).packId
-        })),
+        skills: Array.from(this.skills.values()).map(s => {
+            const stat = this.stats.get(s.id) || { used: 0, success: 0, failed: 0 };
+            return { 
+                id: s.id, 
+                name: s.name,
+                packId: (s as any).packId,
+                usage: stat
+            };
+        }),
         packs: Array.from(this.packs.values()).map(p => ({ id: p.id, skillsCount: p.skills.length }))
     };
   }
@@ -253,20 +258,27 @@ export class SkillManager {
     userId: string, 
     params: SkillParams,
     handlers?: {
-        onLog?: SkillContext['log'];
-        onProgress?: SkillContext['updateProgress'];
-        onTodo?: SkillContext['addTodo'];
-    } | SkillContext['log']
+        onLog?: (type: string, content: string, metadata?: any) => void;
+        onProgress?: (progress: number, description: string, metadata?: any) => Promise<void>;
+        onTodo?: (content: string, priority: 'low'|'medium'|'high', step?: number) => Promise<void>;
+    } | ((type: string, content: string) => void)
   ): Promise<SkillResult> {
     const skill = this.skills.get(skillId);
     if (!skill) {
       throw new Error(`Skill ${skillId} not found`);
     }
 
+    // Initialize stats if not present
+    if (!this.stats.has(skillId)) {
+        this.stats.set(skillId, { used: 0, success: 0, failed: 0 });
+    }
+    const currentStat = this.stats.get(skillId)!;
+    currentStat.used++;
+
     // Handle legacy signature where 4th arg was just onLog function
-    let onLog = handlers as any;
-    let onProgress = undefined;
-    let onTodo = undefined;
+    let onLog: any;
+    let onProgress: any;
+    let onTodo: any;
 
     if (typeof handlers === 'object' && handlers !== null && !('apply' in handlers)) {
         onLog = handlers.onLog;
@@ -297,8 +309,11 @@ export class SkillManager {
     };
 
     try {
-      return await skill.execute(context, params);
+      const result = await skill.execute(context, params);
+      currentStat.success++;
+      return result;
     } catch (error) {
+      currentStat.failed++;
       context.log('error', `Execution failed: ${error}`);
       throw error;
     }

@@ -32,6 +32,16 @@ export default class HeartbeatSkill implements Skill {
              skillStats = (ctx.managers.skill as any).getSkillStats();
              if (skillStats && skillStats.totalSkills > 0) {
                  ctx.log('result', `[Heartbeat] Memory consolidation: Moved ${memoryStats.moved}, Promoted ${memoryStats.promoted}, Pruned ${memoryStats.pruned}`);
+                 
+                 // Log skill usage
+                 const usage = skillStats.skills
+                    .filter((s: any) => s.usage && s.usage.used > 0)
+                    .map((s: any) => `${s.id}: ${s.usage.success}/${s.usage.failed}`)
+                    .join(', ');
+                 
+                 if (usage) {
+                     ctx.log('result', `[Heartbeat] Skill Usage (Success/Fail): ${usage}`);
+                 }
              }
         }
     } catch (e) {

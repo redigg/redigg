@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { ChatMessage as ChatMessageComponent } from './components/chat/message';
 import { ChatInput } from './components/chat/input';
 import { ScrollToBottom } from './components/chat/scroll-to-bottom';
-import { Bot, Sparkles, MessageSquare, Plus, Trash2, ChevronDown, PanelLeftClose, PanelLeftOpen, FileText, Code, Database, Brain } from 'lucide-react';
+import { Bot, Sparkles, MessageSquare, Plus, Trash2, PanelLeftClose, PanelLeftOpen, FileText, Code, Database, Brain } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,

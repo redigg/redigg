@@ -879,8 +879,14 @@ function App() {
                           )}
                           onClick={() => loadSession(session.id)}
                         >
-                          <div className="font-medium text-sm line-clamp-1 flex items-center gap-2">
-                              {session.title || 'New Chat'}
+                          <div className="font-medium text-sm flex items-center gap-2 w-full min-w-0">
+                              <span className="truncate flex-1">{session.title || 'New Chat'}</span>
+                              {(autoModeMap[session.id] ?? true) && (
+                                  <div className="shrink-0 px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[8px] font-bold border border-indigo-200 flex items-center gap-0.5">
+                                    <Sparkles className="h-2 w-2" />
+                                    <span>AUTO</span>
+                                  </div>
+                              )}
                               {unseenSessionIds.has(session.id) && (
                                   <span className="h-2 w-2 rounded-full bg-red-500 shrink-0"></span>
                               )}

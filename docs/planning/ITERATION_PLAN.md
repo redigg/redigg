@@ -212,32 +212,22 @@ redigg skill publish ./my-skill
 
 ---
 
-### Iteration 5: 社区进化 (4-6 周)
+### Iteration 5: 科研增强与社区进化 (4-6 周)
+**目标**: 实现完全自主科研
 
-**目标**: 实现群体智能涌现
+#### 5.1 增强 Survey Skill
+- 深度调研、绘图、制表
 
-#### 5.1 匿名数据共享
-```typescript
-interface SharedLearning {
-    type: 'skill_improvement' | 'memory_pattern' | 'workflow';
-    data: any;  // 匿名化处理
-    effectiveness: number;  // 效果评分
-    context: {  // 使用场景
-        domain: string;
-        taskType: string;
-    }
-}
-```
+#### 5.2 扩展技能生态
+- 接入 Coding Agent (Cursor, Claude Code)
+- 接入科研基建
 
-#### 5.2 联邦学习
-- 本地训练，参数上传
-- 全局模型聚合
-- 隐私保护 (差分隐私)
-
-#### 5.3 研究网络
-- Agent 间协作协议
+#### 5.3 多 Agent 协同
+- 7x24 小时自主科研
 - 任务分发与结果聚合
-- 贡献度追踪与激励
+
+#### 5.4 社区进化
+- 技能市场、联邦学习
 
 ---
 

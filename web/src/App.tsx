@@ -103,7 +103,7 @@ function App() {
       return {};
     }
   });
-  const [pendingAutoMode, setPendingAutoMode] = useState(false);
+  const [pendingAutoMode, setPendingAutoMode] = useState(true);
 
   const handleAutoModeChange = (checked: boolean) => {
     if (currentSessionId) {
@@ -117,7 +117,7 @@ function App() {
     }
   };
 
-  const currentAutoMode = currentSessionId ? (autoModeMap[currentSessionId] || false) : pendingAutoMode;
+  const currentAutoMode = currentSessionId ? (autoModeMap[currentSessionId] ?? true) : pendingAutoMode;
   
   // Notification State
   const [unseenMemoriesCount, setUnseenMemoriesCount] = useState(0);

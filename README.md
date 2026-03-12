@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExcDNoM3Z5ZGR5dXJ5ODF5ZGR5dXJ5ODF5ZGR5dXJ5ODF5ZGR5dXJ5ODF5ZCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3oKIPnAiaMCws8nOsE/giphy.gif" alt="Redigg Demo" width="100%">
+  <img src="assets/logo.png" alt="Redigg Logo" width="200">
   
   # Redigg 🦎
   

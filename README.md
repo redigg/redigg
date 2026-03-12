@@ -68,6 +68,26 @@ This will start the Gateway on `http://localhost:4000` (serving the Dashboard).
     - **UI**: http://localhost:5173
     - **Gateway**: http://localhost:4000
 
+### 🔌 A2A Integration
+
+Redigg supports the **Agent-to-Agent (A2A)** protocol, allowing it to communicate with other agents or platforms like [OpenClaw](https://github.com/openclaw/openclaw).
+
+#### 1. Endpoints
+- **Agent Card**: `http://localhost:4000/.well-known/agent-card.json`
+- **JSON-RPC**: `http://localhost:4000/a2a/jsonrpc`
+
+#### 2. Connect with OpenClaw
+To use Redigg as a node within an OpenClaw network:
+
+1.  **Start Redigg**: Ensure Redigg is running (`redigg start`).
+2.  **Configure OpenClaw**: Add Redigg to your OpenClaw `agents.yaml` or configuration:
+    ```yaml
+    agents:
+      - name: "redigg"
+        url: "http://localhost:4000/.well-known/agent-card.json"
+    ```
+3.  **Interact**: You can now route tasks to Redigg via OpenClaw, e.g., "Ask redigg to perform a literature review on X".
+
 ### 💡 Examples
 - **"Perform a literature review on multi-agent reinforcement learning."** -> *Generates a summary and list of papers.*
 - **"Explain the concept of Transformer architecture."** -> *Provides a detailed explanation.*
@@ -130,6 +150,26 @@ redigg start
     ```
     - **界面 (UI)**: http://localhost:5173
     - **网关 (Gateway)**: http://localhost:4000
+
+### 🔌 A2A 集成
+
+Redigg 支持 **Agent-to-Agent (A2A)** 协议，允许与其他智能体或平台（如 [OpenClaw](https://github.com/openclaw/openclaw)）进行通信。
+
+#### 1. 端点地址
+- **Agent Card**: `http://localhost:4000/.well-known/agent-card.json`
+- **JSON-RPC**: `http://localhost:4000/a2a/jsonrpc`
+
+#### 2. 连接到 OpenClaw
+要将 Redigg 作为 OpenClaw 网络中的一个节点使用：
+
+1.  **启动 Redigg**: 确保 Redigg 正在运行 (`redigg start`)。
+2.  **配置 OpenClaw**: 将 Redigg 添加到 OpenClaw 的 `agents.yaml` 或配置文件中：
+    ```yaml
+    agents:
+      - name: "redigg"
+        url: "http://localhost:4000/.well-known/agent-card.json"
+    ```
+3.  **交互**: 现在你可以通过 OpenClaw 向 Redigg 分发任务，例如："Ask redigg to perform a literature review on X"。
 
 ### 💡 使用示例
 - **"Perform a literature review on multi-agent reinforcement learning."** -> *生成论文摘要和列表。*

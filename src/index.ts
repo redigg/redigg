@@ -55,7 +55,15 @@ class OpenAIClient implements LLMClient {
 
       let fullText = '';
       for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || '';
+        const delta = chunk.choices[0]?.delta;
+        
+        // Handle reasoning tokens (o1, o3, deepseek etc.)
+        const thinking = (delta as any).reasoning_content || (delta as any).thinking;
+        if (thinking) {
+           handler.onThinking?.(thinking);
+        }
+
+        const content = delta?.content || '';
         if (content) {
           process.stdout.write(content); // Stream to console for debugging
           fullText += content;

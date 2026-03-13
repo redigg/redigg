@@ -34,6 +34,10 @@ export async function retrieveSurveyPapers(
     ].map((query) => query.trim()).filter(Boolean)));
 
     for (const query of queries) {
+      // Add a small delay between consecutive search calls to reduce the risk of hitting rate limits
+      if (queryCount > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
       queryCount += 1;
       const hits = await scholar.searchPapers(query, perQueryLimit);
       totalHits += hits.length;

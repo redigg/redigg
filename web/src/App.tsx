@@ -33,6 +33,7 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'agent';
   content: string;
+  thinking?: string;
   logs?: string[];
   todos?: any[];
   attachments?: any[];
@@ -733,6 +734,13 @@ function App() {
                 : msg
             ));
           }
+        } else if (data.type === 'thinking') {
+            const content = data.content;
+            setMessages(prev => prev.map(msg => 
+              msg.id === agentMsgId 
+                ? { ...msg, thinking: (msg.thinking || '') + content } 
+                : msg
+            ));
         } else if (data.type === 'log') {
           // If log content contains __STATS__, parse it
           const rawContent = data.content;
@@ -767,7 +775,15 @@ function App() {
                     if (index >= 0) {
                         // Update existing
                         const newTodos = [...existingTodos];
-                        newTodos[index] = { ...newTodos[index], ...todoItem };
+                        const existing = newTodos[index];
+                        
+                        // Cumulative thinking tokens
+                        let updatedThinking = existing.thinking || '';
+                        if (todoItem.thinking) {
+                            updatedThinking += todoItem.thinking;
+                        }
+
+                        newTodos[index] = { ...existing, ...todoItem, thinking: updatedThinking };
                         return { ...msg, todos: newTodos };
                     } else {
                         // Add new
@@ -1316,6 +1332,7 @@ function App() {
                     key={msg.id}
                     role={msg.role}
                     content={msg.content}
+                    thinking={msg.thinking}
                     isThinking={msg.role === 'agent' && !msg.content && index === messages.length - 1}
                     logs={msg.logs}
                     todos={msg.todos}

@@ -30,6 +30,47 @@ export class ScholarTool {
     });
   }
 
+  private async fetchWithRetry(url: string, options: RequestInit, maxRetries: number = 3): Promise<Response> {
+    let lastError: Error | null = null;
+    
+    for (let i = 0; i <= maxRetries; i++) {
+      try {
+        if (i > 0) {
+          // Exponential backoff: 2, 4, 8 seconds
+          const delay = Math.pow(2, i) * 1000;
+          console.log(`[ScholarTool] Rate limited or failed, retrying in ${delay}ms... (Attempt ${i}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+        const response = await fetch(url, options);
+        
+        if (response.status === 429) {
+          const retryAfter = response.headers.get('Retry-After');
+          if (retryAfter) {
+            const seconds = parseInt(retryAfter, 10);
+            if (!isNaN(seconds)) {
+              await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+              // Note: This counts as one retry attempt but we use the requested delay
+            }
+          }
+          if (i === maxRetries) return response;
+          continue; // Try again
+        }
+
+        if (response.status >= 500) {
+          if (i === maxRetries) return response;
+          continue; // Try again on server errors
+        }
+
+        return response;
+      } catch (error: any) {
+        lastError = error;
+        if (i === maxRetries) throw error;
+      }
+    }
+    throw lastError || new Error('Fetch failed after retries');
+  }
+
   async searchPapers(topic: string, limit: number = 5): Promise<Paper[]> {
     console.log(`[ScholarTool] Searching multiple sources for: ${topic}`);
 
@@ -69,12 +110,19 @@ export class ScholarTool {
   private async searchArxiv(topic: string, limit: number): Promise<Paper[]> {
     const baseUrl = 'http://export.arxiv.org/api/query';
     const searchUrl = `${baseUrl}?search_query=all:${encodeURIComponent(topic)}&start=0&max_results=${limit}&sortBy=relevance&sortOrder=descending`;
-
-    const response = await fetch(searchUrl, {
+    
+    // ArXiv can be strict with rate limiting, use fetchWithRetry
+    const response = await this.fetchWithRetry(searchUrl, {
       headers: {
         'User-Agent': 'redigg-scholar-tool/0.1'
       }
     });
+    
+    if (response.status === 429) {
+      console.warn('[ScholarTool] arXiv rate limited after retries, skipping source');
+      return [];
+    }
+
     if (!response.ok) {
       throw new Error(`arXiv API failed: ${response.status} ${response.statusText}`);
     }
@@ -134,11 +182,16 @@ export class ScholarTool {
       params.set('api_key', this.openAlexApiKey);
     }
 
-    const response = await fetch(`https://api.openalex.org/works?${params.toString()}`, {
+    const response = await this.fetchWithRetry(`https://api.openalex.org/works?${params.toString()}`, {
       headers: {
         'User-Agent': 'redigg-scholar-tool/0.1'
       }
     });
+
+    if (response.status === 429) {
+      console.warn('[ScholarTool] OpenAlex rate limited after retries, skipping source');
+      return [];
+    }
 
     if (!response.ok) {
       throw new Error(`OpenAlex API failed: ${response.status} ${response.statusText}`);
@@ -187,7 +240,7 @@ export class ScholarTool {
       fields: 'title,abstract,year,authors,url,externalIds,citationCount,publicationVenue,openAccessPdf'
     });
 
-    const response = await fetch(`https://api.semanticscholar.org/graph/v1/paper/search?${params.toString()}`, {
+    const response = await this.fetchWithRetry(`https://api.semanticscholar.org/graph/v1/paper/search?${params.toString()}`, {
       headers: {
         'x-api-key': this.semanticScholarApiKey,
         'User-Agent': 'redigg-scholar-tool/0.1'
@@ -195,7 +248,7 @@ export class ScholarTool {
     });
 
     if (response.status === 429) {
-      console.warn('[ScholarTool] Semantic Scholar rate limited, skipping this source');
+      console.warn('[ScholarTool] Semantic Scholar rate limited after retries, skipping source');
       return [];
     }
 

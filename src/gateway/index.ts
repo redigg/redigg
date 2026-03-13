@@ -467,6 +467,9 @@ export class A2AGateway {
                     hasStreamedTokens = true;
                     // Send token
                     res.write(`data: ${JSON.stringify({ type: 'token', content })}\n\n`);
+                } else if (type === 'thinking') {
+                    // Send thinking
+                    res.write(`data: ${JSON.stringify({ type: 'thinking', content })}\n\n`);
                 } else if (type === 'log') {
                     // Send log
                     res.write(`data: ${JSON.stringify({ type: 'log', content })}\n\n`);

@@ -1,4 +1,4 @@
-import { User, Sparkles, Copy, RefreshCw, Paperclip, FileText, Code, Search, Circle, Brain, CheckCircle2, Loader2, ListTodo } from "lucide-react";
+import { User, Sparkles, Copy, RefreshCw, Paperclip, FileText, Code, Search, Circle, Brain, CheckCircle2, Loader2, ListTodo, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -11,12 +11,13 @@ import { useState } from "react";
 import { CodeBlock, CodeBlockCopyButton } from "@/components/ui/code-block";
 import { type BundledLanguage } from "shiki";
 import { InlineCitation, InlineCitationCard, InlineCitationCardTrigger, InlineCitationCardBody, InlineCitationCarousel, InlineCitationCarouselHeader, InlineCitationCarouselPrev, InlineCitationCarouselNext, InlineCitationCarouselIndex, InlineCitationCarouselContent, InlineCitationCarouselItem, InlineCitationSource } from "@/components/ai-elements/inline-citation";
-import { Reasoning, ReasoningTrigger } from "@/components/ai/reasoning";
-import { CollapsibleContent } from "@/components/ui/collapsible";
+import { Reasoning, ReasoningTrigger, ReasoningContent } from "@/components/ai/reasoning";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 
 interface ChatMessageProps {
   role: "user" | "agent";
   content: string;
+  thinking?: string;
   isThinking?: boolean;
   logs?: string[];
   todos?: any[];
@@ -53,7 +54,7 @@ const parseActivity = (log: string) => {
     return { icon: Circle, label: 'Processing', color: 'text-zinc-400', bg: 'bg-zinc-50', border: 'border-zinc-100' };
 };
 
-export function ChatMessage({ role, content, isThinking, logs, todos, stats, attachments, onCopy, onRegenerate }: ChatMessageProps) {
+export function ChatMessage({ role, content, thinking, isThinking, logs, todos, stats, attachments, onCopy, onRegenerate }: ChatMessageProps) {
     // State for copy feedback
     const [isCopied, setIsCopied] = useState(false);
 
@@ -113,55 +114,85 @@ export function ChatMessage({ role, content, isThinking, logs, todos, stats, att
                         </div>
                         <div className="p-2 space-y-1">
                             {todos.map((todo, i) => (
-                                <div key={todo.id || i} className="group flex items-start gap-2 p-1.5 rounded-md hover:bg-zinc-50 transition-colors">
-                                    <div className="mt-0.5 shrink-0">
-                                        {todo.status === 'completed' ? (
-                                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                                        ) : todo.status === 'in_progress' ? (
-                                            <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />
-                                        ) : todo.status === 'failed' ? (
-                                            <Circle className="h-3.5 w-3.5 text-red-500 fill-red-100" />
-                                        ) : (
-                                            <Circle className="h-3.5 w-3.5 text-zinc-300" />
-                                        )}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className={cn("text-xs font-medium leading-snug", 
-                                            todo.status === 'completed' ? "text-zinc-500 line-through decoration-zinc-300" : "text-zinc-800"
-                                        )}>
-                                            {todo.description || todo.content}
+                                <Collapsible key={todo.id || i} className="group w-full">
+                                    <div className="flex items-start gap-2 p-1.5 rounded-md hover:bg-zinc-50 transition-colors">
+                                        <div className="mt-0.5 shrink-0">
+                                            {todo.status === 'completed' ? (
+                                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                                            ) : todo.status === 'in_progress' ? (
+                                                <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />
+                                            ) : todo.status === 'failed' ? (
+                                                <CheckCircle2 className="h-3.5 w-3.5 text-red-500 fill-red-100" />
+                                            ) : (
+                                                <Circle className="h-3.5 w-3.5 text-zinc-300" />
+                                            )}
                                         </div>
-                                        {/* Show metadata like paper count */}
-                                        {todo.metadata && todo.metadata.papers && (
-                                            <div className="mt-1.5 flex flex-col gap-1">
-                                                {todo.metadata.papers.slice(0, 3).map((p: any, idx: number) => (
-                                                    <a key={idx} href={p.url || '#'} target="_blank" rel="noopener noreferrer" 
-                                                       className="flex items-center gap-1.5 text-[10px] text-blue-600 hover:underline truncate bg-blue-50/50 px-1.5 py-0.5 rounded border border-blue-100/50 hover:bg-blue-50 w-fit max-w-full">
-                                                        <FileText className="h-3 w-3 shrink-0 opacity-70" />
-                                                        <span className="truncate">{p.title}</span>
-                                                    </a>
-                                                ))}
-                                                {todo.metadata.papers.length > 3 && (
-                                                    <span className="text-[10px] text-zinc-400 px-1 italic">+{todo.metadata.papers.length - 3} more papers found...</span>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className={cn("text-xs font-medium leading-snug", 
+                                                    todo.status === 'completed' ? "text-zinc-500 line-through decoration-zinc-300" : "text-zinc-800"
+                                                )}>
+                                                    {todo.description || todo.content}
+                                                </div>
+                                                {todo.thinking && (
+                                                    <CollapsibleTrigger asChild>
+                                                        <Button variant="ghost" size="icon" className="h-4 w-4 p-0 text-zinc-400 hover:text-indigo-500">
+                                                            <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                                                        </Button>
+                                                    </CollapsibleTrigger>
                                                 )}
                                             </div>
-                                        )}
+
+                                            {/* Show metadata like paper count */}
+                                            {todo.metadata && todo.metadata.papers && (
+                                                <div className="mt-1.5 flex flex-col gap-1">
+                                                    {todo.metadata.papers.slice(0, 3).map((p: any, idx: number) => (
+                                                        <a key={idx} href={p.url || '#'} target="_blank" rel="noopener noreferrer" 
+                                                           className="flex items-center gap-1.5 text-[10px] text-blue-600 hover:underline truncate bg-blue-50/50 px-1.5 py-0.5 rounded border border-blue-100/50 hover:bg-blue-50 w-fit max-w-full">
+                                                            <FileText className="h-3 w-3 shrink-0 opacity-70" />
+                                                            <span className="truncate">{p.title}</span>
+                                                        </a>
+                                                    ))}
+                                                    {todo.metadata.papers.length > 3 && (
+                                                        <span className="text-[10px] text-zinc-400 px-1 italic">+{todo.metadata.papers.length - 3} more papers found...</span>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {todo.thinking && (
+                                                <CollapsibleContent className="mt-2 text-[11px] text-zinc-500 italic bg-zinc-50/50 p-2 rounded border border-zinc-100/50 overflow-hidden data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-200">
+                                                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                                                        {todo.thinking}
+                                                    </ReactMarkdown>
+                                                </CollapsibleContent>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
+                                </Collapsible>
                             ))}
                         </div>
                     </div>
                 )}
 
-                {logs && logs.length > 0 && (
+                { (thinking || (logs && logs.length > 0)) && (
                     <div className="mb-4">
                         <Reasoning 
-                            isStreaming={isThinking} 
+                            isStreaming={isThinking || (isThinking && !!thinking)} 
                             duration={stats?.duration ? Math.round(stats.duration / 1000) : undefined}
                         >
                             <ReasoningTrigger className="w-fit" />
-                            <CollapsibleContent className="mt-2 space-y-2 pl-2 border-l-2 border-zinc-100 ml-2">
-                                {logs.map((log, i) => {
+                            <CollapsibleContent className="mt-4 space-y-4">
+                                {thinking && (
+                                    <div className="text-sm text-muted-foreground italic outline-none border-b border-zinc-100 pb-4 mb-2">
+                                        <ReactMarkdown 
+                                            remarkPlugins={[remarkGfm, remarkBreaks]} 
+                                        >
+                                            {thinking}
+                                        </ReactMarkdown>
+                                    </div>
+                                )}
+                                <div className="space-y-2 pl-2 border-l-2 border-zinc-100 ml-2">
+                                    {logs?.map((log, i) => {
                                     // Parse stats if available
                                     let displayLog = log;
                                     let logStats = null;
@@ -219,6 +250,7 @@ export function ChatMessage({ role, content, isThinking, logs, todos, stats, att
                                         </div>
                                     );
                                 })}
+                                </div>
                             </CollapsibleContent>
                         </Reasoning>
                     </div>

@@ -133,7 +133,7 @@ export class ResearchAgent {
   public async chat(
     userId: string, 
     message: string, 
-    onProgress?: (type: 'token' | 'log' | 'plan' | 'todo', content: any) => void,
+    onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void,
     sessionId?: string,
     options?: { autoMode?: boolean }
   ): Promise<string> {
@@ -153,6 +153,11 @@ export class ResearchAgent {
     // Send todo update (Dynamic List)
     const sendTodo = (todo: any) => {
         onProgress?.('todo', todo);
+    };
+
+    // Send step thinking token
+    const sendStepThinking = (stepId: string, token: string) => {
+        onProgress?.('todo', { id: stepId, thinking: token });
     };
 
     // Get or create session
@@ -193,19 +198,19 @@ export class ResearchAgent {
         // Removed string-based auto mode check in favor of explicit option
         
         if (!isConversational || options?.autoMode) {
-            try {
-                // Check for explicit auto-research request
-                const forceAuto = options?.autoMode || false;
+        try {
+            // Check for explicit auto-research request
+            const forceAuto = options?.autoMode || false;
 
-                plan = await this.createPlan(planningMessage, log, forceAuto);
-                
-                if (plan.steps.length > 0) {
-                    sendPlan({ steps: plan.steps });
-                }
-            } catch (e) {
-                logger.error('Planning failed, falling back to legacy logic', e);
+            plan = await this.createPlan(planningMessage, log, forceAuto, onProgress);
+            
+            if (plan.steps.length > 0) {
+                sendPlan({ steps: plan.steps });
             }
+        } catch (e) {
+            logger.error('Planning failed, falling back to legacy logic', e);
         }
+    }
 
         let reply = '';
         let accumulatedArtifacts: any[] = [];
@@ -234,7 +239,7 @@ export class ResearchAgent {
                             log(`[${step.tool}] ${step.description}`);
                         }
                         
-                        const result = await this.executeStep(step, userId, session, log, onProgress, accumulatedArtifacts, plan.steps);
+                        const result = await this.executeStep(step, userId, session, log, onProgress, accumulatedArtifacts, plan.steps, sendStepThinking);
                         
                         // Accumulate artifacts
                         if (result.artifacts && result.artifacts.length > 0) {
@@ -315,7 +320,12 @@ export class ResearchAgent {
     }
   }
 
-  private async createPlan(message: string, log?: (content: string, stats?: any) => void, forceAuto: boolean = false): Promise<{ intent: string, steps: any[] }> {
+  private async createPlan(
+      message: string, 
+      log?: (content: string, stats?: any) => void, 
+      forceAuto: boolean = false,
+      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void
+  ): Promise<{ intent: string, steps: any[] }> {
       const startTime = Date.now();
       const prompt = `
 You are a planning engine for a research agent.
@@ -355,16 +365,34 @@ Rules:
 4. If the user wants to test PDF generation directly or asks for a PDF without confirmation, just generate it.
 `;
       try {
-          const response = await this.llm.chat([{ role: 'user', content: prompt }]);
+          let fullContent = '';
+          if (this.llm.chatStream && onProgress) {
+              await this.llm.chatStream([{ role: 'user', content: prompt }], {
+                  onThinking: (token) => {
+                      onProgress('thinking', token);
+                  },
+                  onToken: (token) => {
+                      fullContent += token;
+                      // We can choose to show planning process as thinking too, 
+                      // or just show it as logs. For now, showing as thinking is good.
+                      onProgress('thinking', token);
+                  }
+              });
+          } else {
+              const response = await this.llm.chat([{ role: 'user', content: prompt }]);
+              fullContent = response.content;
+              // Call onProgress even in fallback to show something
+              onProgress?.('thinking', fullContent);
+          }
           
           // Log stats
           const duration = Date.now() - startTime;
-          const tokens = response.usage?.completionTokens || Math.ceil(response.content.length / 4);
+          const tokens = Math.ceil(fullContent.length / 4);
           if (log) {
               log(`[Agent] Created plan`, { duration, tokens, operation: 'planning' });
           }
 
-          let text = response.content.trim();
+          let text = fullContent.trim();
           if (text.startsWith('```')) {
               text = text.replace(/^```(json)?/, '').replace(/```$/, '');
           }
@@ -381,20 +409,41 @@ Rules:
       userId: string, 
       session: Session, 
       log: (c: string, stats?: any) => void,
-      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo', content: any) => void,
+      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void,
       accumulatedArtifacts: any[] = [],
-      planSteps: any[] = []
+      planSteps: any[] = [],
+      sendStepThinking?: (stepId: string, token: string) => void
   ): Promise<{ output: string, artifacts: any[], usage?: { promptTokens: number, completionTokens: number } }> {
       let output = '';
       let artifacts: any[] = [];
       let usage: { promptTokens: number, completionTokens: number } | undefined;
 
+      const skillHandlers = {
+          onLog: (type: string, content: string) => {
+              if (type === 'thinking' && sendStepThinking) {
+                  sendStepThinking(step.id, content);
+              } else {
+                  log(`[Skill:${step.tool}] ${content}`);
+              }
+          },
+          onProgress: async (progress: number, description: string, metadata?: any) => {
+               log(`[Skill Progress] ${progress}% - ${description}`, metadata);
+               // Update the step in UI
+               onProgress?.('todo', { 
+                   id: step.id, 
+                   status: 'in_progress', 
+                   content: `${step.description} (${progress}%)`,
+                   metadata: metadata 
+               });
+          }
+      };
+
       switch (step.tool) {
           case 'LiteratureReview':
-              output = await this.executeLiteratureReview(session, userId, step.params.topic, log, onProgress);
+              output = await this.executeLiteratureReview(session, userId, step.params.topic, log, onProgress, sendStepThinking ? (token) => sendStepThinking(step.id, token) : undefined);
               break;
           case 'ConceptExplainer':
-              const ceResult = await this.skillManager.executeSkill('concept_explainer', userId, { concept: step.params.concept });
+              const ceResult = await this.skillManager.executeSkill('concept_explainer', userId, { concept: step.params.concept }, skillHandlers);
               output = ceResult.formatted_output;
               break;
           case 'PdfGenerator':
@@ -403,7 +452,7 @@ Rules:
                   'pdf_generator',
                   userId,
                   { title: step.params.title, content: pdfContent },
-                  (type, content) => log(`[Skill] ${content}`)
+                  skillHandlers
               );
               output = pdfResult.formatted_output;
               if (pdfResult.url && pdfResult.file_path) {
@@ -421,15 +470,15 @@ Rules:
               }
               break;
           case 'CodeAnalysis':
-               const caResult = await this.skillManager.executeSkill('code_analysis', userId, { path: step.params.path || '.', operation: 'structure' });
+               const caResult = await this.skillManager.executeSkill('code_analysis', userId, { path: step.params.path || '.', operation: 'structure' }, skillHandlers);
                output = `Project Structure:\n${caResult.structure}`;
                break;
           case 'MemorySearch':
-               const msResult = await this.skillManager.executeSkill('memory_management', userId, { operation: 'search', query: step.params.query });
+               const msResult = await this.skillManager.executeSkill('memory_management', userId, { operation: 'search', query: step.params.query }, skillHandlers);
                output = JSON.stringify(msResult.results);
                break;
           case 'FileOps':
-               const foResult = await this.skillManager.executeSkill('local_file_ops', userId, { operation: step.params.operation });
+               const foResult = await this.skillManager.executeSkill('local_file_ops', userId, { operation: step.params.operation }, skillHandlers);
                output = `Moved ${foResult.moved} files.`;
                break;
           case 'AgentOrchestration':
@@ -443,7 +492,7 @@ Rules:
               // User requested continuous mode until stopped manually.
               log(`[AutoResearch] Starting continuous optimization loop for "${topic}". Will run until stopped.`);
               
-              let currentContent = await this.buildAutoResearchInitialDraft(session, userId, topic, log, onProgress);
+              let currentContent = await this.buildAutoResearchInitialDraft(session, userId, topic, log, onProgress, sendStepThinking ? (token: string) => sendStepThinking(step.id, token) : undefined);
               let round = 0;
               
               while (true) {
@@ -467,8 +516,25 @@ Current Content Length: ${currentContent.length} chars.
 Goal: Identify ONE specific area to improve (e.g., "Add recent statistics", "Explain concept X better", "Find a case study").
 Return ONLY the improvement task description.
 `;
-                  const planRes = await this.llm.chat([{ role: 'user', content: improvePrompt }]);
-                  const improvementTask = planRes.content.trim();
+                  
+                  // Use stream for thinking if available
+                  let improvementTask = '';
+                  if (this.llm.chatStream && sendStepThinking) {
+                      sendStepThinking(step.id, `\n\n> **Round ${round} Improvement Planning**\n`);
+                      await this.llm.chatStream([{ role: 'user', content: improvePrompt }], {
+                          onThinking: (token) => {
+                              sendStepThinking(step.id, token);
+                          },
+                          onToken: (token) => {
+                              improvementTask += token;
+                              sendStepThinking(step.id, token);
+                          }
+                      });
+                  } else {
+                      const planRes = await this.llm.chat([{ role: 'user', content: improvePrompt }]);
+                      improvementTask = planRes.content.trim();
+                  }
+                  
                   log(`[AutoResearch] Improvement Task: ${improvementTask}`);
                   
                   // Check stop signal again before expensive operations
@@ -485,46 +551,57 @@ Task: ${improvementTask}
 
 Action: Perform the task and rewrite the FULL content to include the new information. Make it better, more detailed, and academic.
 `;
-                   const refineRes = await this.llm.chat([{ role: 'user', content: refinePrompt }]);
-                   currentContent = refineRes.content;
-                   
-                   // 3. Generate Intermediate PDF
-                   const title = `${topic} - v${round}`;
-                   log(`[AutoResearch] Generating PDF version ${round}...`);
-                   const pdfRes = await this.skillManager.executeSkill('pdf_generator', userId, { title, content: currentContent }, (type, content) => log(`[Skill] ${content}`));
-                   
-                   if (pdfRes.url && pdfRes.file_path) {
-                        const url = pdfRes.url.startsWith('/') ? pdfRes.url : `/${pdfRes.url}`;
-                        const artifact = {
-                            id: `file-${Date.now()}`,
-                            name: `${title}.pdf`,
-                            type: 'file',
-                            url: `http://localhost:4000${url}`,
-                            path: pdfRes.file_path,
-                            mimeType: 'application/pdf'
-                        };
-                        artifacts.push(artifact);
-                        accumulatedArtifacts.push(artifact); // Add to global list
-                        
-                        // Send intermediate update to chat
-                        this.sessionManager.addMessage(session.id, 'assistant', `[AUTO] Round ${round} Complete: I have improved the document based on "${improvementTask}".\n\n[Download ${title}.pdf](${artifact.url})`, { attachments: [artifact], auto: true });
-                   }
-                   
-                   // Small delay to prevent tight loop if LLM is very fast, and allow stop signal processing
-                   await new Promise(resolve => setTimeout(resolve, 2000));
+                  let refinedContent = '';
+                  if (this.llm.chatStream && sendStepThinking) {
+                       sendStepThinking(step.id, `\n\n> **Executing Improvement: ${improvementTask}**\n`);
+                       await this.llm.chatStream([{ role: 'user', content: refinePrompt }], {
+                           onThinking: (token) => {
+                               sendStepThinking(step.id, token);
+                           },
+                           onToken: (token) => {
+                               refinedContent += token;
+                               sendStepThinking(step.id, token);
+                           }
+                       });
+                  } else {
+                       const refineRes = await this.llm.chat([{ role: 'user', content: refinePrompt }]);
+                       refinedContent = refineRes.content;
+                  }
+
+                  currentContent = refinedContent;
+                  
+                  // 3. Generate Intermediate PDF
+                  const title = `${topic} - v${round}`;
+                  log(`[AutoResearch] Generating PDF version ${round}...`);
+                  const pdfRes = await this.skillManager.executeSkill('pdf_generator', userId, { title, content: currentContent }, skillHandlers);
+                  
+                  if (pdfRes.url && pdfRes.file_path) {
+                       const url = pdfRes.url.startsWith('/') ? pdfRes.url : `/${pdfRes.url}`;
+                       const artifact = {
+                           id: `file-${Date.now()}`,
+                           name: `${title}.pdf`,
+                           type: 'file',
+                           url: `http://localhost:4000${url}`,
+                           path: pdfRes.file_path,
+                           mimeType: 'application/pdf'
+                       };
+                       artifacts.push(artifact);
+                       accumulatedArtifacts.push(artifact); // Add to global list
+                       
+                       // Send intermediate update to chat
+                       this.sessionManager.addMessage(session.id, 'assistant', `[AUTO] Round ${round} Complete: I have improved the document based on "${improvementTask}".\n\n[Download ${title}.pdf](${artifact.url})`, { attachments: [artifact], auto: true });
+                  }
+                  
+                  // Small delay to prevent tight loop if LLM is very fast, and allow stop signal processing
+                  await new Promise(resolve => setTimeout(resolve, 2000));
               }
               output = `Auto-research completed/stopped. Final content length: ${currentContent.length}`;
               break;
           case 'Chat': {
-              // Use direct LLM call to avoid recursion loop
-              // But we need context.
-              const context = await this.memoryManager.getFormattedMemories(userId, step.params.message);
-
-              // Include session history
               const history = this.sessionManager.getHistory(session.id, 10);
               const historyText = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
-
-              // Inject artifact info into system prompt so LLM knows what was generated
+              const context = await this.memoryManager.getFormattedMemories(userId, step.params.message);
+              
               let artifactContext = '';
               if (accumulatedArtifacts.length > 0) {
                   artifactContext = `
@@ -539,15 +616,31 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
 `;
               }
 
-              const response = await this.llm.chat([
+              let reply = '';
+              const messages = [
                   { role: 'system', content: `You are Redigg. Context: ${context}\n\nSession History:\n${historyText}${artifactContext}` },
                   { role: 'user', content: step.params.message }
-              ]);
-              const reply = response.content;
-              usage = response.usage;
+              ];
+
+              if (this.llm.chatStream && onProgress) {
+                  await this.llm.chatStream(messages as any, {
+                      onThinking: (token) => {
+                          onProgress('thinking', token);
+                      },
+                      onToken: (token) => {
+                          reply += token;
+                          onProgress('token', token);
+                      }
+                  });
+              } else {
+                  const response = await this.llm.chat(messages as any);
+                  reply = response.content;
+                  usage = response.usage;
+                  // Ensure UI gets the content if non-streaming
+                  onProgress?.('token', reply);
+              }
               
               // Attach accumulated artifacts to the final chat message
-              // Make sure to attach artifacts to metadata so they are persisted
               const metadata = accumulatedArtifacts.length > 0 ? { attachments: accumulatedArtifacts } : undefined;
               this.sessionManager.addMessage(session.id, 'assistant', reply, metadata);
               output = reply;
@@ -614,7 +707,8 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
       userId: string,
       topic: string,
       log: (c: string, stats?: any) => void,
-      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo', content: any) => void
+      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void,
+      onThinking?: (token: string) => void
   ): Promise<string> {
       log(`[AutoResearch] Building initial survey draft with academic_survey_self_improve...`);
 
@@ -624,7 +718,13 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
               userId,
               { topic, depth: 'standard' },
               {
-                  onLog: (_type: any, content: string) => log(`[AutoResearch][Seed] ${content}`),
+                  onLog: (type: any, content: string) => {
+                      if (type === 'thinking' && onThinking) {
+                          onThinking(content);
+                      } else {
+                          log(`[AutoResearch][Seed] ${content}`);
+                      }
+                  },
                   onProgress: async (progress: number, description: string, metadata?: any) => {
                       log(`[AutoResearch][Seed] ${progress}% - ${description}`, metadata);
                   },
@@ -668,7 +768,7 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
       message: string, 
       reply: string, 
       log: (c: string) => void,
-      onProgress?: any
+      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void
   ) {
     // Evolve Memory (Async)
     try {
@@ -714,7 +814,7 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
     userId: string, 
     message: string, 
     log: (content: string, stats?: any) => void,
-    onProgress?: (type: 'token' | 'log' | 'plan' | 'todo', content: any) => void
+    onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void
   ): Promise<string> {
 
     const lowerMsg = message.toLowerCase();
@@ -942,6 +1042,9 @@ Instructions:
             { role: 'system', content: systemPrompt },
             { role: 'user', content: message }
         ], {
+            onThinking: (token) => {
+                onProgress('thinking', token);
+            },
             onToken: (token) => {
                 reply += token;
                 onProgress('token', token);
@@ -954,6 +1057,8 @@ Instructions:
             { role: 'user', content: message }
         ]);
         reply = response.content;
+        // Call onProgress in non-streaming fallback to show tokens in UI
+        onProgress?.('token', reply);
     }
 
     // Save response to session
@@ -1017,7 +1122,8 @@ Title:`;
       userId: string, 
       topic: string, 
       log: (content: string, stats?: any) => void,
-      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo', content: any) => void
+      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void,
+      onThinking?: (token: string) => void
   ): Promise<string> {
     logger.info(`Detected intent: Literature Review on "${topic}"`);
     const startTime = Date.now();
@@ -1029,7 +1135,13 @@ Title:`;
         userId, 
         { topic },
         {
-            onLog: (type, content) => log(`[Skill] ${content}`),
+            onLog: (type, content) => {
+                if (type === 'thinking' && onThinking) {
+                    onThinking(content);
+                } else {
+                    log(`[Skill] ${content}`);
+                }
+            },
             onProgress: async (progress, description, metadata) => {
                  log(`[Skill Progress] ${progress}% - ${description}`, metadata);
                  if (metadata && metadata.papers) {

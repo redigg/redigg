@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo.png" alt="Redigg Logo" width="200">
+  <img src="web/src/assets/logo.png" alt="Redigg Logo" width="200">
   
   # Redigg 🦎
   

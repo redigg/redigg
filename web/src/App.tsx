@@ -208,6 +208,37 @@ function App() {
         },
       };
 
+  const randomTopics = [
+    'multi-agent reinforcement learning',
+    'world models for planning',
+    'retrieval-augmented generation',
+    'diffusion models for generation',
+    'LLM alignment and safety',
+    'agentic tool use and planning',
+    'graph neural networks',
+    'causal representation learning',
+    'offline reinforcement learning',
+    'multi-modal foundation models',
+    'self-supervised learning',
+    'continual learning',
+  ];
+
+  const pickRandom = <T,>(items: T[]): T => items[Math.floor(Math.random() * items.length)];
+
+  const fillExamplePrompt = (template: string) => {
+    const topic = pickRandom(randomTopics);
+    const title = pickRandom([
+      `A Survey of ${topic}`,
+      `${topic}: A Comprehensive Review`,
+      `Recent Advances in ${topic}`,
+      `Benchmarking ${topic}: Methods and Metrics`,
+    ]);
+
+    return template
+      .replaceAll('[Topic]', topic)
+      .replaceAll('[Title]', title);
+  };
+
   const handleAutoModeChange = (checked: boolean) => {
     if (currentSessionId) {
         setAutoModeMap(prev => {
@@ -1466,7 +1497,7 @@ function App() {
                   <Button 
                     variant="outline" 
                     className="justify-start items-start whitespace-normal h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
-                    onClick={() => setInput(t.examples.litReview.prompt)}
+                    onClick={() => setInput(fillExamplePrompt(t.examples.litReview.prompt))}
                   >
                     <FileText className="h-5 w-5 mr-3 text-indigo-500 shrink-0" />
                     <div className="text-left min-w-0 flex-1">
@@ -1478,7 +1509,7 @@ function App() {
                   <Button 
                     variant="outline" 
                     className="justify-start items-start whitespace-normal h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
-                    onClick={() => setInput(t.examples.explain.prompt)}
+                    onClick={() => setInput(fillExamplePrompt(t.examples.explain.prompt))}
                   >
                     <Brain className="h-5 w-5 mr-3 text-indigo-500 shrink-0" />
                     <div className="text-left min-w-0 flex-1">
@@ -1490,7 +1521,7 @@ function App() {
                   <Button 
                     variant="outline" 
                     className="justify-start items-start whitespace-normal h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
-                    onClick={() => setInput(t.examples.analyzePaper.prompt)}
+                    onClick={() => setInput(fillExamplePrompt(t.examples.analyzePaper.prompt))}
                   >
                     <FileText className="h-5 w-5 mr-3 text-indigo-500 shrink-0" />
                     <div className="text-left min-w-0 flex-1">
@@ -1502,7 +1533,7 @@ function App() {
                   <Button 
                     variant="outline" 
                     className="justify-start items-start whitespace-normal h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
-                    onClick={() => setInput(t.examples.autoResearch.prompt)}
+                    onClick={() => setInput(fillExamplePrompt(t.examples.autoResearch.prompt))}
                   >
                     <Sparkles className="h-5 w-5 mr-3 text-indigo-500 shrink-0" />
                     <div className="text-left min-w-0 flex-1">

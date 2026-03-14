@@ -9,6 +9,9 @@ import { EventManager } from '../events/EventManager.js';
 import { QualityManager } from '../quality/QualityManager.js';
 import { createLogger } from '../utils/logger.js';
 import { buildChatGraph } from './graph/chatGraph.js';
+import { runPlan } from './execution/planRunner.js';
+import type { AgentProgressHandler } from '../protocol/progress.js';
+import { ensureSessionWorkspace } from '../workspace/sessionWorkspace.js';
 import AcademicSurveySelfImproveSkill from '../../skills/research/academic-survey-self-improve/index.js';
 
 const logger = createLogger('Agent');
@@ -98,111 +101,29 @@ export class ResearchAgent {
     message: string;
     plan: { intent: string; steps: any[] };
     log: (content: string, stats?: any) => void;
-    onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void;
+    onProgress?: AgentProgressHandler;
     sendPlan: (plan: { steps: any[] }) => void;
     sendStepThinking: (stepId: string, token: string) => void;
     accumulatedArtifacts: any[];
   }): Promise<{ reply: string; accumulatedArtifacts: any[] }> {
-    const { userId, session, plan, log, onProgress, sendPlan, sendStepThinking } = args;
+    const { userId, session, plan, log, onProgress, sendPlan, sendStepThinking, accumulatedArtifacts } = args;
 
-    let reply = '';
-    const accumulatedArtifacts = Array.isArray(args.accumulatedArtifacts) ? [...args.accumulatedArtifacts] : [];
-
-    if (!(plan.intent === 'multi_step' || (plan.intent === 'single' && plan.steps.length > 0))) {
-      return { reply: '', accumulatedArtifacts };
-    }
-
-    for (const step of plan.steps) {
-      if (this.sessionManager.isSessionStopped(session.id)) {
-        log('[Agent] Session stopped by user.');
-        return { reply: 'Session stopped by user.', accumulatedArtifacts };
-      }
-
-      step.status = 'in_progress';
-      sendPlan({ steps: plan.steps });
-
-      let retryCount = 0;
-      const maxRetries = 2;
-      let success = false;
-      const stepStartTime = Date.now();
-
-      while (retryCount <= maxRetries && !success) {
-        try {
-          if (retryCount > 0) {
-            log(`[Agent] Retry ${retryCount}/${maxRetries} for step: ${step.description}`);
-          } else {
-            log(`[${step.tool}] ${step.description}`);
-          }
-
-          const result = await this.executeStep(
-            step,
-            userId,
-            session,
-            log,
-            onProgress,
-            accumulatedArtifacts,
-            plan.steps,
-            sendStepThinking
-          );
-
-          if (result.artifacts && result.artifacts.length > 0) {
-            accumulatedArtifacts.push(...result.artifacts);
-          }
-
-          const duration = Date.now() - stepStartTime;
-          const tokens = result.usage
-            ? result.usage.completionTokens + (result.usage.promptTokens || 0)
-            : typeof result.output === 'string'
-              ? Math.ceil(result.output.length / 4)
-              : 0;
-
-          log(`[${step.tool}] Step completed`, { duration, tokens });
-
-          step.status = 'completed';
-          step.result = result.output;
-          success = true;
-
-          if (step.tool === 'Chat') {
-            reply = result.output;
-          }
-        } catch (e) {
-          retryCount++;
-          const errorMsg = String(e);
-          const duration = Date.now() - stepStartTime;
-          logger.error(`Step failed (Attempt ${retryCount}): ${step.description}`, e);
-
-          if (retryCount > maxRetries) {
-            step.status = 'failed';
-            step.error = errorMsg;
-            log(`[Error] Step failed permanently: ${step.description}`, { duration });
-          } else {
-            log(`[Warning] Step failed, retrying... (${errorMsg})`, { duration });
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-        }
-      }
-
-      sendPlan({ steps: plan.steps });
-    }
-
-    if (!reply) {
-      const completedSteps = plan.steps.filter(s => s.status === 'completed');
-      const failedSteps = plan.steps.filter(s => s.status === 'failed');
-
-      let summary = 'I have completed the requested tasks.\n\n';
-      if (completedSteps.length > 0) {
-        summary += '**Completed:**\n' + completedSteps.map(s => `- ${s.description}`).join('\n') + '\n';
-      }
-      if (failedSteps.length > 0) {
-        summary += '\n**Failed:**\n' + failedSteps.map(s => `- ${s.description}: ${s.error}`).join('\n');
-      }
-
-      reply = summary;
-      const metadata = accumulatedArtifacts.length > 0 ? { attachments: accumulatedArtifacts } : undefined;
-      this.sessionManager.addMessage(session.id, 'assistant', reply, metadata);
-    }
-
-    return { reply, accumulatedArtifacts };
+    return runPlan({
+      userId,
+      session,
+      plan,
+      log,
+      onProgress,
+      sendPlan,
+      sendStepThinking,
+      accumulatedArtifacts,
+      isStopped: () => this.sessionManager.isSessionStopped(session.id),
+      executeStep: this.executeStep.bind(this),
+      addAssistantMessage: (reply, metadata) => this.sessionManager.addMessage(session.id, 'assistant', reply, metadata),
+      onStepError: (message, error) => {
+        logger.error(message, error);
+      },
+    });
   }
 
   private setupEventListeners() {
@@ -273,7 +194,7 @@ export class ResearchAgent {
   public async chat(
     userId: string, 
     message: string, 
-    onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void,
+    onProgress?: AgentProgressHandler,
     sessionId?: string,
     options?: { autoMode?: boolean }
   ): Promise<string> {
@@ -281,12 +202,18 @@ export class ResearchAgent {
     const log = (content: string, stats?: any) => {
       const payload = stats ? `${content}__STATS__${JSON.stringify(stats)}` : content;
       onProgress?.('log', payload);
+      if (stats) {
+        onProgress?.('stats', stats);
+      }
       // Persist log to session history
       this.sessionManager.addMessage(session.id, 'log', payload);
     };
 
     const sendPlan = (plan: { steps: any[] }) => {
       onProgress?.('plan', plan);
+      try {
+        this.sessionManager.addMessage(session.id, 'plan', JSON.stringify(plan));
+      } catch {}
     };
 
     const sendStepThinking = (stepId: string, token: string) => {
@@ -311,6 +238,8 @@ export class ResearchAgent {
     this.sessionManager.setSessionStatus(session.id, 'running');
     
     try {
+        await ensureSessionWorkspace(session.id);
+
         // Update session title if it's the first user message
         if (session.messages.length === 0) {
             session.title = message.slice(0, 30) + (message.length > 30 ? '...' : '');
@@ -349,7 +278,7 @@ export class ResearchAgent {
       message: string, 
       log?: (content: string, stats?: any) => void, 
       forceAuto: boolean = false,
-      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void
+      onProgress?: AgentProgressHandler
   ): Promise<{ intent: string, steps: any[] }> {
       const startTime = Date.now();
       const prompt = `
@@ -422,11 +351,41 @@ Rules:
               text = text.replace(/^```(json)?/, '').replace(/```$/, '');
           }
           const plan = JSON.parse(text);
-          return plan;
+          return forceAuto ? this.normalizeAutoResearchPlan(plan, message) : plan;
       } catch (e) {
           logger.error('Planning failed:', e);
           return { intent: 'single', steps: [] };
       }
+  }
+
+  private normalizeAutoResearchPlan(plan: any, message: string): { intent: string; steps: any[] } {
+    const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+    const autoIndex = steps.findIndex((step: any) => step?.tool === 'AutoResearch');
+
+    const autoStep = autoIndex >= 0
+      ? steps[autoIndex]
+      : {
+          id: 'auto',
+          description: `Conduct continuous optimization and research on the topic '${message}'`,
+          tool: 'AutoResearch',
+          params: { topic: message },
+        };
+
+    const topic = autoStep?.params?.topic || autoStep?.params?.query || message;
+    const normalizedAutoStep = {
+      ...autoStep,
+      id: String(autoStep?.id || 'auto'),
+      tool: 'AutoResearch',
+      params: {
+        ...(autoStep?.params || {}),
+        topic,
+      },
+    };
+
+    return {
+      intent: 'single',
+      steps: [normalizedAutoStep],
+    };
   }
 
   private async executeStep(
@@ -434,7 +393,7 @@ Rules:
       userId: string, 
       session: Session, 
       log: (c: string, stats?: any) => void,
-      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void,
+      onProgress?: AgentProgressHandler,
       accumulatedArtifacts: any[] = [],
       planSteps: any[] = [],
       sendStepThinking?: (stepId: string, token: string) => void
@@ -476,7 +435,7 @@ Rules:
               const pdfResult = await this.skillManager.executeSkill(
                   'pdf_generator',
                   userId,
-                  { title: step.params.title, content: pdfContent },
+                  { title: step.params.title, content: pdfContent, sessionId: session.id },
                   skillHandlers
               );
               output = pdfResult.formatted_output;
@@ -514,21 +473,36 @@ Rules:
                break;
           case 'AutoResearch':
               const topic = step.params.topic || 'General Research';
-              // User requested continuous mode until stopped manually.
-              log(`[AutoResearch] Starting continuous optimization loop for "${topic}". Will run until stopped.`);
+              const parsedIterations = (() => {
+                  const raw = step.params.iterations ?? step.params.maxIterations ?? step.params.rounds;
+                  const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : raw;
+                  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+              })();
+
+              const shouldDelay = !(process.env.NODE_ENV === 'test' || process.env.VITEST === 'true');
+              const maxRounds = parsedIterations;
+              log(
+                maxRounds
+                  ? `[AutoResearch] Starting optimization loop for "${topic}". Max rounds: ${maxRounds}.`
+                  : `[AutoResearch] Starting continuous optimization loop for "${topic}". Will run until stopped.`
+              );
               
               let currentContent = await this.buildAutoResearchInitialDraft(session, userId, topic, log, onProgress, sendStepThinking ? (token: string) => sendStepThinking(step.id, token) : undefined);
               let round = 0;
               
               while (true) {
-                  round++;
-                  
-                  // Check stop signal at start of loop
                   if (this.sessionManager.isSessionStopped(session.id)) {
                       log('[AutoResearch] Session stopped by user.');
-                      output = `Auto-research stopped by user after ${round-1} rounds.`;
+                      output = `Auto-research completed/stopped. Stopped by user after ${round} rounds. Final content length: ${currentContent.length}.`;
                       break;
                   }
+
+                  if (maxRounds && round >= maxRounds) {
+                      output = `Auto-research completed/stopped. Completed after ${round} rounds. Final content length: ${currentContent.length}.`;
+                      break;
+                  }
+
+                  round++;
 
                   log(`[AutoResearch] Round ${round}: Analyzing and improving...`);
                   
@@ -563,7 +537,10 @@ Return ONLY the improvement task description.
                   log(`[AutoResearch] Improvement Task: ${improvementTask}`);
                   
                   // Check stop signal again before expensive operations
-                  if (this.sessionManager.isSessionStopped(session.id)) break;
+                  if (this.sessionManager.isSessionStopped(session.id)) {
+                      output = `Auto-research completed/stopped. Stopped by user after ${round} rounds. Final content length: ${currentContent.length}.`;
+                      break;
+                  }
 
                   // 2. Execute Improvement (Simulated via LLM or Skill)
                   const refinePrompt = `
@@ -598,7 +575,7 @@ Action: Perform the task and rewrite the FULL content to include the new informa
                   // 3. Generate Intermediate PDF
                   const title = `${topic} - v${round}`;
                   log(`[AutoResearch] Generating PDF version ${round}...`);
-                  const pdfRes = await this.skillManager.executeSkill('pdf_generator', userId, { title, content: currentContent }, skillHandlers);
+                  const pdfRes = await this.skillManager.executeSkill('pdf_generator', userId, { title, content: currentContent, sessionId: session.id }, skillHandlers);
                   
                   if (pdfRes.url && pdfRes.file_path) {
                        const url = pdfRes.url.startsWith('/') ? pdfRes.url : `/${pdfRes.url}`;
@@ -618,9 +595,10 @@ Action: Perform the task and rewrite the FULL content to include the new informa
                   }
                   
                   // Small delay to prevent tight loop if LLM is very fast, and allow stop signal processing
-                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  if (shouldDelay) {
+                      await new Promise(resolve => setTimeout(resolve, maxRounds ? 500 : 2000));
+                  }
               }
-              output = `Auto-research completed/stopped. Final content length: ${currentContent.length}`;
               break;
           case 'Chat': {
               const history = this.sessionManager.getHistory(session.id, 10);
@@ -732,7 +710,7 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
       userId: string,
       topic: string,
       log: (c: string, stats?: any) => void,
-      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void,
+      onProgress?: AgentProgressHandler,
       onThinking?: (token: string) => void
   ): Promise<string> {
       log(`[AutoResearch] Building initial survey draft with academic_survey_self_improve...`);
@@ -793,7 +771,7 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
       message: string, 
       reply: string, 
       log: (c: string) => void,
-      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void
+      onProgress?: AgentProgressHandler
   ) {
     // Evolve Memory (Async)
     try {
@@ -822,10 +800,12 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
         });
 
         // After response and memory evolution, generate a title for the session if it's still generic
-        if (session.messages.length <= 4 && (session.title || '').length > 20) { // Early in convo or long default title
+        const dialogueTurns = session.messages.filter(m => m.role === 'user' || m.role === 'assistant').length;
+        if (dialogueTurns <= 4 && (session.title || '').length > 20) { // Early in convo or long default title
             const title = await this.generateSessionTitle(session, message, reply);
             if (title) {
                 session.title = title;
+                onProgress?.('session_title', { title, sessionId: session.id });
                 onProgress?.('token', `[TITLE_GENERATED]${title}`);
             }
         }
@@ -839,7 +819,7 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
     userId: string, 
     message: string, 
     log: (content: string, stats?: any) => void,
-    onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void
+    onProgress?: AgentProgressHandler
   ): Promise<string> {
 
     const lowerMsg = message.toLowerCase();
@@ -1147,7 +1127,7 @@ Title:`;
       userId: string, 
       topic: string, 
       log: (content: string, stats?: any) => void,
-      onProgress?: (type: 'token' | 'log' | 'plan' | 'todo' | 'thinking', content: any) => void,
+      onProgress?: AgentProgressHandler,
       onThinking?: (token: string) => void
   ): Promise<string> {
     logger.info(`Detected intent: Literature Review on "${topic}"`);

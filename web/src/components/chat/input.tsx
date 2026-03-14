@@ -15,9 +15,10 @@ interface ChatInputProps {
   onChange?: (value: string) => void;
   autoMode?: boolean;
   onAutoModeChange?: (checked: boolean) => void;
+  sessionId?: string | null;
 }
 
-export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redigg...", value, onChange, autoMode: controlledAutoMode, onAutoModeChange }: ChatInputProps) {
+export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redigg...", value, onChange, autoMode: controlledAutoMode, onAutoModeChange, sessionId }: ChatInputProps) {
   const [internalInput, setInternalInput] = useState("");
   const [attachments, setAttachments] = useState<any[]>([]);
   const [internalAutoMode, setInternalAutoMode] = useState(false);
@@ -77,6 +78,9 @@ export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redi
           const file = e.target.files[0];
           const formData = new FormData();
           formData.append('file', file);
+          if (sessionId) {
+            formData.append('sessionId', sessionId);
+          }
 
           try {
               const res = await fetch('/api/upload', {

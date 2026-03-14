@@ -11,30 +11,28 @@ export default class PdfGeneratorSkill implements Skill {
   description = 'Generate a PDF from text/markdown using PDFKit';
   tags = ['research', 'document', 'pdf'];
 
-  private workspaceDir: string;
-
-  constructor() {
-    // Ensure output directory exists
-    this.workspaceDir = path.resolve(process.cwd(), 'workspace/output/pdfs');
-  }
+  private defaultWorkspaceDir = path.resolve(process.cwd(), 'workspace/output/pdfs');
 
   async execute(ctx: SkillContext, params: SkillParams): Promise<SkillResult> {
-    const { title, content, author = 'Redigg AI' } = params;
+    const { title, content, author = 'Redigg AI', sessionId } = params;
     
     if (!content) {
       throw new Error('Content is required to generate PDF');
     }
 
-    // Ensure output directory exists
-    if (!fs.existsSync(this.workspaceDir)) {
-      fs.mkdirSync(this.workspaceDir, { recursive: true });
+    const outputDir = typeof sessionId === 'string' && sessionId.trim()
+      ? path.resolve(process.cwd(), 'workspace', 'sessions', sessionId.trim(), 'output', 'pdfs')
+      : this.defaultWorkspaceDir;
+
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
     }
 
     ctx.log('thinking', `Generating PDF for "${title || 'Untitled'}"`);
     if (ctx.updateProgress) await ctx.updateProgress(10, `Initializing PDF document...`);
 
     const filename = (title || 'document').replace(/[^a-z0-9]/gi, '_').toLowerCase() + '_' + uuidv4().slice(0, 8);
-    const pdfPath = path.join(this.workspaceDir, `${filename}.pdf`);
+    const pdfPath = path.join(outputDir, `${filename}.pdf`);
     
     const parsedDocument = parseAcademicMarkdown(title, String(content));
     const resolvedTitle = parsedDocument.title || title || 'Research Report';
@@ -67,7 +65,9 @@ export default class PdfGeneratorSkill implements Skill {
 
     // Return relative path for frontend to access (assuming static serve)
     // We need to make sure the workspace/output is served by express.
-    const relativeUrl = `/files/pdfs/${filename}.pdf`;
+    const relativeUrl = typeof sessionId === 'string' && sessionId.trim()
+      ? `/files/sessions/${sessionId.trim()}/output/pdfs/${filename}.pdf`
+      : `/files/pdfs/${filename}.pdf`;
 
     return {
       success: true,

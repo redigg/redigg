@@ -11,7 +11,7 @@ import { useState } from "react";
 import { CodeBlock, CodeBlockCopyButton } from "@/components/ui/code-block";
 import { type BundledLanguage } from "shiki";
 import { InlineCitation, InlineCitationCard, InlineCitationCardTrigger, InlineCitationCardBody, InlineCitationCarousel, InlineCitationCarouselHeader, InlineCitationCarouselPrev, InlineCitationCarouselNext, InlineCitationCarouselIndex, InlineCitationCarouselContent, InlineCitationCarouselItem, InlineCitationSource } from "@/components/ai-elements/inline-citation";
-import { Reasoning, ReasoningTrigger, ReasoningContent } from "@/components/ai/reasoning";
+import { Reasoning, ReasoningTrigger } from "@/components/ai/reasoning";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 
 interface ChatMessageProps {
@@ -22,7 +22,11 @@ interface ChatMessageProps {
   logs?: string[];
   todos?: any[];
   stats?: {
-    duration: number;
+    duration?: number;
+    tokens?: number;
+    operation?: string;
+    step?: string;
+    [key: string]: any;
   };
   attachments?: any[];
   onCopy?: (content: string) => void;
@@ -65,6 +69,8 @@ export function ChatMessage({ role, content, thinking, isThinking, logs, todos, 
             setTimeout(() => setIsCopied(false), 2000);
         }
     };
+
+  
 
   return (
     <div

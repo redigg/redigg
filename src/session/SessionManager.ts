@@ -3,7 +3,7 @@ import { SQLiteStorage } from '../storage/sqlite.js';
 
 export interface Message {
   id: string;
-  role: 'system' | 'user' | 'assistant' | 'log';
+  role: 'system' | 'user' | 'assistant' | 'log' | 'plan' | 'todo' | 'stats' | 'session_title' | 'error';
   content: string;
   timestamp: Date;
   metadata?: any;

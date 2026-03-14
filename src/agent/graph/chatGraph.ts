@@ -1,7 +1,16 @@
 import { END, START, StateGraph, type StateGraphArgs } from '@langchain/langgraph';
 import type { Session } from '../../session/SessionManager.js';
 
-export type ProgressEventType = 'token' | 'log' | 'plan' | 'todo' | 'thinking';
+export type ProgressEventType =
+  | 'token'
+  | 'log'
+  | 'plan'
+  | 'todo'
+  | 'thinking'
+  | 'stats'
+  | 'session_title'
+  | 'done'
+  | 'error';
 export type ProgressHandler = (type: ProgressEventType, content: any) => void;
 export type LogHandler = (content: string, stats?: any) => void;
 
@@ -182,4 +191,3 @@ export function buildChatGraph(deps: ChatGraphDeps) {
 
   return graph;
 }
-

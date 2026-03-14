@@ -5,8 +5,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { ChatMessage as ChatMessageComponent } from './components/chat/message';
 import { ChatInput } from './components/chat/input';
 import { ScrollToBottom } from './components/chat/scroll-to-bottom';
-import { Bot, Sparkles, MessageSquare, Plus, Trash2, PanelLeftClose, PanelLeftOpen, FileText, Code, Database, Brain } from 'lucide-react';
+import { Sparkles, MessageSquare, Plus, Trash2, PanelLeftClose, PanelLeftOpen, FileText, Brain } from 'lucide-react';
 import { cn } from "@/lib/utils";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -100,6 +101,14 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'session' | 'memory', id: string } | null>(null);
+  const [uiLang, setUiLang] = useState<'en' | 'zh'>(() => {
+    try {
+      const stored = localStorage.getItem('uiLang');
+      return stored === 'zh' ? 'zh' : 'en';
+    } catch {
+      return 'en';
+    }
+  });
   
   // Auto Mode State
   const [autoModeMap, setAutoModeMap] = useState<Record<string, boolean>>(() => {
@@ -110,6 +119,94 @@ function App() {
     }
   });
   const [pendingAutoMode, setPendingAutoMode] = useState(true);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('uiLang', uiLang);
+    } catch {}
+  }, [uiLang]);
+
+  const t = uiLang === 'zh'
+    ? {
+        tabs: { chats: '聊天', skills: '技能', memory: '记忆', papers: '论文' },
+        newChat: '新对话',
+        noRecentChats: '暂无对话',
+        loadingSkills: '加载技能中...',
+        noActiveMems: '暂无记忆',
+        noRefsLoaded: '暂无论文',
+        viewPaper: '查看论文',
+        gatewayOnline: '网关在线',
+        gatewayUrl: '网关地址',
+        deleteTitle: '确定删除？',
+        deleteDescSession: '此操作不可撤销，将永久删除该会话。',
+        deleteDescMemory: '此操作不可撤销，将永久删除该记忆。',
+        cancel: '取消',
+        delete: '删除',
+        homeTitle: '我可以如何帮助你？',
+        homeSubtitle: '从下面的示例开始吧。',
+        examples: {
+          litReview: {
+            title: 'Perform a literature review on [Topic].',
+            subtitle: '-> 生成论文摘要和列表。',
+            prompt: 'Perform a literature review on [Topic].',
+          },
+          explain: {
+            title: 'Explain the concept of [Topic].',
+            subtitle: '-> 提供详细的概念解释。',
+            prompt: 'Explain the concept of [Topic].',
+          },
+          analyzePaper: {
+            title: 'Analyze this paper: [Title]',
+            subtitle: '-> 深入分析特定论文。',
+            prompt: 'Analyze this paper: [Title]',
+          },
+          autoResearch: {
+            title: 'Auto-research: [Topic] (3 iterations)',
+            subtitle: '-> 经过 3 轮自我优化后生成一份精炼的 PDF 报告。',
+            prompt: 'Auto-research: [Topic] (3 iterations)',
+          },
+        },
+      }
+    : {
+        tabs: { chats: 'Chat', skills: 'Skill', memory: 'Mem', papers: 'Ref' },
+        newChat: 'New Chat',
+        noRecentChats: 'No recent chats',
+        loadingSkills: 'Loading skills...',
+        noActiveMems: 'No active mems',
+        noRefsLoaded: 'No refs loaded',
+        viewPaper: 'View Paper',
+        gatewayOnline: 'Gateway Online',
+        gatewayUrl: 'Gateway URL',
+        deleteTitle: 'Are you sure?',
+        deleteDescSession: 'This action cannot be undone. This will permanently delete the chat session.',
+        deleteDescMemory: 'This action cannot be undone. This will permanently delete the memory item.',
+        cancel: 'Cancel',
+        delete: 'Delete',
+        homeTitle: 'How can I help you research?',
+        homeSubtitle: 'Try one of these examples to get started.',
+        examples: {
+          litReview: {
+            title: 'Perform a literature review on [Topic].',
+            subtitle: '-> Generates a paper list with concise summaries.',
+            prompt: 'Perform a literature review on [Topic].',
+          },
+          explain: {
+            title: 'Explain the concept of [Topic].',
+            subtitle: '-> Provides a detailed, structured explanation.',
+            prompt: 'Explain the concept of [Topic].',
+          },
+          analyzePaper: {
+            title: 'Analyze this paper: [Title]',
+            subtitle: '-> Deep-dives into a specific paper.',
+            prompt: 'Analyze this paper: [Title]',
+          },
+          autoResearch: {
+            title: 'Auto-research: [Topic] (3 iterations)',
+            subtitle: '-> Refines over 3 iterations and produces a polished PDF report.',
+            prompt: 'Auto-research: [Topic] (3 iterations)',
+          },
+        },
+      };
 
   const handleAutoModeChange = (checked: boolean) => {
     if (currentSessionId) {
@@ -124,6 +221,8 @@ function App() {
   };
 
   const currentAutoMode = currentSessionId ? (autoModeMap[currentSessionId] ?? true) : pendingAutoMode;
+
+  const gatewayBaseUrl = import.meta.env.VITE_GATEWAY_URL || (import.meta.env.DEV ? 'http://localhost:4000' : window.location.origin);
   
   // Notification State
   const [unseenMemoriesCount, setUnseenMemoriesCount] = useState(0);
@@ -349,7 +448,30 @@ function App() {
                   // and no final completion, it's active.
               }
 
-              if (msg.role === 'log') {
+              if (msg.role === 'plan') {
+                  let plan: any = null;
+                  try {
+                      plan = JSON.parse(msg.content);
+                  } catch {}
+
+                  const steps = plan?.steps;
+                  if (Array.isArray(steps)) {
+                      let lastMsg = reconstructedMessages[reconstructedMessages.length - 1];
+                      if (!lastMsg || lastMsg.role !== 'agent') {
+                          const placeholder: ChatMessage = {
+                              id: `temp-plan-${msg.id}`,
+                              role: 'agent',
+                              content: '',
+                              logs: [],
+                              todos: steps,
+                              timestamp: new Date(msg.timestamp)
+                          };
+                          reconstructedMessages.push(placeholder);
+                      } else {
+                          lastMsg.todos = steps;
+                      }
+                  }
+              } else if (msg.role === 'log') {
                   // Find the last agent message to attach logs to
                   // Or if no agent message, create a pending one?
                   // Actually, logs usually come *before* or *during* the agent's reply.
@@ -482,7 +604,24 @@ function App() {
         // If we reconnected, we might not have the exact "agentMsgId" in closure.
         // We need to find the *latest* agent message in state.
         
-        if (data.type === 'token') {
+        if (data.type === 'session_title') {
+          const title = data.content?.title;
+          if (typeof title === 'string' && title.trim()) {
+            setSessions(prev => prev.map(s =>
+              s.id === currentSessionId ? { ...s, title: title.trim() } : s
+            ));
+          }
+        } else if (data.type === 'stats') {
+          setMessages(prev => {
+            const lastIdx = prev.length - 1;
+            const lastMsg = prev[lastIdx];
+            if (lastMsg && lastMsg.role === 'agent') {
+              const newMsg = { ...lastMsg, stats: data.content };
+              return [...prev.slice(0, lastIdx), newMsg];
+            }
+            return prev;
+          });
+        } else if (data.type === 'token') {
           const content = data.content;
           if (content && content.startsWith('[TITLE_GENERATED]')) {
              // ...
@@ -520,6 +659,41 @@ function App() {
         // if we are not "actively" generating new tokens but just waiting for logs.
         // But logs come via SSE.
         
+        if (data.type === 'plan') {
+          const plan = data.content;
+          setMessages(prev => {
+              const lastIdx = prev.length - 1;
+              const lastMsg = prev[lastIdx];
+              if (lastMsg && lastMsg.role === 'agent') {
+                  const newMsg = { ...lastMsg, todos: plan.steps };
+                  return [...prev.slice(0, lastIdx), newMsg];
+              }
+              return prev;
+          });
+        } else if (data.type === 'todo') {
+          const todoItem = data.content;
+          setMessages(prev => {
+              const lastIdx = prev.length - 1;
+              const lastMsg = prev[lastIdx];
+              if (!lastMsg || lastMsg.role !== 'agent') return prev;
+              const existingTodos = lastMsg.todos || [];
+              const index = existingTodos.findIndex((t: any) => t.id === todoItem.id);
+              if (index >= 0) {
+                  const newTodos = [...existingTodos];
+                  const existing = newTodos[index];
+                  let updatedThinking = existing.thinking || '';
+                  if (todoItem.thinking) {
+                      updatedThinking += todoItem.thinking;
+                  }
+                  newTodos[index] = { ...existing, ...todoItem, thinking: updatedThinking };
+                  const newMsg = { ...lastMsg, todos: newTodos };
+                  return [...prev.slice(0, lastIdx), newMsg];
+              }
+              const newMsg = { ...lastMsg, todos: [...existingTodos, todoItem] };
+              return [...prev.slice(0, lastIdx), newMsg];
+          });
+        }
+
         // Actually, the `handleSend` SSE logic is complex because it updates specific IDs.
         // When reconnecting, we don't have those IDs.
         // A better approach for "Resume" is:
@@ -540,7 +714,7 @@ function App() {
           const res = await fetch('/api/sessions', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ userId: 'web-user', title: 'New Chat' })
+              body: JSON.stringify({ userId: 'web-user', title: t.newChat })
           });
           const session = await res.json();
           setSessions(prev => [session, ...prev]);
@@ -720,7 +894,20 @@ function App() {
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
         
-        if (data.type === 'token') {
+        if (data.type === 'session_title') {
+          const title = data.content?.title;
+          if (typeof title === 'string' && title.trim()) {
+            setSessions(prev => prev.map(s =>
+              s.id === currentSessionId ? { ...s, title: title.trim() } : s
+            ));
+          }
+        } else if (data.type === 'stats') {
+          setMessages(prev => prev.map(msg =>
+            msg.id === agentMsgId
+              ? { ...msg, stats: data.content }
+              : msg
+          ));
+        } else if (data.type === 'token') {
           const content = data.content;
           if (content && content.startsWith('[TITLE_GENERATED]')) {
             const title = content.replace('[TITLE_GENERATED]', '').trim();
@@ -857,25 +1044,25 @@ function App() {
               <TabsList className="w-full bg-zinc-100 p-1 mb-2 grid grid-cols-4 h-auto">
                   <TabsTrigger value="chats" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm relative" title="Chat">
                     <MessageSquare className="h-3.5 w-3.5" />
-                    <span className="text-xs font-medium">Chat</span>
+                    <span className="text-xs font-medium">{t.tabs.chats}</span>
                     {unseenSessionIds.size > 0 && (
                         <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500 border border-white"></span>
                     )}
                   </TabsTrigger>
                   <TabsTrigger value="skills" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm" title="Skill">
                     <Sparkles className="h-3.5 w-3.5" />
-                    <span className="text-xs font-medium">Skill</span>
+                    <span className="text-xs font-medium">{t.tabs.skills}</span>
                   </TabsTrigger>
                   <TabsTrigger value="memory" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm relative" title="Mem">
                     <Brain className="h-3.5 w-3.5" />
-                    <span className="text-xs font-medium">Mem</span>
+                    <span className="text-xs font-medium">{t.tabs.memory}</span>
                     {unseenMemoriesCount > 0 && (
                         <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500 border border-white"></span>
                     )}
                   </TabsTrigger>
                   <TabsTrigger value="papers" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm relative" title="Ref">
                     <FileText className="h-3.5 w-3.5" />
-                    <span className="text-xs font-medium">Ref</span>
+                    <span className="text-xs font-medium">{t.tabs.papers}</span>
                     {unseenPapersCount > 0 && (
                         <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500 border border-white"></span>
                     )}
@@ -900,7 +1087,7 @@ function App() {
                           onClick={() => loadSession(session.id)}
                         >
                           <div className="font-medium text-sm flex items-center gap-2 w-full min-w-0">
-                              <span className="truncate flex-1">{session.title || 'New Chat'}</span>
+                              <span className="truncate flex-1">{session.title || t.newChat}</span>
                               {session.status === 'running' && (
                                   <div className="shrink-0 px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[8px] font-bold border border-indigo-200 flex items-center gap-0.5">
                                     <Sparkles className="h-2 w-2 animate-pulse" />
@@ -924,7 +1111,7 @@ function App() {
                   ) : (
                     <div className="text-center py-8 text-zinc-400 text-xs">
                         <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                        No recent chats
+                        {t.noRecentChats}
                     </div>
                   )}
                 </TabsContent>
@@ -1019,7 +1206,7 @@ function App() {
                     })()
                   ) : (
                     <div className="text-center py-8 text-zinc-400 text-xs">
-                        Loading skills...
+                        {t.loadingSkills}
                     </div>
                   )}
                 </TabsContent>
@@ -1150,7 +1337,7 @@ function App() {
                                  ) : (
                                  <div className="text-center py-8 text-zinc-400 text-xs">
                                      <Brain className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                                     No active mems
+                                     {t.noActiveMems}
                                  </div>
                                  );
                              })()}
@@ -1193,7 +1380,7 @@ function App() {
                            </div>
                            {m.metadata?.url && (
                              <a href={m.metadata.url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:underline mt-2 flex items-center gap-1">
-                               View Paper <FileText className="h-3 w-3" />
+                               {t.viewPaper} <FileText className="h-3 w-3" />
                              </a>
                            )}
                            <div 
@@ -1208,7 +1395,7 @@ function App() {
                   ) : (
                     <div className="text-center py-8 text-zinc-400 text-xs">
                         <FileText className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                        No refs loaded
+                        {t.noRefsLoaded}
                     </div>
                   )}
                 </TabsContent>
@@ -1220,15 +1407,16 @@ function App() {
           <div className="flex items-center gap-2 text-sm text-zinc-600">
             <div className="group relative flex items-center gap-2 px-2 py-1 bg-white/50 rounded-full border border-zinc-200/50 shadow-sm cursor-help">
                     <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                    <span className="text-xs font-medium text-zinc-600">Gateway Online</span>
+                    <span className="text-xs font-medium text-zinc-600">{t.gatewayOnline}</span>
                     
                     {/* Tooltip */}
                     <div className="absolute bottom-full left-0 mb-2 px-2 py-1 bg-zinc-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                        Gateway URL: {window.location.origin}
+                        {t.gatewayUrl}: {gatewayBaseUrl}
                         <div className="absolute top-full left-4 -mt-1 border-4 border-transparent border-t-zinc-800"></div>
                     </div>
                 </div>
           </div>
+          <LanguageSwitcher value={uiLang} onValueChange={setUiLang} />
         </div>
       </aside>
 
@@ -1237,14 +1425,14 @@ function App() {
           <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                <AlertDialogTitle>{t.deleteTitle}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This action cannot be undone. This will permanently delete the {deleteTarget?.type === 'session' ? 'chat session' : 'memory item'}.
+                  {deleteTarget?.type === 'session' ? t.deleteDescSession : t.deleteDescMemory}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel onClick={() => setDeleteTarget(null)}>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700 focus:ring-red-600">Delete</AlertDialogAction>
+                <AlertDialogCancel onClick={() => setDeleteTarget(null)}>{t.cancel}</AlertDialogCancel>
+                <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700 focus:ring-red-600">{t.delete}</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
@@ -1271,55 +1459,55 @@ function App() {
                   <img src="/favicons/favicon-256x256.ico" alt="Redigg" className="h-16 w-16 rounded-xl shadow-indigo-200 shadow-lg" />
                 </div>
                 <div className="text-center space-y-2 max-w-md px-4">
-                  <h3 className="text-xl font-semibold text-zinc-900">How can I help you research?</h3>
-                  <p className="text-zinc-500">I can analyze codebases, perform literature reviews, and organize your research materials.</p>
+                  <h3 className="text-xl font-semibold text-zinc-900">{t.homeTitle}</h3>
+                  <p className="text-zinc-500">{t.homeSubtitle}</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl w-full px-4">
                   <Button 
                     variant="outline" 
-                    className="justify-start h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
-                    onClick={() => setInput("Conduct a literature review on: ")}
+                    className="justify-start items-start whitespace-normal h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
+                    onClick={() => setInput(t.examples.litReview.prompt)}
                   >
-                    <FileText className="h-5 w-5 mr-3 text-indigo-500" />
-                    <div className="text-left">
-                      <div className="font-medium text-zinc-900">Literature Review</div>
-                      <div className="text-xs text-zinc-400 font-normal mt-0.5">Search and summarize papers</div>
+                    <FileText className="h-5 w-5 mr-3 text-indigo-500 shrink-0" />
+                    <div className="text-left min-w-0 flex-1">
+                      <div className="font-medium text-zinc-900 whitespace-normal break-words">{t.examples.litReview.title}</div>
+                      <div className="text-xs text-zinc-400 font-normal mt-0.5">{t.examples.litReview.subtitle}</div>
                     </div>
                   </Button>
                   
                   <Button 
                     variant="outline" 
-                    className="justify-start h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
-                    onClick={() => setInput("Analyze the codebase structure. Focus on: ")}
+                    className="justify-start items-start whitespace-normal h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
+                    onClick={() => setInput(t.examples.explain.prompt)}
                   >
-                    <Code className="h-5 w-5 mr-3 text-indigo-500" />
-                    <div className="text-left">
-                      <div className="font-medium text-zinc-900">Analyze Code</div>
-                      <div className="text-xs text-zinc-400 font-normal mt-0.5">Scan project structure</div>
+                    <Brain className="h-5 w-5 mr-3 text-indigo-500 shrink-0" />
+                    <div className="text-left min-w-0 flex-1">
+                      <div className="font-medium text-zinc-900 whitespace-normal break-words">{t.examples.explain.title}</div>
+                      <div className="text-xs text-zinc-400 font-normal mt-0.5">{t.examples.explain.subtitle}</div>
                     </div>
                   </Button>
 
                   <Button 
                     variant="outline" 
-                    className="justify-start h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
-                    onClick={() => setInput("Help me organize my local files. specifically: ")}
+                    className="justify-start items-start whitespace-normal h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
+                    onClick={() => setInput(t.examples.analyzePaper.prompt)}
                   >
-                    <Database className="h-5 w-5 mr-3 text-indigo-500" />
-                    <div className="text-left">
-                      <div className="font-medium text-zinc-900">Organize Files</div>
-                      <div className="text-xs text-zinc-400 font-normal mt-0.5">Manage local PDFs</div>
+                    <FileText className="h-5 w-5 mr-3 text-indigo-500 shrink-0" />
+                    <div className="text-left min-w-0 flex-1">
+                      <div className="font-medium text-zinc-900 whitespace-normal break-words">{t.examples.analyzePaper.title}</div>
+                      <div className="text-xs text-zinc-400 font-normal mt-0.5">{t.examples.analyzePaper.subtitle}</div>
                     </div>
                   </Button>
 
                   <Button 
                     variant="outline" 
-                    className="justify-start h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
-                    onClick={() => setInput("Create a new research agent named: ")}
+                    className="justify-start items-start whitespace-normal h-auto py-4 px-4 border-zinc-200 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all text-zinc-600"
+                    onClick={() => setInput(t.examples.autoResearch.prompt)}
                   >
-                    <Bot className="h-5 w-5 mr-3 text-indigo-500" />
-                    <div className="text-left">
-                      <div className="font-medium text-zinc-900">New Agent</div>
-                      <div className="text-xs text-zinc-400 font-normal mt-0.5">Create specialized sub-agent</div>
+                    <Sparkles className="h-5 w-5 mr-3 text-indigo-500 shrink-0" />
+                    <div className="text-left min-w-0 flex-1">
+                      <div className="font-medium text-zinc-900 whitespace-normal break-words">{t.examples.autoResearch.title}</div>
+                      <div className="text-xs text-zinc-400 font-normal mt-0.5">{t.examples.autoResearch.subtitle}</div>
                     </div>
                   </Button>
                 </div>
@@ -1378,6 +1566,7 @@ function App() {
                     placeholder="Ask a question about your research..." 
                     value={input}
                     onChange={setInput}
+                    sessionId={currentSessionId}
                     autoMode={currentAutoMode}
                     onAutoModeChange={handleAutoModeChange}
                 />

@@ -18,6 +18,7 @@ import { createLogger } from '../utils/logger.js';
 import { EventEmitter } from 'events';
 
 import { fileURLToPath } from 'url';
+import { ensureSessionWorkspace, getSessionWorkspacePaths } from '../workspace/sessionWorkspace.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,23 +26,31 @@ const __dirname = path.dirname(__filename);
 const logger = createLogger('Gateway');
 const sessionEvents = new EventEmitter(); // Bus for streaming events to SSE clients
 
-// Configure multer for file uploads
-const uploadDir = path.join(process.cwd(), 'data', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
-
 const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, uploadDir)
-    },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
-        cb(null, uniqueSuffix + '-' + file.originalname)
-    }
-})
+  destination: function (req, _file, cb) {
+    try {
+      const sessionId = (req.body as any)?.sessionId || (req.query as any)?.sessionId;
+      if (typeof sessionId === 'string' && sessionId.trim()) {
+        const dirs = getSessionWorkspacePaths(sessionId.trim());
+        fs.mkdirSync(dirs.uploadsDir, { recursive: true });
+        cb(null, dirs.uploadsDir);
+        return;
+      }
+    } catch {}
 
-const upload = multer({ storage: storage });
+    const fallbackDir = path.join(process.cwd(), 'data', 'uploads');
+    if (!fs.existsSync(fallbackDir)) {
+      fs.mkdirSync(fallbackDir, { recursive: true });
+    }
+    cb(null, fallbackDir);
+  },
+  filename: function (_req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  },
+});
+
+const upload = multer({ storage });
 
 export class A2AGateway {
   private app: express.Express;
@@ -163,6 +172,7 @@ export class A2AGateway {
     
     // Simple Chat API for Web Dashboard
     this.app.use(express.json({ limit: '50mb' }));
+    this.app.use('/files/sessions', express.static(path.join(process.cwd(), 'workspace', 'sessions')));
     this.app.use('/files', express.static(path.join(process.cwd(), 'workspace/output')));
 
     // Serve Frontend Static Files (Production Mode)
@@ -203,17 +213,29 @@ export class A2AGateway {
     
     // File Upload API
     // File Upload API
-    this.app.post('/api/upload', upload.single('file'), (req, res) => {
+    this.app.post('/api/upload', upload.single('file'), async (req, res) => {
         try {
             if (!req.file) {
                 res.status(400).json({ error: 'No file uploaded' });
                 return;
             }
+
+            const sessionId = (req.body as any)?.sessionId;
+            if (typeof sessionId === 'string' && sessionId.trim()) {
+              await ensureSessionWorkspace(sessionId.trim());
+            }
             logger.info(`File uploaded: ${req.file.originalname} (${req.file.size} bytes)`);
+
+            let url: string | undefined;
+            if (typeof sessionId === 'string' && sessionId.trim()) {
+              url = `/files/sessions/${sessionId.trim()}/uploads/${req.file.filename}`;
+            }
+
             res.json({
                 id: req.file.filename,
                 name: req.file.originalname,
                 path: req.file.path,
+                url,
                 size: req.file.size,
                 mimetype: req.file.mimetype
             });

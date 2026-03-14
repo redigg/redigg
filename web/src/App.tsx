@@ -146,24 +146,24 @@ function App() {
         homeSubtitle: '从下面的示例开始吧。',
         examples: {
           litReview: {
-            title: 'Perform a literature review on [Topic].',
-            subtitle: '-> 生成论文摘要和列表。',
-            prompt: 'Perform a literature review on [Topic].',
+            title: '请对[主题]做一份文献综述。',
+            subtitle: '→ 生成论文摘要和列表。',
+            prompt: '请对[主题]做一份文献综述。',
           },
           explain: {
-            title: 'Explain the concept of [Topic].',
-            subtitle: '-> 提供详细的概念解释。',
-            prompt: 'Explain the concept of [Topic].',
+            title: '请解释一下[主题]的概念。',
+            subtitle: '→ 提供详细的概念解释。',
+            prompt: '请解释一下[主题]的概念。',
           },
           analyzePaper: {
-            title: 'Analyze this paper: [Title]',
-            subtitle: '-> 深入分析特定论文。',
-            prompt: 'Analyze this paper: [Title]',
+            title: '请分析这篇论文：[标题]',
+            subtitle: '→ 深入分析特定论文。',
+            prompt: '请分析这篇论文：[标题]',
           },
           autoResearch: {
-            title: 'Auto-research: [Topic] (3 iterations)',
-            subtitle: '-> 经过 3 轮自我优化后生成一份精炼的 PDF 报告。',
-            prompt: 'Auto-research: [Topic] (3 iterations)',
+            title: '自动研究：[主题]（3轮）',
+            subtitle: '→ 经过 3 轮自我优化后生成一份精炼的 PDF 报告。',
+            prompt: '自动研究：[主题]（3轮）',
           },
         },
       }
@@ -223,20 +223,44 @@ function App() {
     'continual learning',
   ];
 
+  const randomTopicsZh = [
+    '多智能体强化学习',
+    '世界模型与规划',
+    '检索增强生成',
+    '扩散模型',
+    '对齐与安全',
+    '工具调用与规划',
+    '图神经网络',
+    '因果表征学习',
+    '离线强化学习',
+    '多模态基础模型',
+    '自监督学习',
+    '持续学习',
+  ];
+
   const pickRandom = <T,>(items: T[]): T => items[Math.floor(Math.random() * items.length)];
 
   const fillExamplePrompt = (template: string) => {
-    const topic = pickRandom(randomTopics);
-    const title = pickRandom([
-      `A Survey of ${topic}`,
-      `${topic}: A Comprehensive Review`,
-      `Recent Advances in ${topic}`,
-      `Benchmarking ${topic}: Methods and Metrics`,
-    ]);
+    const topic = uiLang === 'zh' ? pickRandom(randomTopicsZh) : pickRandom(randomTopics);
+    const title = uiLang === 'zh'
+      ? pickRandom([
+          `《${topic}综述》`,
+          `《${topic}：方法与进展》`,
+          `《${topic}：系统性回顾》`,
+          `《${topic}：基准、数据集与评测》`,
+        ])
+      : pickRandom([
+          `A Survey of ${topic}`,
+          `${topic}: A Comprehensive Review`,
+          `Recent Advances in ${topic}`,
+          `Benchmarking ${topic}: Methods and Metrics`,
+        ]);
 
     return template
       .replaceAll('[Topic]', topic)
-      .replaceAll('[Title]', title);
+      .replaceAll('[Title]', title)
+      .replaceAll('[主题]', topic)
+      .replaceAll('[标题]', title);
   };
 
   const handleAutoModeChange = (checked: boolean) => {

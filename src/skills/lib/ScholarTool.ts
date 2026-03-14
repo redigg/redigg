@@ -22,6 +22,7 @@ export class ScholarTool {
   private readonly openAlexApiKey = process.env.OPENALEX_API_KEY?.trim();
   private readonly openAlexEmail = process.env.OPENALEX_EMAIL?.trim();
   private readonly semanticScholarApiKey = process.env.SEMANTIC_SCHOLAR_API_KEY?.trim();
+  private readonly shouldDelay = !(process.env.NODE_ENV === 'test' || process.env.VITEST === 'true');
 
   constructor() {
     this.parser = new XMLParser({
@@ -35,7 +36,7 @@ export class ScholarTool {
     
     for (let i = 0; i <= maxRetries; i++) {
       try {
-        if (i > 0) {
+        if (i > 0 && this.shouldDelay) {
           // Exponential backoff: 2, 4, 8 seconds
           const delay = Math.pow(2, i) * 1000;
           console.log(`[ScholarTool] Rate limited or failed, retrying in ${delay}ms... (Attempt ${i}/${maxRetries})`);
@@ -46,7 +47,7 @@ export class ScholarTool {
         
         if (response.status === 429) {
           const retryAfter = response.headers.get('Retry-After');
-          if (retryAfter) {
+          if (retryAfter && this.shouldDelay) {
             const seconds = parseInt(retryAfter, 10);
             if (!isNaN(seconds)) {
               await new Promise(resolve => setTimeout(resolve, seconds * 1000));

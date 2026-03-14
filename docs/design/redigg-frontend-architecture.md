@@ -2,45 +2,39 @@
 
 ```mermaid
 graph TD
-  A[用户浏览器] --> B[Next.js前端应用]
-  B --> C[A2A网关客户端]
-  C --> D[localhost:4000]
+  A[用户浏览器] --> B[Vite/React SPA]
+  B --> C[Gateway HTTP API]
+  C --> D[Redigg Agent Runtime]
 
   subgraph "前端层"
     B
-    C
   end
 
-  subgraph "外部服务"
+  subgraph "本地服务"
+    C
     D
   end
 ```
 
 ## 2. 技术描述
 
-- **前端**: Next.js@14 (App Router) + React@18 + TypeScript
-- **样式**: Tailwind CSS@3 + Headless UI
+- **前端**: Vite + React@19 + TypeScript
+- **样式**: Tailwind CSS@4（通过 `@tailwindcss/vite`）
 - **图标**: Lucide React
-- **HTTP客户端**: Axios + SWR
-- **初始化工具**: create-next-app
-- **后端**: 无独立后端，直接通过A2A网关与Redigg Agent通信
+- **HTTP 客户端**: 浏览器 `fetch`（无 SWR）
+- **后端**: Express Gateway（同进程内调用 `ResearchAgent`）
 
-## 3. 路由定义
+## 3. 页面形态
 
-| 路由 | 用途 |
-|-------|---------|
-| / | 仪表板主页，包含导航和功能概览 |
-| /chat | 聊天界面，与AI代理交互 |
-| /memories | 记忆查看器，展示用户记忆和论文 |
-| /skills | 技能监控器，查看和管理注册技能 |
+- 当前实现为单页应用（SPA），主要通过组件内部状态切换不同面板（Chat / Memories / Skills / Sessions）。
 
 ## 4. API定义
 
-### 4.1 A2A网关API
+### 4.1 Web Dashboard API（Gateway `/api/*`）
 
-聊天消息发送
+异步聊天（推荐）
 ```
-POST http://localhost:4000/api/chat
+POST /api/chat/async
 ```
 
 请求:
@@ -48,13 +42,11 @@ POST http://localhost:4000/api/chat
 |-----------|-------------|-------------|-------------|
 | message | string | true | 用户输入的消息内容 |
 | sessionId | string | false | 会话ID，用于维持对话上下文 |
+| webSearch | boolean | false | 是否附加 Web Search 指令 |
+| attachments | array | false | 上传文件列表（用于上下文提示） |
+| autoMode | boolean | false | 是否强制 AutoResearch 模式 |
 
-响应:
-| 参数名 | 参数类型 | 描述 |
-|-----------|-------------|-------------|
-| response | string | AI代理的回复内容 |
-| sessionId | string | 会话ID |
-| timestamp | string | 响应时间戳 |
+响应：`202 Accepted`
 
 示例:
 ```json
@@ -64,26 +56,43 @@ POST http://localhost:4000/api/chat
 }
 ```
 
-获取用户记忆
+会话事件流（SSE）
 ```
-GET http://localhost:4000/api/memories
+GET /api/sessions/:sessionId/events
 ```
 
-查询参数:
-| 参数名 | 参数类型 | 描述 |
-|-----------|-------------|-------------|
-| page | number | 页码，默认为1 |
-| limit | number | 每页数量，默认为20 |
-| search | string | 搜索关键词 |
+会话列表与历史
+```
+GET /api/sessions
+GET /api/sessions/:sessionId/history
+POST /api/sessions
+POST /api/sessions/:sessionId/stop
+DELETE /api/sessions/:sessionId
+```
+
+上传
+```
+POST /api/upload
+```
+
+获取用户记忆
+```
+GET /api/memories
+```
 
 获取注册技能
 ```
-GET http://localhost:4000/api/skills
+GET /api/skills
 ```
 
-触发技能进化
+技能包
 ```
-POST http://localhost:4000/api/skills/:skillId/evolve
+GET /api/skill-packs
+```
+
+生成文件（PDF 等）
+```
+GET /files/*
 ```
 
 ## 5. 组件架构
@@ -91,25 +100,14 @@ POST http://localhost:4000/api/skills/:skillId/evolve
 ### 5.1 核心组件结构
 ```
 src/
-├── app/
-│   ├── layout.tsx          # 根布局，包含导航和主题
-│   ├── page.tsx            # 主页仪表板
-│   ├── chat/
-│   │   └── page.tsx        # 聊天界面
-│   ├── memories/
-│   │   └── page.tsx        # 记忆查看器
-│   └── skills/
-│       └── page.tsx        # 技能监控器
 ├── components/
 │   ├── ui/                 # 基础UI组件
 │   ├── chat/               # 聊天相关组件
-│   ├── memories/           # 记忆相关组件
-│   └── skills/             # 技能相关组件
+│   └── ai/                 # AI 相关渲染组件
 ├── lib/
-│   ├── api-client.ts       # A2A网关客户端
 │   └── utils.ts            # 工具函数
-└── types/
-    └── index.ts            # TypeScript类型定义
+├── App.tsx                 # 单页容器与状态编排
+└── main.tsx                # 入口
 ```
 
 ### 5.2 状态管理
@@ -118,11 +116,10 @@ src/
 ## 6. 部署配置
 
 ### 6.1 环境变量
-```
-NEXT_PUBLIC_A2A_GATEWAY_URL=http://localhost:4000
-```
+
+- 当前实现默认使用相对路径请求 `/api/*`，在开发态通过 Vite proxy 转发到 `http://localhost:4000`。
 
 ### 6.2 构建配置
-- 使用Next.js的静态导出功能，构建为静态网站
-- 配置输出目录为`web`，与redigg主站区分
-- 启用TypeScript严格模式确保代码质量
+
+- 前端构建产物为 `web/dist`，由 Gateway 在生产态以静态资源方式托管。
+- 本地联调使用根目录 `npm run dev` 并发启动后端与前端。

@@ -14,6 +14,7 @@ export async function retrieveSurveyPapers(
   seedPapers: Paper[],
   options: RetrieveOptions = {}
 ): Promise<RetrievalResult> {
+  const shouldDelay = !(process.env.NODE_ENV === 'test' || process.env.VITEST === 'true');
   const sectionLimit = options.sectionLimit ?? 4;
   const perQueryLimit = options.perQueryLimit ?? 4;
   const papersBySection: Record<string, Paper[]> = {};
@@ -35,7 +36,7 @@ export async function retrieveSurveyPapers(
 
     for (const query of queries) {
       // Add a small delay between consecutive search calls to reduce the risk of hitting rate limits
-      if (queryCount > 0) {
+      if (queryCount > 0 && shouldDelay) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       queryCount += 1;

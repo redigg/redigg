@@ -29,6 +29,10 @@ export class ResearchAgent {
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private chatGraph: any;
 
+  private getGatewayBaseUrl(): string {
+    return process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || '4000'}`;
+  }
+
   constructor(
     memoryManager: MemoryManager,
     memoryEvo: MemoryEvolutionSystem,
@@ -447,7 +451,7 @@ Rules:
                       id: `file-${Date.now()}`,
                       name: `${step.params.title || 'document'}.pdf`,
                       type: 'file',
-                      url: `http://localhost:4000${url}`,
+                      url: `${this.getGatewayBaseUrl()}${url}`,
                       path: pdfResult.file_path,
                       mimeType: 'application/pdf'
                   });
@@ -583,7 +587,7 @@ Action: Perform the task and rewrite the FULL content to include the new informa
                            id: `file-${Date.now()}`,
                            name: `${title}.pdf`,
                            type: 'file',
-                           url: `http://localhost:4000${url}`,
+                           url: `${this.getGatewayBaseUrl()}${url}`,
                            path: pdfRes.file_path,
                            mimeType: 'application/pdf'
                        };

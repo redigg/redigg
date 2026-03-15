@@ -11,7 +11,15 @@ describe('writeSurveySections', () => {
       const prompt = messages.map((message) => message.content).join('\n');
       prompts.push(prompt);
       return {
-        content: '## Evaluation and Benchmarks\n\nThis section compares benchmark evidence across agent systems [1][2].'
+        content: JSON.stringify({
+          markdown: '## Evaluation and Benchmarks\n\nThis section compares benchmark evidence across agent systems and shows that benchmark design strongly shapes how scientific-agent performance is interpreted [1][2].',
+          claimMappings: [
+            {
+              claim: 'This section compares benchmark evidence across agent systems and shows that benchmark design strongly shapes how scientific-agent performance is interpreted.',
+              citations: [1, 2]
+            }
+          ]
+        })
       };
     });
 
@@ -85,6 +93,8 @@ describe('writeSurveySections', () => {
     expect(prompts[0]).toContain('Evidence cards:');
     expect(prompts[0]).toContain('Grounded claim:');
     expect(result[0].evidenceCards).toHaveLength(2);
+    expect(result[0].claimAlignments).toHaveLength(1);
+    expect(result[0].claimAlignments[0].citations).toEqual([1, 2]);
     expect(result[0].evidenceCards[0].paperTypeSignals).toEqual(expect.arrayContaining(['benchmark', 'evaluation']));
     expect(result[0].evidenceCards[0].groundedClaim).toContain('AstaBench');
   });

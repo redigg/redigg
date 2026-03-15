@@ -118,6 +118,7 @@ describe('AcademicSurveySelfImproveSkill', () => {
     expect(result.outline.sections[0].queryPlan.length).toBeGreaterThanOrEqual(3);
     expect(result.sections).toHaveLength(3);
     expect(result.sections[0].evidenceCards.length).toBeGreaterThan(0);
+    expect(result.sections[0].claimAlignments.length).toBeGreaterThan(0);
     expect(result.sections[0].evidenceCards[0].groundedClaim).toContain('A Survey of AI Agents for Scientific Workflows');
     expect(result.quality_report).not.toBeNull();
     expect(result.quality_report.overallScore).toBe(84);

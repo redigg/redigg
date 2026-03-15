@@ -1,6 +1,6 @@
 import type { SkillContext } from '../../../src/skills/types.js';
 import type { SectionDraft, SurveyQualityReport } from './types.js';
-import { countWords, normalizeText, parseJsonObject } from './utils.js';
+import { alignClaimsToEvidence, countWords, normalizeText, parseJsonObject } from './utils.js';
 
 interface ReviewResponse {
   score: number;
@@ -38,7 +38,8 @@ export async function reviewSurveySections(
       if (rewritten) {
         finalSection = {
           ...section,
-          content: rewritten
+          content: rewritten,
+          claimAlignments: alignClaimsToEvidence(rewritten, section.evidenceCards, section.claimAlignments)
         };
         rewriteApplied = true;
       }
@@ -127,6 +128,9 @@ async function rewriteSection(
   const evidenceSummary = section.evidenceCards
     .map((card) => `[${card.citation}] ${card.title}\n- Grounded claim: ${card.groundedClaim}\n- Limitation hint: ${card.limitationHint}`)
     .join('\n');
+  const claimSummary = section.claimAlignments
+    .map((item) => `- Claim: ${item.claim}\n  Citations: ${item.citations.join(', ')}`)
+    .join('\n');
   const prompt = `
 [SURVEY_SECTION_REWRITE]
 Topic: ${topic}
@@ -135,6 +139,9 @@ ${suggestions.join('\n') || 'Improve clarity and evidence grounding.'}
 
 You must stay within the following evidence cards:
 ${evidenceSummary || 'No evidence cards available.'}
+
+Current claim-to-citation alignments:
+${claimSummary || 'No claim alignments available.'}
 
 ${section.content}
 
@@ -165,6 +172,7 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
   const usedCitations = new Set(citationMatches);
   const availableCitations = new Set(section.evidenceCards.map((card) => card.citation));
   const paperTypeSignals = new Set(section.evidenceCards.flatMap((card) => card.paperTypeSignals));
+  const claimAlignments = section.claimAlignments || [];
 
   if (section.evidenceCards.length === 0) {
     issues.push('No evidence cards were attached to this section.');
@@ -193,6 +201,25 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     issues.push(`The section references citations not present in its evidence cards: ${unknownCitations.join(', ')}.`);
     suggestions.push('Align every inline citation with the evidence cards attached to this section.');
     scorePenalty += 12;
+    forceRewrite = true;
+  }
+
+  if (claimAlignments.length === 0) {
+    issues.push('The section does not expose claim-level citation alignment.');
+    suggestions.push('Identify the core sentence-level claims in this section and map each of them to explicit evidence-card citations.');
+    scorePenalty += 10;
+    forceRewrite = true;
+  } else {
+    strengths.push(`Tracks ${claimAlignments.length} claim-level citation alignments`);
+  }
+
+  const invalidClaimMappings = claimAlignments.filter((item) =>
+    item.citations.length === 0 || item.citations.some((citation) => !availableCitations.has(citation))
+  );
+  if (invalidClaimMappings.length > 0) {
+    issues.push('Some claim-level citation mappings reference citations outside this section evidence set.');
+    suggestions.push('Ensure every aligned claim only references citations from this section’s evidence cards.');
+    scorePenalty += 10;
     forceRewrite = true;
   }
 

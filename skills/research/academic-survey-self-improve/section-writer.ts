@@ -1,7 +1,15 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { SkillContext } from '../../../src/skills/types.js';
 import type { SectionDraft, SurveyOutline } from './types.js';
-import { buildEvidenceCards, normalizeText } from './utils.js';
+import { alignClaimsToEvidence, buildEvidenceCards, normalizeText, parseJsonObject } from './utils.js';
+
+interface SectionDraftResponse {
+  markdown?: string;
+  claimMappings?: Array<{
+    claim?: string;
+    citations?: number[];
+  }>;
+}
 
 export async function writeSurveySections(
   context: SkillContext,
@@ -38,8 +46,18 @@ ${evidenceCards.map((card) => {
 - Limitation hint: ${card.limitationHint}`;
 }).join('\n\n')}
 
-Write a concise academic survey subsection in Markdown.
-Requirements:
+Return ONLY valid JSON:
+{
+  "markdown": "## ${section.title}\\n\\n...",
+  "claimMappings": [
+    {
+      "claim": "One explicit sentence-level claim copied from the markdown body.",
+      "citations": [1, 2]
+    }
+  ]
+}
+
+Requirements for the markdown:
 - Start with a level-2 heading using the exact section title.
 - Synthesize, do not list papers one by one.
 - Every substantive claim must be supported by the evidence cards above.
@@ -47,6 +65,10 @@ Requirements:
 - Mention at least two distinct evidence cards when more than one is available.
 - Do not introduce systems, benchmarks, datasets, or claims that are absent from the evidence cards.
 - End with one sentence stating what remains unresolved in this section.
+Requirements for claimMappings:
+- Include 2-4 core sentence-level claims from the markdown body.
+- Each claim must appear verbatim or near-verbatim in the markdown.
+- Each claim must cite only the evidence cards used to support it.
 `;
 
     const response = await context.llm.chat([
@@ -54,7 +76,8 @@ Requirements:
       { role: 'user', content: prompt }
     ]);
 
-    let content = normalizeText(response.content);
+    const parsed = parseJsonObject<SectionDraftResponse>(response.content);
+    let content = normalizeText(parsed?.markdown || response.content);
     if (!content.startsWith('## ')) {
       content = `## ${section.title}\n\n${content}`;
     }
@@ -63,13 +86,16 @@ Requirements:
       content = createFallbackSection(section.title, section.description, evidenceCards);
     }
 
+    const claimAlignments = alignClaimsToEvidence(content, evidenceCards, parsed?.claimMappings);
+
     drafts.push({
       sectionId: section.id,
       title: section.title,
       content,
       paperCount: sectionPapers.length,
       citations,
-      evidenceCards
+      evidenceCards,
+      claimAlignments
     });
   }
 

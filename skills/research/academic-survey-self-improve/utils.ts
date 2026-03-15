@@ -1,5 +1,5 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
-import type { EvidenceCard, OutlineSection, TopicProfile } from './types.js';
+import type { ClaimAlignment, EvidenceCard, OutlineSection, TopicProfile } from './types.js';
 
 const BROAD_ANCHOR_TERMS = new Set([
   'research',
@@ -326,6 +326,58 @@ export function buildEvidenceCards(
   });
 }
 
+export function alignClaimsToEvidence(
+  content: string,
+  evidenceCards: EvidenceCard[],
+  suggestedClaims?: Array<{ claim?: string; citations?: number[] }>
+): ClaimAlignment[] {
+  const evidenceByCitation = new Map(evidenceCards.map((card) => [card.citation, card]));
+  const alignments = new Map<string, ClaimAlignment>();
+  const normalizedContent = normalizeMatchText(content);
+
+  const addAlignment = (claim: string, citations: number[]) => {
+    const cleanedClaim = claim.replace(/\s+/g, ' ').trim();
+    if (!cleanedClaim) return;
+
+    const validCitations = Array.from(new Set(
+      citations.filter((citation) => evidenceByCitation.has(citation))
+    )).sort((a, b) => a - b);
+
+    if (validCitations.length === 0) return;
+
+    const key = normalizeMatchText(cleanedClaim);
+    const existing = alignments.get(key);
+    const mergedCitations = existing
+      ? Array.from(new Set([...existing.citations, ...validCitations])).sort((a, b) => a - b)
+      : validCitations;
+    const evidenceTitles = mergedCitations
+      .map((citation) => evidenceByCitation.get(citation)?.title)
+      .filter((title): title is string => Boolean(title));
+
+    alignments.set(key, {
+      claim: cleanedClaim,
+      citations: mergedCitations,
+      evidenceTitles
+    });
+  };
+
+  for (const item of suggestedClaims || []) {
+    const claim = typeof item?.claim === 'string' ? item.claim : '';
+    const citations = Array.isArray(item?.citations) ? item.citations.map(Number) : [];
+    const normalizedClaim = normalizeMatchText(claim);
+    if (!normalizedClaim || !normalizedContent.includes(normalizedClaim)) {
+      continue;
+    }
+    addAlignment(claim, citations);
+  }
+
+  for (const item of extractClaimAlignmentsFromContent(content)) {
+    addAlignment(item.claim, item.citations);
+  }
+
+  return Array.from(alignments.values());
+}
+
 function mergePaperRecords(primary: Paper, secondary: Paper): Paper {
   const preferred = scorePaperRecord(secondary) > scorePaperRecord(primary) ? secondary : primary;
   const fallback = preferred === primary ? secondary : primary;
@@ -402,6 +454,37 @@ function inferPreferredPaperTypes(section: OutlineSection, topicProfile: TopicPr
   }
 
   return preferred;
+}
+
+function extractClaimAlignmentsFromContent(content: string): Array<{ claim: string; citations: number[] }> {
+  const alignments: Array<{ claim: string; citations: number[] }> = [];
+  const normalized = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+    .join(' ');
+  const sentences = normalized
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  for (const sentence of sentences) {
+    const citations = Array.from(sentence.matchAll(/\[(\d+)\]/g))
+      .map((match) => Number(match[1]))
+      .filter((value) => Number.isFinite(value));
+
+    if (citations.length === 0) continue;
+
+    const claim = sentence.replace(/\s*\[(\d+)\]/g, '').replace(/\s+/g, ' ').trim();
+    if (!claim) continue;
+
+    alignments.push({
+      claim,
+      citations: Array.from(new Set(citations)).sort((a, b) => a - b)
+    });
+  }
+
+  return alignments;
 }
 
 function normalizeMatchText(value: string): string {

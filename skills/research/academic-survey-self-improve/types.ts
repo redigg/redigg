@@ -57,6 +57,12 @@ export interface EvidenceCard {
   limitationHint: string;
 }
 
+export interface ClaimAlignment {
+  claim: string;
+  citations: number[];
+  evidenceTitles: string[];
+}
+
 export interface SectionDraft {
   sectionId: string;
   title: string;
@@ -64,6 +70,7 @@ export interface SectionDraft {
   paperCount: number;
   citations: number[];
   evidenceCards: EvidenceCard[];
+  claimAlignments: ClaimAlignment[];
 }
 
 export interface SectionReview {

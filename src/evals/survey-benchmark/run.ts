@@ -1,0 +1,387 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+import OpenAI from 'openai';
+import { v4 as uuidv4 } from 'uuid';
+import AcademicSurveySelfImproveSkill from '../../../skills/research/academic-survey-self-improve/index.js';
+import PdfGeneratorSkill from '../../../skills/research/pdf-generator/index.js';
+import { MemoryManager } from '../../memory/MemoryManager.js';
+import { SQLiteStorage } from '../../storage/sqlite.js';
+import type { LLMClient, LLMResponse, LLMStreamHandler } from '../../llm/LLMClient.js';
+import type { SkillContext, SkillResult } from '../../skills/types.js';
+import { QualityManager } from '../../quality/QualityManager.js';
+import { createLogger } from '../../utils/logger.js';
+import { SURVEY_BENCHMARK_CASES, selectBenchmarkCases } from './dataset.js';
+import {
+  aggregateSurveyBenchmarkScore,
+  scoreSurveyBenchmarkCase
+} from './scorer.js';
+import type {
+  SurveyBenchmarkCase,
+  SurveyBenchmarkRunSummary,
+  SurveyBenchmarkTopicResult
+} from './types.js';
+
+dotenv.config({ override: true });
+
+const logger = createLogger('SurveyBenchmark');
+
+class BenchmarkOpenAIClient implements LLMClient {
+  private openai: OpenAI;
+  private model: string;
+
+  constructor(apiKey: string, baseURL?: string, model?: string) {
+    this.openai = new OpenAI({
+      apiKey,
+      baseURL: baseURL || 'https://api.openai.com/v1'
+    });
+    this.model = model || 'gpt-4o-mini';
+  }
+
+  async complete(prompt: string): Promise<LLMResponse> {
+    const response = await this.openai.chat.completions.create({
+      model: this.model,
+      messages: [{ role: 'user', content: prompt }]
+    });
+
+    return { content: response.choices[0]?.message?.content || '' };
+  }
+
+  async chat(messages: { role: string; content: string }[]): Promise<LLMResponse> {
+    const response = await this.openai.chat.completions.create({
+      model: this.model,
+      messages: messages as any
+    });
+
+    return { content: response.choices[0]?.message?.content || '' };
+  }
+
+  async chatStream(messages: { role: string; content: string }[], handler: LLMStreamHandler): Promise<void> {
+    const response = await this.chat(messages);
+    handler.onToken?.(response.content);
+    handler.onComplete?.(response.content);
+  }
+}
+
+interface CliOptions {
+  caseIds?: string[];
+  depth?: 'brief' | 'standard' | 'deep';
+  skipPdf: boolean;
+}
+
+function parseArgs(argv: string[]): CliOptions {
+  const options: CliOptions = { skipPdf: false };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const next = argv[index + 1];
+
+    if (arg === '--topics' && next) {
+      options.caseIds = next.split(',').map((item) => item.trim()).filter(Boolean);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--depth' && next && ['brief', 'standard', 'deep'].includes(next)) {
+      options.depth = next as CliOptions['depth'];
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--skip-pdf') {
+      options.skipPdf = true;
+    }
+  }
+
+  return options;
+}
+
+function ensureDirectory(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function createSkillContext(llm: LLMClient, memory: MemoryManager, workspace: string, userId: string): SkillContext {
+  return {
+    llm,
+    memory,
+    workspace,
+    userId,
+    log: () => undefined,
+    updateProgress: async () => undefined
+  };
+}
+
+function buildTopicSummary(result: SkillResult, pdfPath?: string) {
+  const sections = Array.isArray(result.sections) ? result.sections.map((section: any) => section.title) : [];
+  const paperCount = Array.isArray(result.papers) ? result.papers.length : 0;
+  const referenceCount = Array.isArray(result.papers) ? result.papers.length : 0;
+  const claimAlignmentCount = Array.isArray(result.sections)
+    ? result.sections.reduce((count: number, section: any) => count + (Array.isArray(section.claimAlignments) ? section.claimAlignments.length : 0), 0)
+    : 0;
+  const uniqueCitationCount = new Set(
+    String(result.formatted_output || result.summary || '')
+      .match(/\[(\d+)\]/g)
+      ?.map((value) => Number(value.replace(/\[|\]/g, '')))
+      .filter(Number.isFinite) || []
+  ).size;
+
+  return {
+    sections,
+    paperCount,
+    referenceCount,
+    claimAlignmentCount,
+    uniqueCitationCount,
+    pdfGenerated: typeof pdfPath === 'string' && fs.existsSync(pdfPath)
+  };
+}
+
+function buildSummaryMarkdown(summary: SurveyBenchmarkRunSummary): string {
+  const lines: string[] = [];
+  lines.push('# Survey Benchmark Small-Sample Baseline');
+  lines.push('');
+  lines.push(`- Run ID: \`${summary.runId}\``);
+  lines.push(`- Generated At: ${summary.generatedAt}`);
+  lines.push(`- Cases: ${summary.caseCount}`);
+  lines.push(`- Passed (>=70): ${summary.passedCount}`);
+  lines.push(`- Average Score: ${summary.averageScore}`);
+  lines.push('');
+  lines.push('| Case | Score | Papers | References | Claim Alignments | PDF |');
+  lines.push('| --- | ---: | ---: | ---: | ---: | --- |');
+
+  for (const result of summary.results) {
+    lines.push(
+      `| ${result.benchmarkCase.id} | ${result.aggregateScore} | ${result.summary.paperCount} | ${result.summary.referenceCount} | ${result.summary.claimAlignmentCount} | ${result.summary.pdfGenerated ? 'yes' : 'no'} |`
+    );
+  }
+
+  lines.push('');
+  lines.push('## Per-Case Notes');
+  lines.push('');
+
+  for (const result of summary.results) {
+    lines.push(`### ${result.benchmarkCase.id}`);
+    lines.push(`- Topic: ${result.benchmarkCase.topic}`);
+    lines.push(`- Score: ${result.aggregateScore}`);
+    lines.push(`- Structure: ${result.scorecard.structure.score}`);
+    lines.push(`- Coverage: ${result.scorecard.coverage.score}`);
+    lines.push(`- Citations: ${result.scorecard.citations.score}`);
+    lines.push(`- References: ${result.scorecard.references.score}`);
+    lines.push(`- PDF: ${result.scorecard.pdf.score}`);
+    lines.push(`- Quality Gate: ${result.scorecard.qualityGate.score}`);
+    if (result.error) {
+      lines.push(`- Error: ${result.error}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+async function runSingleBenchmarkCase(args: {
+  benchmarkCase: SurveyBenchmarkCase;
+  llm: LLMClient;
+  runId: string;
+  outputDir: string;
+  depthOverride?: 'brief' | 'standard' | 'deep';
+  skipPdf: boolean;
+}): Promise<SurveyBenchmarkTopicResult> {
+  const { benchmarkCase, llm, runId, outputDir, depthOverride, skipPdf } = args;
+  const startedAt = new Date().toISOString();
+  const startedMs = Date.now();
+  const caseOutputDir = path.join(outputDir, benchmarkCase.id);
+  ensureDirectory(caseOutputDir);
+
+  const storage = new SQLiteStorage(path.join(caseOutputDir, 'benchmark.db'));
+  const memory = new MemoryManager(storage);
+  const skill = new AcademicSurveySelfImproveSkill();
+  const pdfSkill = new PdfGeneratorSkill();
+  const qualityManager = new QualityManager(llm);
+  const userId = `benchmark-${runId}`;
+  const context = createSkillContext(llm, memory, caseOutputDir, userId);
+
+  const markdownPath = path.join(caseOutputDir, 'survey.md');
+  const jsonPath = path.join(caseOutputDir, 'result.json');
+  let pdfPath: string | undefined;
+
+  try {
+    const result = await skill.execute(context, {
+      topic: benchmarkCase.topic,
+      depth: depthOverride || benchmarkCase.depth
+    });
+
+    fs.writeFileSync(markdownPath, String(result.formatted_output || result.summary || ''), 'utf8');
+
+    if (!skipPdf && result.success) {
+      const pdfResult = await pdfSkill.execute(context, {
+        title: result.outline?.title || `A Survey of ${benchmarkCase.topic}`,
+        content: result.formatted_output || result.summary,
+        author: 'Redigg Benchmark',
+        sessionId: `benchmark-${runId}-${benchmarkCase.id}`
+      });
+      pdfPath = typeof pdfResult.file_path === 'string' ? pdfResult.file_path : undefined;
+      if (pdfPath && fs.existsSync(pdfPath)) {
+        fs.copyFileSync(pdfPath, path.join(caseOutputDir, 'survey.pdf'));
+        pdfPath = path.join(caseOutputDir, 'survey.pdf');
+      }
+    }
+
+    const scorecard = scoreSurveyBenchmarkCase(benchmarkCase, result, { pdfPath });
+    const aggregateScore = aggregateSurveyBenchmarkScore(scorecard);
+    const llmQa = await qualityManager.evaluateTask(
+      `Evaluate the quality of a survey on ${benchmarkCase.topic}`,
+      String(result.formatted_output || result.summary || ''),
+      {
+        benchmarkCase: benchmarkCase.id,
+        paperCount: Array.isArray(result.papers) ? result.papers.length : 0,
+        referenceCount: Array.isArray(result.papers) ? result.papers.length : 0
+      }
+    );
+
+    const topicResult: SurveyBenchmarkTopicResult = {
+      benchmarkCase,
+      success: Boolean(result.success),
+      startedAt,
+      completedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedMs,
+      aggregateScore,
+      scorecard,
+      outputPaths: {
+        markdownPath,
+        jsonPath,
+        pdfPath
+      },
+      summary: buildTopicSummary(result, pdfPath),
+      llmQa: {
+        score: llmQa.score,
+        reasoning: llmQa.reasoning,
+        passed: llmQa.passed,
+        suggestions: llmQa.suggestions
+      }
+    };
+
+    fs.writeFileSync(jsonPath, JSON.stringify({ result, topicResult }, null, 2), 'utf8');
+    return topicResult;
+  } catch (error) {
+    const topicResult: SurveyBenchmarkTopicResult = {
+      benchmarkCase,
+      success: false,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedMs,
+      aggregateScore: 0,
+      scorecard: {
+        structure: { score: 0, maxScore: 100, passed: false, details: ['未生成结构结果'] },
+        coverage: { score: 0, maxScore: 100, passed: false, details: ['未生成覆盖结果'] },
+        citations: { score: 0, maxScore: 100, passed: false, details: ['未生成引用结果'] },
+        references: { score: 0, maxScore: 100, passed: false, details: ['未生成参考文献结果'] },
+        pdf: { score: 0, maxScore: 100, passed: false, details: ['PDF 未生成'] },
+        qualityGate: { score: 0, maxScore: 100, passed: false, details: ['质量门未执行'] }
+      },
+      outputPaths: {
+        markdownPath,
+        jsonPath
+      },
+      summary: {
+        sections: [],
+        paperCount: 0,
+        referenceCount: 0,
+        claimAlignmentCount: 0,
+        uniqueCitationCount: 0,
+        pdfGenerated: false
+      },
+      error: error instanceof Error ? error.message : String(error)
+    };
+
+    fs.writeFileSync(jsonPath, JSON.stringify({ error: topicResult.error, topicResult }, null, 2), 'utf8');
+    return topicResult;
+  } finally {
+    storage.close();
+  }
+}
+
+export async function runSurveyBenchmark(options: CliOptions = { skipPdf: false }): Promise<SurveyBenchmarkRunSummary> {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required to run the survey benchmark baseline.');
+  }
+
+  const llm = new BenchmarkOpenAIClient(
+    process.env.OPENAI_API_KEY,
+    process.env.OPENAI_BASE_URL,
+    process.env.OPENAI_MODEL
+  );
+
+  const selectedCases = selectBenchmarkCases(options.caseIds);
+  if (selectedCases.length === 0) {
+    throw new Error(`No benchmark cases matched. Available cases: ${SURVEY_BENCHMARK_CASES.map((item) => item.id).join(', ')}`);
+  }
+
+  const runId = `${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}-${uuidv4().slice(0, 8)}`;
+  const outputDir = path.join(process.cwd(), 'workspace', 'evals', 'survey-small-benchmark', runId);
+  ensureDirectory(outputDir);
+
+  logger.info(`Running survey benchmark for ${selectedCases.length} topics`, {
+    runId,
+    outputDir
+  });
+
+  const results: SurveyBenchmarkTopicResult[] = [];
+  for (const benchmarkCase of selectedCases) {
+    logger.info(`Running benchmark case: ${benchmarkCase.id}`, { topic: benchmarkCase.topic });
+    results.push(
+      await runSingleBenchmarkCase({
+        benchmarkCase,
+        llm,
+        runId,
+        outputDir,
+        depthOverride: options.depth,
+        skipPdf: options.skipPdf
+      })
+    );
+  }
+
+  const passedCount = results.filter((result) => result.aggregateScore >= 70).length;
+  const averageScore = Math.round(
+    results.reduce((sum, result) => sum + result.aggregateScore, 0) / Math.max(results.length, 1)
+  );
+  const summary: SurveyBenchmarkRunSummary = {
+    runId,
+    generatedAt: new Date().toISOString(),
+    outputDir,
+    caseCount: results.length,
+    passedCount,
+    averageScore,
+    results
+  };
+
+  fs.writeFileSync(path.join(outputDir, 'summary.json'), JSON.stringify(summary, null, 2), 'utf8');
+  fs.writeFileSync(path.join(outputDir, 'summary.md'), buildSummaryMarkdown(summary), 'utf8');
+
+  logger.success('Survey benchmark baseline complete', {
+    averageScore,
+    passedCount,
+    outputDir
+  });
+
+  return summary;
+}
+
+async function main(): Promise<void> {
+  const options = parseArgs(process.argv.slice(2));
+  const summary = await runSurveyBenchmark(options);
+
+  console.log('\nSurvey benchmark baseline complete.');
+  console.log(`Run ID: ${summary.runId}`);
+  console.log(`Average Score: ${summary.averageScore}`);
+  console.log(`Passed: ${summary.passedCount}/${summary.caseCount}`);
+  console.log(`Artifacts: ${summary.outputDir}`);
+}
+
+const currentFilePath = fileURLToPath(import.meta.url);
+
+if (process.argv[1] && path.resolve(process.argv[1]) === currentFilePath) {
+  main().catch((error) => {
+    logger.error('Survey benchmark baseline failed', error);
+    process.exit(1);
+  });
+}

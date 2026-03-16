@@ -23,6 +23,7 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\" --names \"gateway,ui\" --prefix-colors \"blue,magenta\" --kill-others",
     "dev:backend": "tsx watch src/index.ts",
     "dev:frontend": "npm run dev --prefix web",
+    "benchmark:survey": "tsx src/evals/survey-benchmark/run.ts",
     "test": "vitest run",
     "lint": "oxlint",
     "postinstall": "npm install --prefix web",

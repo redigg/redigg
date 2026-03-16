@@ -77,6 +77,18 @@ export async function reviewSurveySections(
   };
 }
 
+// Cross-review roles: each reviews from a different perspective
+const REVIEW_ROLES = [
+  {
+    system: 'You review academic survey sections for evidence grounding and citation accuracy.',
+    focus: 'evidence grounding: Are all claims supported by the cited evidence cards? Are citations used correctly?'
+  },
+  {
+    system: 'You review academic survey sections for synthesis quality and rhetorical structure.',
+    focus: 'synthesis and structure: Does the section follow the rhetorical goal and required moves? Is it a true synthesis rather than a list of papers?'
+  }
+];
+
 async function reviewSection(
   context: SkillContext,
   topic: string,
@@ -86,10 +98,10 @@ async function reviewSection(
   const evidenceSummary = section.evidenceCards
     .map((card) => `[${card.citation}] ${card.title} | focus: ${card.evidenceFocus.join(', ') || 'general'} | claim: ${card.groundedClaim}`)
     .join('\n');
-  const prompt = `
+
+  const basePrompt = `
 [SURVEY_SECTION_REVIEW]
 Topic: ${topic}
-Review the following survey section.
 
 Section template: ${template.label} (${template.kind})
 Rhetorical goal: ${template.rhetoricalGoal}
@@ -102,9 +114,13 @@ Expected closing move: ${template.closingMove}
 Available evidence cards:
 ${evidenceSummary || 'No evidence cards available.'}
 
-${section.content}
+${section.content}`;
 
-Score the section on: evidence grounding, synthesis quality, adherence to the rhetorical goal and required moves above, and absence of anti-patterns.
+  // Run cross-reviews in parallel
+  const reviewPromises = REVIEW_ROLES.map((role) => {
+    const prompt = `${basePrompt}
+
+Focus your review on: ${role.focus}
 
 Return ONLY valid JSON:
 {
@@ -115,19 +131,50 @@ Return ONLY valid JSON:
   "needsRewrite": false
 }
 `;
+    return context.llm.chat([
+      { role: 'system', content: role.system },
+      { role: 'user', content: prompt }
+    ]).then((response) => {
+      const parsed = parseJsonObject<Partial<ReviewResponse>>(response.content);
+      return {
+        score: Number(parsed?.score) > 0 ? Number(parsed?.score) : 80,
+        strengths: Array.isArray(parsed?.strengths) && parsed!.strengths!.length > 0 ? parsed!.strengths!.map(String) : [],
+        issues: Array.isArray(parsed?.issues) ? parsed!.issues!.map(String) : [],
+        suggestions: Array.isArray(parsed?.suggestions) ? parsed!.suggestions!.map(String) : [],
+        needsRewrite: Boolean(parsed?.needsRewrite)
+      };
+    }).catch(() => ({
+      score: 75,
+      strengths: [] as string[],
+      issues: [] as string[],
+      suggestions: [] as string[],
+      needsRewrite: false
+    }));
+  });
 
-  const response = await context.llm.chat([
-    { role: 'system', content: 'You review academic survey sections for coverage, grounding, and clarity.' },
-    { role: 'user', content: prompt }
-  ]);
+  const reviews = await Promise.all(reviewPromises);
 
-  const parsed = parseJsonObject<Partial<ReviewResponse>>(response.content);
+  // Merge cross-reviews: average scores, union strengths/issues/suggestions
+  return mergeCrossReviews(reviews);
+}
+
+function mergeCrossReviews(reviews: ReviewResponse[]): ReviewResponse {
+  if (reviews.length === 0) {
+    return { score: 75, strengths: ['Grounded in retrieved papers'], issues: [], suggestions: [], needsRewrite: false };
+  }
+
+  const avgScore = Math.round(reviews.reduce((sum, r) => sum + r.score, 0) / reviews.length);
+  const allStrengths = reviews.flatMap((r) => r.strengths);
+  const allIssues = reviews.flatMap((r) => r.issues);
+  const allSuggestions = reviews.flatMap((r) => r.suggestions);
+  const needsRewrite = reviews.some((r) => r.needsRewrite);
+
   return {
-    score: Number(parsed?.score) > 0 ? Number(parsed?.score) : 80,
-    strengths: Array.isArray(parsed?.strengths) && parsed!.strengths!.length > 0 ? parsed!.strengths!.map(String) : ['Grounded in retrieved papers'],
-    issues: Array.isArray(parsed?.issues) ? parsed!.issues!.map(String) : [],
-    suggestions: Array.isArray(parsed?.suggestions) ? parsed!.suggestions!.map(String) : [],
-    needsRewrite: Boolean(parsed?.needsRewrite)
+    score: avgScore,
+    strengths: allStrengths.length > 0 ? uniqueTop(allStrengths) : ['Grounded in retrieved papers'],
+    issues: uniqueTop(allIssues),
+    suggestions: uniqueTop(allSuggestions),
+    needsRewrite
   };
 }
 

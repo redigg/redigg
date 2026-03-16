@@ -409,3 +409,109 @@ function normalizeTopic(value: string): string {
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 }
+
+// ── Iterative Outline Refinement ──────────────────────────────────────
+
+/**
+ * Refine an outline based on actual retrieval results.
+ * - Drop sections with zero papers
+ * - Merge sections whose papers overlap heavily
+ * - Discover new facets from paper clusters not covered by existing sections
+ * Returns an updated outline (or the original if no refinement needed).
+ */
+export async function refineOutline(
+  context: SkillContext,
+  topic: string,
+  outline: SurveyOutline,
+  papersBySection: Record<string, Paper[]>,
+  depth: string
+): Promise<SurveyOutline> {
+  const sectionCount = DEPTH_SECTION_COUNT[depth] || DEPTH_SECTION_COUNT.standard;
+
+  // Build a retrieval summary for the LLM
+  const sectionSummaries = outline.sections.map((section) => {
+    const papers = papersBySection[section.id] || [];
+    const paperList = papers.slice(0, 4).map((p) => `"${p.title}" (${p.year})`).join(', ');
+    return `- "${section.title}" (id: ${section.id}): ${papers.length} papers found. ${paperList || 'No papers.'}`;
+  }).join('\n');
+
+  const allPaperTitles = Array.from(new Set(
+    Object.values(papersBySection).flat().map((p) => p.title)
+  ));
+
+  const prompt = `
+[OUTLINE_REFINEMENT]
+Topic: "${topic}"
+Current outline has ${outline.sections.length} sections. Target: ${sectionCount} sections.
+
+Retrieval results per section:
+${sectionSummaries}
+
+Total unique papers found: ${allPaperTitles.length}
+
+Based on these retrieval results, decide whether to refine the outline:
+1. If a section found 0 papers, either drop it or merge it into another section.
+2. If two sections retrieved mostly the same papers, merge them.
+3. If papers reveal an important subtopic not covered by any section, add a new section.
+4. Keep the total number of sections at ${sectionCount}.
+5. Do NOT rename sections that are working well.
+
+If no changes are needed, return {"refined": false}.
+Otherwise, return:
+{
+  "refined": true,
+  "sections": [
+    {
+      "id": "string",
+      "title": "string",
+      "description": "string",
+      "focusFacets": ["string"],
+      "searchQueries": ["string"],
+      "targetWordCount": 200
+    }
+  ],
+  "changes": ["string describing each change made"]
+}
+
+Return ONLY valid JSON.
+`;
+
+  const response = await context.llm.chat([
+    { role: 'system', content: 'You refine academic survey outlines based on retrieval evidence.' },
+    { role: 'user', content: prompt }
+  ]);
+
+  const parsed = parseJsonObject<{
+    refined?: boolean;
+    sections?: Partial<OutlineSection>[];
+    changes?: string[];
+  }>(response.content);
+
+  if (!parsed?.refined || !Array.isArray(parsed.sections) || parsed.sections.length === 0) {
+    return outline;
+  }
+
+  // Rebuild sections from refinement, preserving topicProfile
+  const refinedSections = parsed.sections.slice(0, sectionCount).map((section, index) => {
+    const existing = outline.sections.find((s) => s.id === section.id);
+    return normalizeSection({
+      id: slugify(section.id || section.title || `section-${index + 1}`),
+      title: section.title?.trim() || existing?.title || `Section ${index + 1}`,
+      description: section.description?.trim() || existing?.description || `Discuss ${topic}.`,
+      searchQueries: Array.isArray(section.searchQueries) && section.searchQueries.length > 0
+        ? section.searchQueries.map((q) => String(q).trim()).filter(Boolean)
+        : existing?.searchQueries || [topic],
+      targetWordCount: Number(section.targetWordCount) > 0
+        ? Number(section.targetWordCount)
+        : existing?.targetWordCount || 200,
+      focusFacets: Array.isArray(section.focusFacets) && section.focusFacets.length > 0
+        ? section.focusFacets.map((f) => String(f).trim()).filter(Boolean)
+        : existing?.focusFacets || deriveSectionFacets(section.title || '')
+    }, existing, topic, outline.topicProfile!);
+  });
+
+  return {
+    ...outline,
+    sections: refinedSections
+  };
+}

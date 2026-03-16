@@ -1,6 +1,6 @@
 import { Skill, SkillContext, SkillParams, SkillResult } from '../../../src/skills/types.js';
 import { ScholarTool, type Paper } from '../../../src/skills/lib/ScholarTool.js';
-import { createSurveyOutline } from './outline.js';
+import { createSurveyOutline, refineOutline } from './outline.js';
 import { retrieveSurveyPapers } from './retriever.js';
 import { writeSurveySections } from './section-writer.js';
 import { reviewSurveySections } from './reviewer.js';
@@ -50,11 +50,23 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
       };
     }
 
-    await context.updateProgress?.(35, 'Planning survey outline', { seedPaperCount: seedPapers.length });
-    const outline = await createSurveyOutline(context, topic, seedPapers, depth);
+    await context.updateProgress?.(30, 'Planning survey outline', { seedPaperCount: seedPapers.length });
+    let outline = await createSurveyOutline(context, topic, seedPapers, depth);
 
-    await context.updateProgress?.(50, 'Retrieving evidence for each section', { sectionCount: outline.sections.length });
-    const retrieval = await retrieveSurveyPapers(scholar, topic, outline, seedPapers, { sectionLimit: 4, perQueryLimit: 4 });
+    await context.updateProgress?.(42, 'Retrieving evidence for each section', { sectionCount: outline.sections.length });
+    let retrieval = await retrieveSurveyPapers(scholar, topic, outline, seedPapers, { sectionLimit: 4, perQueryLimit: 4 });
+
+    // Iterative outline refinement: adjust outline based on actual retrieval results
+    await context.updateProgress?.(52, 'Refining outline based on retrieval results');
+    const refinedOutline = await refineOutline(context, topic, outline, retrieval.papersBySection, depth);
+    if (refinedOutline !== outline) {
+      context.log('thinking', `Outline refined: ${refinedOutline.sections.map((s) => s.title).join(', ')}`);
+      outline = refinedOutline;
+      // Re-retrieve for any new/changed sections
+      await context.updateProgress?.(58, 'Re-retrieving evidence for refined outline');
+      retrieval = await retrieveSurveyPapers(scholar, topic, outline, seedPapers, { sectionLimit: 4, perQueryLimit: 4 });
+    }
+
     const papers = dedupePapers(retrieval.papers);
     const paperIndexMap = new Map(papers.map((paper, index) => [paper.title.toLowerCase(), index + 1]));
 

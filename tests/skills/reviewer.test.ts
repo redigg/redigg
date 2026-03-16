@@ -6,6 +6,7 @@ import type { SectionDraft } from '../../skills/research/academic-survey-self-im
 describe('reviewSurveySections', () => {
   it('should force rewrite when hard checks fail for a benchmark section', async () => {
     const chat = vi.fn()
+      // Cross-review role 1: evidence grounding
       .mockResolvedValueOnce({
         content: JSON.stringify({
           score: 92,
@@ -15,6 +16,17 @@ describe('reviewSurveySections', () => {
           needsRewrite: false
         })
       })
+      // Cross-review role 2: synthesis quality
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          score: 90,
+          strengths: ['Good structure'],
+          issues: [],
+          suggestions: [],
+          needsRewrite: false
+        })
+      })
+      // Rewrite response
       .mockResolvedValueOnce({
         content: '## Evaluation and Benchmarks\n\nRewritten benchmark section grounded in evidence [1][2].'
       });

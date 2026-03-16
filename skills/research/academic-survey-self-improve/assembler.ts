@@ -1,6 +1,6 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { FinalSurvey, SectionDraft, SurveyOutline, SurveyQualityReport } from './types.js';
-import { countWords } from './utils.js';
+import { checkCitationConsistency, countWords, stripGhostCitations } from './utils.js';
 
 export function assembleSurvey(
   outline: SurveyOutline,
@@ -8,9 +8,16 @@ export function assembleSurvey(
   papers: Paper[],
   qualityReport: SurveyQualityReport
 ): FinalSurvey {
+  const referenceCount = papers.length;
   const references = papers
     .map((paper, index) => `${index + 1}. ${paper.title}. ${paper.journal || 'Unknown venue'}, ${paper.year}. ${paper.url || ''}`.trim())
     .join('\n');
+
+  // Strip ghost citations from each section before assembly
+  const cleanedSections = sections.map((section) => ({
+    ...section,
+    content: stripGhostCitations(section.content, referenceCount)
+  }));
 
   const markdownParts = [
     `# ${outline.title}`,
@@ -18,7 +25,7 @@ export function assembleSurvey(
     outline.abstractDraft,
     '## Taxonomy',
     ...outline.taxonomy.map((item) => `- ${item}`),
-    ...sections.map((section) => section.content),
+    ...cleanedSections.map((section) => section.content),
     '## Review Summary',
     `Overall score: ${qualityReport.overallScore}/100`,
     ...qualityReport.suggestions.map((item) => `- ${item}`),
@@ -28,11 +35,19 @@ export function assembleSurvey(
 
   const markdown = markdownParts.join('\n\n');
 
+  // Run bidirectional consistency check on assembled output
+  const consistency = checkCitationConsistency(markdown, referenceCount);
+
   return {
     title: outline.title,
     markdown,
-    sections,
+    sections: cleanedSections,
     wordCount: countWords(markdown),
-    citationCount: papers.length
+    citationCount: referenceCount,
+    citationConsistency: {
+      ghostCitations: consistency.ghostCitations,
+      orphanReferences: consistency.orphanReferences,
+      isConsistent: consistency.isConsistent
+    }
   };
 }

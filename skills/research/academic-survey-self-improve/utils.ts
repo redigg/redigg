@@ -600,3 +600,66 @@ function extractArxivId(value?: string): string | undefined {
   const match = value.match(/arxiv\.org\/(?:abs|pdf)\/([^?#/]+)|\/([^/?#]+)$/i);
   return (match?.[1] || match?.[2] || '').replace(/\.pdf$/i, '') || undefined;
 }
+
+export interface CitationConsistencyReport {
+  /** Citation numbers used in text but outside valid reference range */
+  ghostCitations: number[];
+  /** Reference indices (1-based) that are never cited in text */
+  orphanReferences: number[];
+  /** All valid citation numbers found in text */
+  usedCitations: number[];
+  /** Total reference count */
+  totalReferences: number;
+  /** true when no ghosts and no orphans */
+  isConsistent: boolean;
+}
+
+/**
+ * Check bidirectional consistency between inline [n] citations in markdown
+ * and the reference list (1-based, length = referenceCount).
+ */
+export function checkCitationConsistency(
+  markdown: string,
+  referenceCount: number
+): CitationConsistencyReport {
+  const cited = new Set(
+    Array.from(markdown.matchAll(/\[(\d+)\]/g))
+      .map((m) => Number(m[1]))
+      .filter(Number.isFinite)
+  );
+
+  const validRange = new Set(
+    Array.from({ length: referenceCount }, (_, i) => i + 1)
+  );
+
+  const ghostCitations = Array.from(cited)
+    .filter((n) => !validRange.has(n))
+    .sort((a, b) => a - b);
+
+  const usedCitations = Array.from(cited)
+    .filter((n) => validRange.has(n))
+    .sort((a, b) => a - b);
+
+  const orphanReferences = Array.from(validRange)
+    .filter((n) => !cited.has(n))
+    .sort((a, b) => a - b);
+
+  return {
+    ghostCitations,
+    orphanReferences,
+    usedCitations,
+    totalReferences: referenceCount,
+    isConsistent: ghostCitations.length === 0 && orphanReferences.length === 0
+  };
+}
+
+/**
+ * Strip ghost citation markers from markdown (citations outside valid range).
+ * Preserves valid citations untouched.
+ */
+export function stripGhostCitations(markdown: string, referenceCount: number): string {
+  return markdown.replace(/\[(\d+)\]/g, (match, num) => {
+    const n = Number(num);
+    return n >= 1 && n <= referenceCount ? match : '';
+  }).replace(/ {2,}/g, ' ');
+}

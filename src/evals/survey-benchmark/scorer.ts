@@ -144,15 +144,26 @@ function scoreCitations(benchmarkCase: SurveyBenchmarkCase, result: SkillResult)
   const referenceCount = inferReferenceCount(result);
 
   if (uniqueCitations.size > 0) {
-    score += Math.min(35, uniqueCitations.size * 5);
+    score += Math.min(30, uniqueCitations.size * 5);
     details.push(`唯一正文引用 ${uniqueCitations.size} 个`);
   } else {
     details.push('正文未发现引用');
   }
 
   const validCitations = [...uniqueCitations].filter((citation) => citation >= 1 && citation <= Math.max(referenceCount, 1)).length;
-  score += uniqueCitations.size > 0 ? (validCitations / uniqueCitations.size) * 25 : 0;
+  score += uniqueCitations.size > 0 ? (validCitations / uniqueCitations.size) * 20 : 0;
   details.push(`有效引用编号 ${validCitations}/${uniqueCitations.size || 1}`);
+
+  // Ghost citation penalty: citations pointing to non-existent references
+  const ghostCount = uniqueCitations.size - validCitations;
+  if (ghostCount > 0) {
+    const ghostPenalty = Math.min(15, ghostCount * 5);
+    score -= ghostPenalty;
+    details.push(`幽灵引用 ${ghostCount} 个 (-${ghostPenalty})`);
+  } else {
+    score += 10;
+    details.push('无幽灵引用 (+10)');
+  }
 
   const claimAlignmentCount = inferClaimAlignmentCount(result);
   score += Math.min(40, (claimAlignmentCount / benchmarkCase.minClaimAlignments) * 40);
@@ -172,12 +183,12 @@ function scoreReferences(benchmarkCase: SurveyBenchmarkCase, result: SkillResult
 
   const papers = Array.isArray(result.papers) ? (result.papers as Paper[]) : [];
   const referenceCount = papers.length;
-  score += Math.min(40, (referenceCount / benchmarkCase.minReferences) * 40);
+  score += Math.min(35, (referenceCount / benchmarkCase.minReferences) * 35);
   details.push(`参考文献数 ${referenceCount}/${benchmarkCase.minReferences}`);
 
   const uniqueTitles = new Set(papers.map((paper) => normalizeText(paper.title)));
   const dedupeRatio = referenceCount > 0 ? uniqueTitles.size / referenceCount : 0;
-  score += dedupeRatio * 25;
+  score += dedupeRatio * 20;
   details.push(`参考文献去重比例 ${(dedupeRatio * 100).toFixed(0)}%`);
 
   const sources = new Set(
@@ -186,14 +197,29 @@ function scoreReferences(benchmarkCase: SurveyBenchmarkCase, result: SkillResult
       .filter((source) => typeof source === 'string' && source.trim().length > 0)
       .map((source) => String(source).toLowerCase())
   );
-  score += Math.min(20, sources.size * 10);
+  score += Math.min(15, sources.size * 7.5);
   details.push(`来源多样性 ${sources.size} 个`);
 
-  const citedCount = extractInlineCitations(String(result.formatted_output || result.summary || '')).length;
+  // Bidirectional citation coverage
+  const markdown = String(result.formatted_output || result.summary || '');
+  const citedIndices = new Set(
+    extractInlineCitations(markdown).filter((n) => n >= 1 && n <= referenceCount)
+  );
   if (referenceCount > 0) {
-    const citedRatio = Math.min(1, citedCount / referenceCount);
-    score += citedRatio * 15;
-    details.push(`正文引用覆盖 ${(citedRatio * 100).toFixed(0)}%`);
+    const coverageRatio = citedIndices.size / referenceCount;
+    score += coverageRatio * 20;
+    details.push(`引用覆盖率 ${citedIndices.size}/${referenceCount} (${(coverageRatio * 100).toFixed(0)}%)`);
+
+    // Orphan reference penalty
+    const orphanCount = referenceCount - citedIndices.size;
+    if (orphanCount > 0) {
+      const orphanPenalty = Math.min(10, orphanCount * 2);
+      score -= orphanPenalty;
+      details.push(`孤儿文献 ${orphanCount} 篇 (-${orphanPenalty})`);
+    } else {
+      score += 10;
+      details.push('无孤儿文献 (+10)');
+    }
   } else {
     details.push('无可评估的参考文献');
   }

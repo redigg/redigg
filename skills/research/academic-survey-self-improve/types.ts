@@ -99,4 +99,9 @@ export interface FinalSurvey {
   sections: SectionDraft[];
   wordCount: number;
   citationCount: number;
+  citationConsistency: {
+    ghostCitations: number[];
+    orphanReferences: number[];
+    isConsistent: boolean;
+  };
 }

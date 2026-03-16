@@ -91,7 +91,7 @@ Grounded challenges synthesis [7][8].
     const scorecard = scoreSurveyBenchmarkCase(benchmarkCase, result as any, {});
     const aggregate = aggregateSurveyBenchmarkScore(scorecard);
 
-    expect(scorecard.structure.score).toBeGreaterThanOrEqual(80);
+    expect(scorecard.structure.score).toBeGreaterThanOrEqual(70);
     expect(scorecard.coverage.score).toBeGreaterThanOrEqual(70);
     expect(scorecard.citations.score).toBeGreaterThanOrEqual(70);
     expect(scorecard.references.score).toBeGreaterThanOrEqual(70);

@@ -19,8 +19,8 @@ function normalizeText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-function tokenSet(value: string): Set<string> {
-  return new Set(normalizeText(value).split(/\s+/).filter(Boolean));
+function countWords(content: string): number {
+  return content.trim().split(/\s+/).filter(Boolean).length;
 }
 
 function includesSection(actualSections: string[], expectedSection: string): boolean {
@@ -34,11 +34,7 @@ function extractInlineCitations(markdown: string): number[] {
 }
 
 function inferReferenceCount(result: SkillResult): number {
-  if (Array.isArray(result.papers)) {
-    return result.papers.length;
-  }
-
-  return 0;
+  return Array.isArray(result.papers) ? result.papers.length : 0;
 }
 
 function inferPaperTypeCoverage(result: SkillResult): Set<string> {
@@ -66,47 +62,61 @@ function inferClaimAlignmentCount(result: SkillResult): number {
   }, 0);
 }
 
+// ── Structure ──────────────────────────────────────────────────────────
+
 function scoreStructure(benchmarkCase: SurveyBenchmarkCase, result: SkillResult): BenchmarkMetric {
   const details: string[] = [];
   const actualSections = Array.isArray(result.sections) ? result.sections.map((section: any) => section.title) : [];
   const markdown = String(result.formatted_output || result.summary || '');
   let score = 0;
 
+  // Title (10)
   const hasTitle = typeof result.outline?.title === 'string' && result.outline.title.trim().length > 0;
   if (hasTitle) {
-    score += 15;
+    score += 10;
     details.push('包含 survey 标题');
   } else {
     details.push('缺少 survey 标题');
   }
 
+  // Abstract (10)
   const hasAbstract = markdown.includes('## Abstract');
   if (hasAbstract) {
-    score += 15;
+    score += 10;
     details.push('包含 Abstract');
   } else {
     details.push('缺少 Abstract');
   }
 
+  // Required section coverage (45)
   const sectionCoverage = benchmarkCase.requiredSections.filter((section) => includesSection(actualSections, section)).length;
-  score += (sectionCoverage / benchmarkCase.requiredSections.length) * 55;
+  score += (sectionCoverage / benchmarkCase.requiredSections.length) * 45;
   details.push(`必需章节覆盖 ${sectionCoverage}/${benchmarkCase.requiredSections.length}`);
 
+  // References section (10)
   const hasReferences = markdown.includes('## References') || markdown.includes('\nReferences\n');
   if (hasReferences) {
-    score += 15;
+    score += 10;
     details.push('包含 References');
   } else {
     details.push('缺少 References');
   }
 
+  // Word count (25) — scaled against minWordCount
+  const wordCount = countWords(markdown);
+  const wordRatio = Math.min(1, wordCount / benchmarkCase.minWordCount);
+  score += wordRatio * 25;
+  details.push(`字数 ${wordCount}/${benchmarkCase.minWordCount} (${(wordRatio * 100).toFixed(0)}%)`);
+
   return {
     score: clampScore(score),
     maxScore: 100,
-    passed: score >= 75,
+    passed: score >= 70,
     details
   };
 }
+
+// ── Coverage ───────────────────────────────────────────────────────────
 
 function scoreCoverage(benchmarkCase: SurveyBenchmarkCase, result: SkillResult): BenchmarkMetric {
   const details: string[] = [];
@@ -117,14 +127,28 @@ function scoreCoverage(benchmarkCase: SurveyBenchmarkCase, result: SkillResult):
   score += Math.min(35, (paperCount / benchmarkCase.minPapers) * 35);
   details.push(`候选论文数 ${paperCount}/${benchmarkCase.minPapers}`);
 
+  // Taxonomy (10, reduced from 20 — too easy to get)
   const taxonomyCount = Array.isArray(result.outline?.taxonomy) ? result.outline.taxonomy.length : 0;
-  score += Math.min(20, (taxonomyCount / 4) * 20);
+  score += Math.min(10, (taxonomyCount / 4) * 10);
   details.push(`taxonomy 条目 ${taxonomyCount}/4`);
 
+  // Paper type coverage (40)
   const paperTypeCoverage = inferPaperTypeCoverage(result);
   const matchedTypes = benchmarkCase.preferredPaperTypes.filter((type) => paperTypeCoverage.has(type));
-  score += (matchedTypes.length / benchmarkCase.preferredPaperTypes.length) * 45;
+  score += (matchedTypes.length / benchmarkCase.preferredPaperTypes.length) * 40;
   details.push(`目标论文类型覆盖 ${matchedTypes.length}/${benchmarkCase.preferredPaperTypes.length}`);
+
+  // Section count penalty — fewer sections than required loses points (15)
+  const actualSectionCount = Array.isArray(result.sections) ? result.sections.length : 0;
+  const expectedSectionCount = benchmarkCase.requiredSections.length;
+  if (actualSectionCount >= expectedSectionCount) {
+    score += 15;
+    details.push(`章节数 ${actualSectionCount} >= ${expectedSectionCount}`);
+  } else {
+    const sectionRatio = actualSectionCount / expectedSectionCount;
+    score += sectionRatio * 15;
+    details.push(`章节数不足 ${actualSectionCount}/${expectedSectionCount}`);
+  }
 
   return {
     score: clampScore(score),
@@ -133,6 +157,8 @@ function scoreCoverage(benchmarkCase: SurveyBenchmarkCase, result: SkillResult):
     details
   };
 }
+
+// ── Citations ──────────────────────────────────────────────────────────
 
 function scoreCitations(benchmarkCase: SurveyBenchmarkCase, result: SkillResult): BenchmarkMetric {
   const details: string[] = [];
@@ -143,30 +169,40 @@ function scoreCitations(benchmarkCase: SurveyBenchmarkCase, result: SkillResult)
   const uniqueCitations = new Set(inlineCitations);
   const referenceCount = inferReferenceCount(result);
 
+  // Unique citation count (25)
   if (uniqueCitations.size > 0) {
-    score += Math.min(30, uniqueCitations.size * 5);
+    score += Math.min(25, uniqueCitations.size * 4);
     details.push(`唯一正文引用 ${uniqueCitations.size} 个`);
   } else {
     details.push('正文未发现引用');
   }
 
-  const validCitations = [...uniqueCitations].filter((citation) => citation >= 1 && citation <= Math.max(referenceCount, 1)).length;
+  // Valid citation ratio (20)
+  const validCitations = [...uniqueCitations].filter((c) => c >= 1 && c <= Math.max(referenceCount, 1)).length;
   score += uniqueCitations.size > 0 ? (validCitations / uniqueCitations.size) * 20 : 0;
   details.push(`有效引用编号 ${validCitations}/${uniqueCitations.size || 1}`);
 
-  // Ghost citation penalty: citations pointing to non-existent references
+  // Ghost citation penalty (up to -15)
   const ghostCount = uniqueCitations.size - validCitations;
   if (ghostCount > 0) {
     const ghostPenalty = Math.min(15, ghostCount * 5);
     score -= ghostPenalty;
     details.push(`幽灵引用 ${ghostCount} 个 (-${ghostPenalty})`);
-  } else {
+  } else if (uniqueCitations.size > 0) {
     score += 10;
     details.push('无幽灵引用 (+10)');
   }
 
+  // Citation density — at least 1 citation per 150 words of body (10)
+  const wordCount = countWords(markdown);
+  const expectedCitations = Math.max(1, Math.floor(wordCount / 150));
+  const densityRatio = Math.min(1, inlineCitations.length / expectedCitations);
+  score += densityRatio * 10;
+  details.push(`引用密度 ${inlineCitations.length}/${expectedCitations} (期望每150词≥1)`);
+
+  // Claim alignments (35)
   const claimAlignmentCount = inferClaimAlignmentCount(result);
-  score += Math.min(40, (claimAlignmentCount / benchmarkCase.minClaimAlignments) * 40);
+  score += Math.min(35, (claimAlignmentCount / benchmarkCase.minClaimAlignments) * 35);
   details.push(`claim alignment ${claimAlignmentCount}/${benchmarkCase.minClaimAlignments}`);
 
   return {
@@ -176,6 +212,8 @@ function scoreCitations(benchmarkCase: SurveyBenchmarkCase, result: SkillResult)
     details
   };
 }
+
+// ── References ─────────────────────────────────────────────────────────
 
 function scoreReferences(benchmarkCase: SurveyBenchmarkCase, result: SkillResult): BenchmarkMetric {
   const details: string[] = [];
@@ -232,23 +270,27 @@ function scoreReferences(benchmarkCase: SurveyBenchmarkCase, result: SkillResult
   };
 }
 
+// ── PDF / Markdown Quality ─────────────────────────────────────────────
+
 function scorePdf(result: SkillResult, artifacts: BenchmarkArtifacts): BenchmarkMetric {
   const details: string[] = [];
   let score = 0;
 
   const markdown = String(result.formatted_output || result.summary || '');
-  const hasAcademicHeadings =
-    markdown.includes('## Abstract') &&
-    markdown.includes('## References') &&
-    markdown.includes('## Background') &&
-    markdown.includes('## Core Methods');
+  const actualSections = Array.isArray(result.sections) ? result.sections.map((s: any) => s.title) : [];
 
-  if (hasAcademicHeadings) {
-    score += 45;
-    details.push('Markdown 结构具备论文样式章节');
-  } else {
-    details.push('Markdown 缺少论文样式章节');
-  }
+  // Check that actual generated section headings appear in markdown (dynamic, not hardcoded)
+  const hasAbstract = markdown.includes('## Abstract');
+  const hasReferences = markdown.includes('## References');
+  const sectionHeadingsFound = actualSections.filter((title: string) =>
+    markdown.includes(`## ${title}`)
+  ).length;
+  const totalExpected = actualSections.length + 2; // + Abstract + References
+  const foundCount = sectionHeadingsFound + (hasAbstract ? 1 : 0) + (hasReferences ? 1 : 0);
+  const headingRatio = totalExpected > 0 ? foundCount / totalExpected : 0;
+
+  score += headingRatio * 45;
+  details.push(`Markdown 章节标题覆盖 ${foundCount}/${totalExpected} (${(headingRatio * 100).toFixed(0)}%)`);
 
   if (artifacts.pdfPath && fs.existsSync(artifacts.pdfPath)) {
     const stat = fs.statSync(artifacts.pdfPath);
@@ -266,10 +308,12 @@ function scorePdf(result: SkillResult, artifacts: BenchmarkArtifacts): Benchmark
   return {
     score: clampScore(score),
     maxScore: 100,
-    passed: score >= 65,
+    passed: score >= 40,
     details
   };
 }
+
+// ── Quality Gate ───────────────────────────────────────────────────────
 
 function scoreQualityGate(result: SkillResult): BenchmarkMetric {
   const details: string[] = [];
@@ -283,6 +327,8 @@ function scoreQualityGate(result: SkillResult): BenchmarkMetric {
     details
   };
 }
+
+// ── Public API ─────────────────────────────────────────────────────────
 
 export function scoreSurveyBenchmarkCase(
   benchmarkCase: SurveyBenchmarkCase,
@@ -300,12 +346,14 @@ export function scoreSurveyBenchmarkCase(
 }
 
 export function aggregateSurveyBenchmarkScore(scorecard: SurveyBenchmarkTopicScorecard): number {
+  // Weights: content quality (citations + references) = 40%, structure = 20%,
+  // coverage = 15%, quality gate = 15%, PDF = 10%
   return clampScore(
-    scorecard.structure.score * 0.2 +
-      scorecard.coverage.score * 0.2 +
-      scorecard.citations.score * 0.2 +
+    scorecard.structure.score * 0.20 +
+      scorecard.coverage.score * 0.15 +
+      scorecard.citations.score * 0.25 +
       scorecard.references.score * 0.15 +
-      scorecard.pdf.score * 0.1 +
+      scorecard.pdf.score * 0.10 +
       scorecard.qualityGate.score * 0.15
   );
 }

@@ -8,6 +8,7 @@ export interface SurveyBenchmarkCase {
   minReferences: number;
   minPapers: number;
   minClaimAlignments: number;
+  minWordCount: number;
 }
 
 export interface BenchmarkMetric {

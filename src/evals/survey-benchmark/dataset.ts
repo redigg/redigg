@@ -1,11 +1,13 @@
 import type { SurveyBenchmarkCase } from './types.js';
 
+// Use shorter canonical names so substring matching works with LLM-generated titles
+// e.g. "Background" matches "Background and Scope", "Background and Motivation", etc.
 const COMMON_REQUIRED_SECTIONS = [
-  'Background and Scope',
-  'Core Methods',
-  'Evaluation and Benchmarks',
-  'Applications and Systems',
-  'Open Challenges'
+  'Background',
+  'Methods',
+  'Evaluation',
+  'Applications',
+  'Challenges'
 ];
 
 export const SURVEY_BENCHMARK_CASES: SurveyBenchmarkCase[] = [
@@ -18,7 +20,8 @@ export const SURVEY_BENCHMARK_CASES: SurveyBenchmarkCase[] = [
     preferredPaperTypes: ['survey', 'benchmark', 'system', 'workflow'],
     minReferences: 8,
     minPapers: 8,
-    minClaimAlignments: 5
+    minClaimAlignments: 5,
+    minWordCount: 800
   },
   {
     id: 'llm-reasoning-deliberation',
@@ -29,7 +32,8 @@ export const SURVEY_BENCHMARK_CASES: SurveyBenchmarkCase[] = [
     preferredPaperTypes: ['survey', 'benchmark', 'method'],
     minReferences: 8,
     minPapers: 8,
-    minClaimAlignments: 5
+    minClaimAlignments: 5,
+    minWordCount: 800
   },
   {
     id: 'scientific-literature-review-automation',
@@ -40,7 +44,8 @@ export const SURVEY_BENCHMARK_CASES: SurveyBenchmarkCase[] = [
     preferredPaperTypes: ['survey', 'system', 'workflow', 'benchmark'],
     minReferences: 8,
     minPapers: 8,
-    minClaimAlignments: 5
+    minClaimAlignments: 5,
+    minWordCount: 800
   },
   {
     id: 'autonomous-materials-discovery',
@@ -51,7 +56,8 @@ export const SURVEY_BENCHMARK_CASES: SurveyBenchmarkCase[] = [
     preferredPaperTypes: ['system', 'workflow', 'benchmark', 'application'],
     minReferences: 8,
     minPapers: 8,
-    minClaimAlignments: 5
+    minClaimAlignments: 5,
+    minWordCount: 800
   },
   {
     id: 'multi-agent-scientific-discovery',
@@ -62,7 +68,8 @@ export const SURVEY_BENCHMARK_CASES: SurveyBenchmarkCase[] = [
     preferredPaperTypes: ['system', 'workflow', 'benchmark', 'survey'],
     minReferences: 8,
     minPapers: 8,
-    minClaimAlignments: 5
+    minClaimAlignments: 5,
+    minWordCount: 800
   }
 ];
 

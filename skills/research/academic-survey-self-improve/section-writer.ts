@@ -1,6 +1,7 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { SkillContext } from '../../../src/skills/types.js';
 import type { SectionDraft, SurveyOutline } from './types.js';
+import { resolveSectionWritingTemplate } from './section-templates.js';
 import { alignClaimsToEvidence, buildEvidenceCards, normalizeText, parseJsonObject } from './utils.js';
 
 interface SectionDraftResponse {
@@ -26,6 +27,19 @@ export async function writeSurveySections(
       .map((paper) => paperIndexMap.get(paper.title.toLowerCase()))
       .filter((value): value is number => typeof value === 'number');
     const evidenceCards = buildEvidenceCards(sectionPapers, citations, section, outline.topicProfile);
+    const template = resolveSectionWritingTemplate(section, outline.topicProfile);
+
+    const templateBlock = `
+Section template: ${template.label} (${template.kind})
+Rhetorical goal: ${template.rhetoricalGoal}
+Required moves:
+${template.requiredMoves.map((m) => `- ${m}`).join('\n')}
+Synthesis focus: ${template.synthesisFocus.join(', ')}
+Citation guidance:
+${template.citationGuidance.map((g) => `- ${g}`).join('\n')}
+Anti-patterns to avoid:
+${template.antiPatterns.map((a) => `- ${a}`).join('\n')}
+Closing move: ${template.closingMove}`;
 
     const prompt = `
 [SURVEY_SECTION_DRAFT]
@@ -33,6 +47,7 @@ Topic: ${topic}
 Section title: ${section.title}
 Section goal: ${section.description}
 Target word count: ${section.targetWordCount}
+${templateBlock}
 
 Evidence cards:
 ${evidenceCards.map((card) => {
@@ -59,12 +74,13 @@ Return ONLY valid JSON:
 
 Requirements for the markdown:
 - Start with a level-2 heading using the exact section title.
+- Follow the rhetorical goal, required moves, and closing move from the section template above.
 - Synthesize, do not list papers one by one.
 - Every substantive claim must be supported by the evidence cards above.
 - Use citation markers like [1], [2] when making claims.
 - Mention at least two distinct evidence cards when more than one is available.
 - Do not introduce systems, benchmarks, datasets, or claims that are absent from the evidence cards.
-- End with one sentence stating what remains unresolved in this section.
+- Avoid all listed anti-patterns.
 Requirements for claimMappings:
 - Include 2-4 core sentence-level claims from the markdown body.
 - Each claim must appear verbatim or near-verbatim in the markdown.
@@ -91,6 +107,7 @@ Requirements for claimMappings:
     drafts.push({
       sectionId: section.id,
       title: section.title,
+      templateKind: template.kind,
       content,
       paperCount: sectionPapers.length,
       citations,

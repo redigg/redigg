@@ -1,5 +1,6 @@
 import type { SkillContext } from '../../../src/skills/types.js';
 import type { SectionDraft, SurveyQualityReport } from './types.js';
+import { getSectionWritingTemplate } from './section-templates.js';
 import { alignClaimsToEvidence, countWords, normalizeText, parseJsonObject } from './utils.js';
 
 interface ReviewResponse {
@@ -81,6 +82,7 @@ async function reviewSection(
   topic: string,
   section: SectionDraft
 ): Promise<ReviewResponse> {
+  const template = getSectionWritingTemplate(section.templateKind);
   const evidenceSummary = section.evidenceCards
     .map((card) => `[${card.citation}] ${card.title} | focus: ${card.evidenceFocus.join(', ') || 'general'} | claim: ${card.groundedClaim}`)
     .join('\n');
@@ -89,10 +91,20 @@ async function reviewSection(
 Topic: ${topic}
 Review the following survey section.
 
+Section template: ${template.label} (${template.kind})
+Rhetorical goal: ${template.rhetoricalGoal}
+Required moves:
+${template.requiredMoves.map((m) => `- ${m}`).join('\n')}
+Anti-patterns to check for:
+${template.antiPatterns.map((a) => `- ${a}`).join('\n')}
+Expected closing move: ${template.closingMove}
+
 Available evidence cards:
 ${evidenceSummary || 'No evidence cards available.'}
 
 ${section.content}
+
+Score the section on: evidence grounding, synthesis quality, adherence to the rhetorical goal and required moves above, and absence of anti-patterns.
 
 Return ONLY valid JSON:
 {
@@ -125,6 +137,7 @@ async function rewriteSection(
   section: SectionDraft,
   suggestions: string[]
 ): Promise<string | null> {
+  const template = getSectionWritingTemplate(section.templateKind);
   const evidenceSummary = section.evidenceCards
     .map((card) => `[${card.citation}] ${card.title}\n- Grounded claim: ${card.groundedClaim}\n- Limitation hint: ${card.limitationHint}`)
     .join('\n');
@@ -134,6 +147,12 @@ async function rewriteSection(
   const prompt = `
 [SURVEY_SECTION_REWRITE]
 Topic: ${topic}
+Section template: ${template.label} (${template.kind})
+Rhetorical goal: ${template.rhetoricalGoal}
+Required moves:
+${template.requiredMoves.map((m) => `- ${m}`).join('\n')}
+Closing move: ${template.closingMove}
+
 Improve the following survey section using these suggestions:
 ${suggestions.join('\n') || 'Improve clarity and evidence grounding.'}
 
@@ -164,7 +183,7 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
   let scorePenalty = 0;
   let forceRewrite = false;
 
-  const normalizedTitle = section.title.toLowerCase();
+  const kind = section.templateKind;
   const wordCount = countWords(section.content);
   const citationMatches = Array.from(section.content.matchAll(/\[(\d+)\]/g))
     .map((match) => Number(match[1]))
@@ -173,6 +192,8 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
   const availableCitations = new Set(section.evidenceCards.map((card) => card.citation));
   const paperTypeSignals = new Set(section.evidenceCards.flatMap((card) => card.paperTypeSignals));
   const claimAlignments = section.claimAlignments || [];
+
+  // --- universal checks ---
 
   if (section.evidenceCards.length === 0) {
     issues.push('No evidence cards were attached to this section.');
@@ -218,7 +239,7 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
   );
   if (invalidClaimMappings.length > 0) {
     issues.push('Some claim-level citation mappings reference citations outside this section evidence set.');
-    suggestions.push('Ensure every aligned claim only references citations from this section’s evidence cards.');
+    suggestions.push('Ensure every aligned claim only references citations from this section\u2019s evidence cards.');
     scorePenalty += 10;
     forceRewrite = true;
   }
@@ -230,7 +251,9 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     forceRewrite = true;
   }
 
-  if (normalizedTitle.includes('benchmark') || normalizedTitle.includes('evaluation')) {
+  // --- template-kind-specific checks ---
+
+  if (kind === 'benchmark') {
     if (!hasPaperType(paperTypeSignals, ['benchmark', 'evaluation'])) {
       issues.push('Benchmark section lacks benchmark/evaluation evidence.');
       suggestions.push('Include benchmark, dataset, or evaluation papers before finalizing this section.');
@@ -241,7 +264,7 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     }
   }
 
-  if (normalizedTitle.includes('system') || normalizedTitle.includes('application')) {
+  if (kind === 'systems') {
     if (!hasPaperType(paperTypeSignals, ['system', 'workflow', 'application'])) {
       issues.push('Systems section lacks system/workflow evidence.');
       suggestions.push('Add system, workflow, or platform papers to ground this section.');
@@ -252,7 +275,7 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     }
   }
 
-  if (normalizedTitle.includes('background') || normalizedTitle.includes('scope')) {
+  if (kind === 'background') {
     if (!hasPaperType(paperTypeSignals, ['survey'])) {
       issues.push('Background section lacks survey/review style evidence.');
       suggestions.push('Anchor the background section with at least one survey, review, or overview paper.');
@@ -262,7 +285,7 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     }
   }
 
-  if (normalizedTitle.includes('challenge') || normalizedTitle.includes('future')) {
+  if (kind === 'challenges') {
     const hasChallengeSignal = section.evidenceCards.some((card) =>
       card.paperTypeSignals.includes('challenges') ||
       /limit|challenge|future|reliability|ethic|open/i.test(card.limitationHint)
@@ -273,6 +296,16 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
       scorePenalty += 10;
     } else {
       strengths.push('Challenges section includes limitation-oriented evidence');
+    }
+  }
+
+  if (kind === 'methods') {
+    if (!hasPaperType(paperTypeSignals, ['framework', 'architecture', 'method'])) {
+      issues.push('Methods section lacks framework/architecture evidence.');
+      suggestions.push('Include papers that describe specific method families, architectures, or frameworks.');
+      scorePenalty += 10;
+    } else {
+      strengths.push('Methods section includes framework/architecture evidence');
     }
   }
 

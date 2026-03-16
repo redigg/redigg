@@ -1,5 +1,7 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 
+export type SectionTemplateKind = 'background' | 'methods' | 'benchmark' | 'systems' | 'challenges' | 'generic';
+
 export interface TopicProfile {
   originalTopic: string;
   normalizedTopic: string;
@@ -66,6 +68,7 @@ export interface ClaimAlignment {
 export interface SectionDraft {
   sectionId: string;
   title: string;
+  templateKind: SectionTemplateKind;
   content: string;
   paperCount: number;
   citations: number[];

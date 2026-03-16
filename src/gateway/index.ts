@@ -550,6 +550,68 @@ export class A2AGateway {
         }
     });
 
+    // Benchmark API — trigger evaluation runs and retrieve results
+    this.app.get('/api/benchmark/cases', (_req, res) => {
+        try {
+            const { SURVEY_BENCHMARK_CASES } = require('../evals/survey-benchmark/dataset.js');
+            res.json({ cases: SURVEY_BENCHMARK_CASES });
+        } catch (error) {
+            res.status(500).json({ error: String(error) });
+        }
+    });
+
+    this.app.post('/api/benchmark/run', async (req, res) => {
+        try {
+            const { runSurveyBenchmark } = await import('../evals/survey-benchmark/run.js');
+            const { caseIds, depth, skipPdf } = req.body || {};
+            logger.info('Starting benchmark run', { caseIds, depth });
+
+            // Run in background, return run ID immediately
+            const runId = `${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`;
+            res.json({ status: 'started', runId, message: 'Benchmark run started. Check /api/benchmark/results for progress.' });
+
+            // Fire and forget — results are written to disk
+            runSurveyBenchmark({
+                caseIds: Array.isArray(caseIds) ? caseIds : undefined,
+                depth: depth || undefined,
+                skipPdf: skipPdf !== false
+            }).then((summary: any) => {
+                logger.success(`Benchmark run ${runId} complete`, { averageScore: summary.averageScore });
+            }).catch((error: any) => {
+                logger.error(`Benchmark run ${runId} failed`, error);
+            });
+        } catch (error) {
+            res.status(500).json({ error: String(error) });
+        }
+    });
+
+    this.app.get('/api/benchmark/results', (_req, res) => {
+        try {
+            const resultsDir = path.join(process.cwd(), 'workspace', 'evals', 'survey-small-benchmark');
+            if (!fs.existsSync(resultsDir)) {
+                res.json({ runs: [] });
+                return;
+            }
+            const runs = fs.readdirSync(resultsDir)
+                .filter((name) => fs.statSync(path.join(resultsDir, name)).isDirectory())
+                .sort()
+                .reverse()
+                .slice(0, 20)
+                .map((name) => {
+                    const summaryPath = path.join(resultsDir, name, 'summary.json');
+                    if (fs.existsSync(summaryPath)) {
+                        try {
+                            return JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
+                        } catch { return { runId: name, error: 'Failed to parse summary' }; }
+                    }
+                    return { runId: name, status: 'in_progress' };
+                });
+            res.json({ runs });
+        } catch (error) {
+            res.status(500).json({ error: String(error) });
+        }
+    });
+
   }
 
   public start() {

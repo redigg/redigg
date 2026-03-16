@@ -13,6 +13,7 @@ import { runPlan } from './execution/planRunner.js';
 import type { AgentProgressHandler } from '../protocol/progress.js';
 import { ensureSessionWorkspace } from '../workspace/sessionWorkspace.js';
 import AcademicSurveySelfImproveSkill from '../../skills/research/academic-survey-self-improve/index.js';
+import { computeSurgeMetrics } from '../evals/survey-benchmark/metrics.js';
 
 const logger = createLogger('Agent');
 
@@ -1274,6 +1275,18 @@ function formatQualityCard(result: any, paperCount: number, sectionCount: number
         `| Orphan References | ${orphanCount} |`,
         `| Citation Consistent | ${isConsistent === true ? 'Yes' : isConsistent === false ? 'No' : '?'} |`,
     ];
+
+    // SurGE-style metrics (computed locally)
+    try {
+        const requiredHeadings = sections.map((s: any) => String(s.title || ''));
+        const surge = computeSurgeMetrics(markdown, requiredHeadings);
+        lines.push(`| Citation Recall | ${(surge.citationRecall * 100).toFixed(0)}% |`);
+        lines.push(`| Structural Similarity | ${(surge.structuralSimilarity * 100).toFixed(0)}% |`);
+        lines.push(`| Vocabulary Diversity | ${(surge.vocabularyDiversity * 100).toFixed(0)}% |`);
+        lines.push(`| SurGE Composite | **${(surge.composite * 100).toFixed(1)}** |`);
+    } catch {
+        // metrics computation failed, skip
+    }
 
     // Per-section review scores
     if (Array.isArray(qr.sectionReviews) && qr.sectionReviews.length > 0) {

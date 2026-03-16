@@ -18,6 +18,7 @@ import {
   scoreSurveyBenchmarkCase
 } from './scorer.js';
 import { computeSurgeMetrics } from './metrics.js';
+import { writeSurgeFormat, writeSurveyBenchFormat } from './surge-adapter.js';
 import type {
   SurveyBenchmarkCase,
   SurveyBenchmarkRunSummary,
@@ -219,6 +220,14 @@ async function runSingleBenchmarkCase(args: {
     });
 
     fs.writeFileSync(markdownPath, String(result.formatted_output || result.summary || ''), 'utf8');
+
+    // Write SurGE and SurveyBench format outputs for external evaluation
+    try {
+      writeSurgeFormat(result, path.join(caseOutputDir, 'surge'));
+      writeSurveyBenchFormat(result, path.join(caseOutputDir, 'surveybench.json'));
+    } catch (adapterError) {
+      logger.warn('Failed to write external eval format', adapterError);
+    }
 
     if (!skipPdf && result.success) {
       const pdfResult = await pdfSkill.execute(context, {

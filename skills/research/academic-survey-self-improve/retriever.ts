@@ -1,11 +1,16 @@
 import { ScholarTool, type Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { OutlineSection, RetrievalResult, SurveyOutline } from './types.js';
-import { dedupePapers, filterPapersByAnchors, scorePaperForSection } from './utils.js';
+import { assessPaperAnchors, dedupePapers, filterPapersByAnchors, scorePaperForSection } from './utils.js';
 
 interface RetrieveOptions {
   sectionLimit?: number;
   perQueryLimit?: number;
 }
+
+/** Minimum anchor-tier quality for a batch to count as useful */
+const MIN_USEFUL_BATCH_RATIO = 0.25;
+/** Once we have this many strong/weak papers for a section, stop querying */
+const EARLY_STOP_THRESHOLD = 6;
 
 export async function retrieveSurveyPapers(
   scholar: ScholarTool,
@@ -30,19 +35,25 @@ export async function retrieveSurveyPapers(
       : section.searchQueries;
     const queries = Array.from(new Set([
       ...plannedQueries,
-      `${topic} ${section.title}`,
-      `${topic} ${section.description}`
+      `${topic} ${section.title}`
     ].map((query) => query.trim()).filter(Boolean)));
 
     for (const query of queries) {
-      // Add a small delay between consecutive search calls to reduce the risk of hitting rate limits
+      // Early stop: if we already have enough quality papers, skip remaining queries
+      if (hasEnoughQualityPapers(sectionPapers, section, outline.topicProfile)) {
+        break;
+      }
+
       if (queryCount > 0 && shouldDelay) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       queryCount += 1;
       const hits = await scholar.searchPapers(query, perQueryLimit);
       totalHits += hits.length;
-      sectionPapers.push(...hits);
+
+      // Batch quality gate: only keep hits that have minimal relevance to the topic
+      const useful = filterBatchByRelevance(hits, section, outline.topicProfile);
+      sectionPapers.push(...useful);
     }
 
     const fallbackCandidates = rankPapersForSection(seedPapers, section, outline.topicProfile).slice(0, sectionLimit);
@@ -73,6 +84,49 @@ export async function retrieveSurveyPapers(
       deduplicatedCount: papers.length
     }
   };
+}
+
+/** Check if we already have enough strong/weak papers to skip further queries */
+function hasEnoughQualityPapers(
+  papers: Paper[],
+  section: OutlineSection,
+  topicProfile?: SurveyOutline['topicProfile']
+): boolean {
+  if (!topicProfile || papers.length < EARLY_STOP_THRESHOLD) return false;
+
+  const deduped = dedupePapers(papers);
+  const qualityCount = deduped.filter((paper) => {
+    const assessment = assessPaperAnchors(paper, topicProfile, section);
+    return assessment.tier === 'strong' || assessment.tier === 'weak';
+  }).length;
+
+  return qualityCount >= EARLY_STOP_THRESHOLD;
+}
+
+/** Filter a search batch: keep papers with at least weak relevance; if batch
+ *  quality is below threshold, return all (degrade gracefully instead of dropping everything) */
+function filterBatchByRelevance(
+  papers: Paper[],
+  section: OutlineSection,
+  topicProfile?: SurveyOutline['topicProfile']
+): Paper[] {
+  if (!topicProfile || papers.length === 0) return papers;
+
+  const assessed = papers.map((paper) => ({
+    paper,
+    tier: assessPaperAnchors(paper, topicProfile, section).tier
+  }));
+
+  const relevant = assessed.filter((item) => item.tier !== 'off-topic');
+  const usefulRatio = relevant.length / papers.length;
+
+  // If most results are relevant, keep only relevant ones
+  if (usefulRatio >= MIN_USEFUL_BATCH_RATIO) {
+    return relevant.map((item) => item.paper);
+  }
+
+  // If batch is mostly off-topic, keep all to avoid losing the few useful ones
+  return papers;
 }
 
 function rankPapersForSection(

@@ -11,7 +11,7 @@ const DEPTH_SECTION_COUNT: Record<string, number> = {
 
 const DEFAULT_INTENT_FACETS = ['survey', 'benchmark', 'system', 'workflow', 'evaluation'];
 const DEFAULT_PAPER_TYPES = ['survey', 'review', 'benchmark', 'system', 'framework', 'workflow'];
-const MAX_SECTION_QUERIES = 8;
+const MAX_SECTION_QUERIES = 6;
 
 export async function createSurveyOutline(
   context: SkillContext,
@@ -268,13 +268,17 @@ function buildQueryPlan(topic: string, topicProfile: TopicProfile, section: Outl
     }
   }
 
-  const broadFallbacks = [
-    `${topic} survey`,
-    `${topic} benchmark`,
-    `${topic} system`
+  // Only add fallback queries for facets not already covered by the section's focus
+  const coveredFacets = new Set(focusFacets.map((f) => f.toLowerCase()));
+  const fallbackCandidates: Array<[string, string]> = [
+    ['survey', `${topic} survey`],
+    ['benchmark', `${topic} benchmark`],
+    ['system', `${topic} system`]
   ];
-  for (const query of broadFallbacks) {
-    pushQuery(plan, query, 'fallback', 0.7, 'fallback');
+  for (const [facet, query] of fallbackCandidates) {
+    if (!coveredFacets.has(facet)) {
+      pushQuery(plan, query, 'fallback', 0.55, 'fallback');
+    }
   }
 
   return plan
@@ -292,13 +296,28 @@ function pushQuery(
   const query = rawQuery.replace(/\s+/g, ' ').trim();
   if (!query) return;
 
-  const existing = plan.find((item) => item.query.toLowerCase() === query.toLowerCase());
+  const key = normalizeQueryKey(query);
+  const existing = plan.find((item) => normalizeQueryKey(item.query) === key);
   if (existing) {
     existing.weight = Math.max(existing.weight, weight);
     return;
   }
 
   plan.push({ query, facet, weight, source });
+}
+
+/** Normalize a query for dedup: lowercase, singularize, drop stopwords, sort tokens */
+function normalizeQueryKey(query: string): string {
+  const stopwords = new Set(['the', 'and', 'for', 'with', 'from', 'into', 'using', 'of', 'in', 'on', 'a', 'an']);
+  return query
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((t) => singularize(t))
+    .filter((t) => t.length > 1 && !stopwords.has(t))
+    .sort()
+    .join(' ');
 }
 
 function inferAliasPhrases(topic: string, anchorTerms: string[]): string[] {

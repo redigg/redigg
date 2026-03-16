@@ -27,6 +27,15 @@ export interface SurveyBenchmarkTopicScorecard {
   qualityGate: BenchmarkMetric;
 }
 
+export interface SurgeStyleMetricsSummary {
+  rougeL: number;
+  rouge2: number;
+  structuralSimilarity: number;
+  citationRecall: number;
+  vocabularyDiversity: number;
+  composite: number;
+}
+
 export interface SurveyBenchmarkTopicResult {
   benchmarkCase: SurveyBenchmarkCase;
   success: boolean;
@@ -35,6 +44,7 @@ export interface SurveyBenchmarkTopicResult {
   durationMs: number;
   aggregateScore: number;
   scorecard: SurveyBenchmarkTopicScorecard;
+  surgeMetrics?: SurgeStyleMetricsSummary;
   outputPaths: {
     markdownPath: string;
     jsonPath: string;

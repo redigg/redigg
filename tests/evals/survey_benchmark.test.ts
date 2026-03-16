@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { aggregateSurveyBenchmarkScore, scoreSurveyBenchmarkCase } from '../../src/evals/survey-benchmark/scorer.js';
+import { computeSurgeMetrics } from '../../src/evals/survey-benchmark/metrics.js';
 import { SURVEY_BENCHMARK_CASES } from '../../src/evals/survey-benchmark/dataset.js';
 
 describe('survey benchmark scorer', () => {
@@ -97,5 +98,13 @@ Grounded challenges synthesis [7][8].
     expect(scorecard.references.score).toBeGreaterThanOrEqual(70);
     expect(scorecard.qualityGate.score).toBe(82);
     expect(aggregate).toBeGreaterThanOrEqual(70);
+
+    // SurGE-style metrics should be computable from the same result
+    const surgeMetrics = computeSurgeMetrics(
+      result.formatted_output,
+      benchmarkCase.requiredSections
+    );
+    expect(surgeMetrics.structuralSimilarity).toBeGreaterThan(0.5);
+    expect(surgeMetrics.composite).toBeGreaterThan(0);
   });
 });

@@ -17,6 +17,7 @@ import {
   aggregateSurveyBenchmarkScore,
   scoreSurveyBenchmarkCase
 } from './scorer.js';
+import { computeSurgeMetrics } from './metrics.js';
 import type {
   SurveyBenchmarkCase,
   SurveyBenchmarkRunSummary,
@@ -146,12 +147,13 @@ function buildSummaryMarkdown(summary: SurveyBenchmarkRunSummary): string {
   lines.push(`- Passed (>=70): ${summary.passedCount}`);
   lines.push(`- Average Score: ${summary.averageScore}`);
   lines.push('');
-  lines.push('| Case | Score | Papers | References | Claim Alignments | PDF |');
-  lines.push('| --- | ---: | ---: | ---: | ---: | --- |');
+  lines.push('| Case | Score | Papers | References | Claim Alignments | PDF | SurGE Composite |');
+  lines.push('| --- | ---: | ---: | ---: | ---: | --- | ---: |');
 
   for (const result of summary.results) {
+    const surgeComposite = result.surgeMetrics ? (result.surgeMetrics.composite * 100).toFixed(1) : 'N/A';
     lines.push(
-      `| ${result.benchmarkCase.id} | ${result.aggregateScore} | ${result.summary.paperCount} | ${result.summary.referenceCount} | ${result.summary.claimAlignmentCount} | ${result.summary.pdfGenerated ? 'yes' : 'no'} |`
+      `| ${result.benchmarkCase.id} | ${result.aggregateScore} | ${result.summary.paperCount} | ${result.summary.referenceCount} | ${result.summary.claimAlignmentCount} | ${result.summary.pdfGenerated ? 'yes' : 'no'} | ${surgeComposite} |`
     );
   }
 
@@ -169,6 +171,12 @@ function buildSummaryMarkdown(summary: SurveyBenchmarkRunSummary): string {
     lines.push(`- References: ${result.scorecard.references.score}`);
     lines.push(`- PDF: ${result.scorecard.pdf.score}`);
     lines.push(`- Quality Gate: ${result.scorecard.qualityGate.score}`);
+    if (result.surgeMetrics) {
+      lines.push(`- SurGE Composite: ${(result.surgeMetrics.composite * 100).toFixed(1)}`);
+      lines.push(`- Citation Recall: ${(result.surgeMetrics.citationRecall * 100).toFixed(1)}%`);
+      lines.push(`- Structural Similarity: ${(result.surgeMetrics.structuralSimilarity * 100).toFixed(1)}%`);
+      lines.push(`- Vocabulary Diversity: ${(result.surgeMetrics.vocabularyDiversity * 100).toFixed(1)}%`);
+    }
     if (result.error) {
       lines.push(`- Error: ${result.error}`);
     }
@@ -228,6 +236,8 @@ async function runSingleBenchmarkCase(args: {
 
     const scorecard = scoreSurveyBenchmarkCase(benchmarkCase, result, { pdfPath });
     const aggregateScore = aggregateSurveyBenchmarkScore(scorecard);
+    const markdown = String(result.formatted_output || result.summary || '');
+    const surgeMetrics = computeSurgeMetrics(markdown, benchmarkCase.requiredSections);
     const llmQa = await qualityManager.evaluateTask(
       `Evaluate the quality of a survey on ${benchmarkCase.topic}`,
       String(result.formatted_output || result.summary || ''),
@@ -246,6 +256,7 @@ async function runSingleBenchmarkCase(args: {
       durationMs: Date.now() - startedMs,
       aggregateScore,
       scorecard,
+      surgeMetrics,
       outputPaths: {
         markdownPath,
         jsonPath,

@@ -753,12 +753,19 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
                   : '';
 
           if (initialContent.trim()) {
+              const paperCount = Array.isArray(result.papers) ? result.papers.length : 0;
+              const sectionCount = Array.isArray(result.sections) ? result.sections.length : 0;
+              const qualityScore = result.quality_report?.overallScore ?? null;
+
               log('[AutoResearch] Initial survey draft ready.', {
-                  papers: Array.isArray(result.papers) ? result.papers.length : 0,
-                  sections: Array.isArray(result.sections) ? result.sections.length : 0,
-                  quality: result.quality_report?.overallScore ?? null
+                  papers: paperCount,
+                  sections: sectionCount,
+                  quality: qualityScore
               });
-              return initialContent;
+
+              // Append quality report card to the survey markdown so it's visible in the UI
+              const qualityCard = formatQualityCard(result, paperCount, sectionCount);
+              return qualityCard ? `${initialContent}\n\n${qualityCard}` : initialContent;
           }
 
           throw new Error('Survey skill returned empty content.');
@@ -1233,4 +1240,65 @@ NO_SEARCH
       }
       return { shouldSearch: false, topic: '' };
   }
+}
+
+/** Build a markdown quality report card from the survey skill result */
+function formatQualityCard(result: any, paperCount: number, sectionCount: number): string {
+    const qr = result.quality_report;
+    if (!qr || typeof qr.overallScore !== 'number') return '';
+
+    const sections = Array.isArray(result.sections) ? result.sections : [];
+    const claimCount = sections.reduce((sum: number, s: any) =>
+        sum + (Array.isArray(s.claimAlignments) ? s.claimAlignments.length : 0), 0);
+
+    const markdown = String(result.formatted_output || result.summary || '');
+    const citationMatches = markdown.match(/\[(\d+)\]/g);
+    const uniqueCitations = new Set(citationMatches?.map((m: string) => m.replace(/\[|\]/g, '')) || []);
+
+    const consistency = result.final_survey?.citationConsistency;
+    const ghostCount = consistency?.ghostCitations?.length ?? '?';
+    const orphanCount = consistency?.orphanReferences?.length ?? '?';
+    const isConsistent = consistency?.isConsistent;
+
+    const lines: string[] = [
+        '## Quality Report',
+        '',
+        `| Metric | Value |`,
+        `| --- | --- |`,
+        `| Overall Score | **${qr.overallScore}/100** |`,
+        `| Sections | ${sectionCount} |`,
+        `| Papers Retrieved | ${paperCount} |`,
+        `| Unique Citations | ${uniqueCitations.size} |`,
+        `| Claim Alignments | ${claimCount} |`,
+        `| Ghost Citations | ${ghostCount} |`,
+        `| Orphan References | ${orphanCount} |`,
+        `| Citation Consistent | ${isConsistent === true ? 'Yes' : isConsistent === false ? 'No' : '?'} |`,
+    ];
+
+    // Per-section review scores
+    if (Array.isArray(qr.sectionReviews) && qr.sectionReviews.length > 0) {
+        lines.push('', '### Section Scores', '');
+        lines.push('| Section | Score | Rewritten |');
+        lines.push('| --- | ---: | --- |');
+        for (const review of qr.sectionReviews) {
+            const title = sections.find((s: any) => s.sectionId === review.sectionId)?.title || review.sectionId;
+            lines.push(`| ${title} | ${review.score} | ${review.rewriteApplied ? 'Yes' : 'No'} |`);
+        }
+    }
+
+    // Strengths & issues
+    if (Array.isArray(qr.strengths) && qr.strengths.length > 0) {
+        lines.push('', '### Strengths', '');
+        for (const s of qr.strengths) lines.push(`- ${s}`);
+    }
+    if (Array.isArray(qr.issues) && qr.issues.length > 0) {
+        lines.push('', '### Issues', '');
+        for (const i of qr.issues) lines.push(`- ${i}`);
+    }
+    if (Array.isArray(qr.suggestions) && qr.suggestions.length > 0) {
+        lines.push('', '### Suggestions', '');
+        for (const s of qr.suggestions) lines.push(`- ${s}`);
+    }
+
+    return lines.join('\n');
 }

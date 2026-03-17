@@ -94,19 +94,27 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
       overallScore: reviewed.qualityReport.overallScore
     });
 
+    // Use referencedPapers (only papers actually cited in body) for scoring,
+    // but keep all retrieved papers in retrieval_metadata for analysis
+    const referencedPapers = finalSurvey.referencedPapers;
+
     return {
       success: true,
       topic,
       depth,
       summary: finalSurvey.markdown,
-      papers,
-      sources: papers,
+      papers: referencedPapers,
+      sources: referencedPapers,
       outline,
       sections: reviewed.sections,
       quality_report: reviewed.qualityReport,
       formatted_output: finalSurvey.markdown,
       final_survey: finalSurvey,
-      retrieval_metadata: retrieval.searchMetadata
+      retrieval_metadata: {
+        ...retrieval.searchMetadata,
+        totalRetrieved: papers.length,
+        referencedCount: referencedPapers.length
+      }
     };
   }
 

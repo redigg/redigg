@@ -5,6 +5,9 @@ import { assessPaperAnchors, dedupePapers, filterPapersByAnchors, scorePaperForS
 interface RetrieveOptions {
   sectionLimit?: number;
   perQueryLimit?: number;
+  enableSnowball?: boolean;
+  snowballMaxSeeds?: number;
+  snowballPerPaper?: number;
 }
 
 /** Minimum anchor-tier quality for a batch to count as useful */
@@ -70,10 +73,50 @@ export async function retrieveSurveyPapers(
     papersBySection[section.id] = ranked.length > 0 ? ranked : seedPapers.slice(0, sectionLimit);
   }
 
-  const papers = dedupePapers([
+  let papers = dedupePapers([
     ...seedPapers,
     ...Object.values(papersBySection).flat()
   ]);
+
+  // Snowball expansion: follow citation graph from retrieved papers
+  if (options.enableSnowball !== false) {
+    const snowballPapers = await expandViaCitationGraph(
+      scholar,
+      papers,
+      outline,
+      {
+        maxSeeds: options.snowballMaxSeeds ?? 5,
+        perPaperLimit: options.snowballPerPaper ?? 3
+      }
+    );
+
+    if (snowballPapers.length > 0) {
+      // Assign snowball papers to sections based on relevance
+      for (const section of outline.sections) {
+        const current = papersBySection[section.id] || [];
+        const currentCount = current.length;
+        if (currentCount >= sectionLimit) continue;
+
+        const ranked = rankPapersForSection(snowballPapers, section, outline.topicProfile);
+        const filtered = filterPapersByAnchors(
+          ranked,
+          outline.topicProfile,
+          section,
+          sectionLimit - currentCount
+        );
+        const toAdd = filtered.slice(0, sectionLimit - currentCount);
+        if (toAdd.length > 0) {
+          papersBySection[section.id] = dedupePapers([...current, ...toAdd]);
+        }
+      }
+
+      papers = dedupePapers([
+        ...papers,
+        ...snowballPapers
+      ]);
+      totalHits += snowballPapers.length;
+    }
+  }
 
   return {
     papers,
@@ -84,6 +127,35 @@ export async function retrieveSurveyPapers(
       deduplicatedCount: papers.length
     }
   };
+}
+
+/**
+ * One round of citation graph expansion (snowball retrieval).
+ * Picks top-cited seed papers, fetches their references & citers,
+ * filters by topic relevance.
+ */
+async function expandViaCitationGraph(
+  scholar: ScholarTool,
+  seedPapers: Paper[],
+  outline: SurveyOutline,
+  options: { maxSeeds: number; perPaperLimit: number }
+): Promise<Paper[]> {
+  try {
+    const expanded = await scholar.expandCitationGraph(seedPapers, options);
+
+    if (!outline.topicProfile || expanded.length === 0) return expanded;
+
+    // Filter: only keep papers with at least weak relevance to any section
+    return expanded.filter((paper) => {
+      for (const section of outline.sections) {
+        const assessment = assessPaperAnchors(paper, outline.topicProfile!, section);
+        if (assessment.tier !== 'off-topic') return true;
+      }
+      return false;
+    });
+  } catch {
+    return [];
+  }
 }
 
 /** Check if we already have enough strong/weak papers to skip further queries */

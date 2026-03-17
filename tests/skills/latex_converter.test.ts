@@ -1,0 +1,161 @@
+import { describe, it, expect } from 'vitest';
+import { convertToLatex } from '../../skills/research/academic-survey-self-improve/latex-converter.js';
+import type { FinalSurvey, SurveyOutline } from '../../skills/research/academic-survey-self-improve/types.js';
+import type { Paper } from '../../src/skills/lib/ScholarTool.js';
+
+function makeOutline(): SurveyOutline {
+  return {
+    title: 'A Survey of AI Agents for Scientific Research',
+    abstractDraft: 'This survey examines AI agents designed for scientific research tasks.',
+    taxonomy: ['Task-based agents', 'Tool-using agents', 'Multi-agent systems'],
+    sections: [
+      {
+        id: 'background',
+        title: 'Background and Evolution',
+        description: 'Historical context',
+        searchQueries: ['AI agents history'],
+        targetWordCount: 300
+      },
+      {
+        id: 'methods',
+        title: 'Methods and Architectures',
+        description: 'Technical approaches',
+        searchQueries: ['AI agent architectures'],
+        targetWordCount: 400
+      }
+    ]
+  };
+}
+
+function makePapers(): Paper[] {
+  return [
+    {
+      title: 'ChemCrow: Augmenting LLMs with Chemistry Tools',
+      authors: ['Bran, A.', 'Cox, S.'],
+      year: 2024,
+      url: 'https://arxiv.org/abs/2304.05376',
+      summary: 'An LLM agent for chemistry.',
+      journal: 'Nature Machine Intelligence',
+      source: 'arxiv'
+    },
+    {
+      title: 'SciAgent: A Multi-Agent Framework',
+      authors: ['Zhang, Y.'],
+      year: 2025,
+      url: 'https://arxiv.org/abs/2501.12345',
+      summary: 'Multi-agent scientific research.',
+      journal: 'arXiv preprint',
+      source: 'arxiv'
+    }
+  ];
+}
+
+function makeFinalSurvey(): FinalSurvey {
+  return {
+    title: 'A Survey of AI Agents for Scientific Research',
+    markdown: '# A Survey of AI Agents for Scientific Research\n\n## Background\n\nSome text [1].\n\n## Methods\n\nMore text [2].',
+    sections: [
+      {
+        sectionId: 'background',
+        title: 'Background and Evolution',
+        templateKind: 'background',
+        content: '## Background and Evolution\n\nAI agents have evolved significantly [1]. Recent work by Bran et al. demonstrates chemistry-specific tool use [1].',
+        paperCount: 1,
+        citations: [1],
+        evidenceCards: [],
+        claimAlignments: []
+      },
+      {
+        sectionId: 'methods',
+        title: 'Methods and Architectures',
+        templateKind: 'methods',
+        content: '## Methods and Architectures\n\nMulti-agent frameworks like SciAgent [2] enable collaborative research workflows. The use of **specialized tools** is a key pattern.',
+        paperCount: 1,
+        citations: [2],
+        evidenceCards: [],
+        claimAlignments: []
+      }
+    ],
+    wordCount: 200,
+    citationCount: 2,
+    citationConsistency: {
+      ghostCitations: [],
+      orphanReferences: [],
+      isConsistent: true
+    }
+  };
+}
+
+describe('LaTeX Converter', () => {
+  it('generates valid LaTeX document structure', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('\\documentclass');
+    expect(latex).toContain('\\begin{document}');
+    expect(latex).toContain('\\end{document}');
+    expect(latex).toContain('\\maketitle');
+    expect(latex).toContain('\\begin{abstract}');
+    expect(latex).toContain('\\end{abstract}');
+  });
+
+  it('includes title and abstract', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('A Survey of AI Agents for Scientific Research');
+    expect(latex).toContain('This survey examines AI agents');
+  });
+
+  it('includes taxonomy section', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('\\section{Taxonomy}');
+    expect(latex).toContain('Task-based agents');
+    expect(latex).toContain('\\begin{itemize}');
+  });
+
+  it('includes body sections', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('\\section{Background and Evolution}');
+    expect(latex).toContain('\\section{Methods and Architectures}');
+  });
+
+  it('preserves citation markers', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('[1]');
+    expect(latex).toContain('[2]');
+  });
+
+  it('converts bold markdown to LaTeX textbf', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('\\textbf{specialized tools}');
+  });
+
+  it('includes bibliography with papers', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('\\begin{thebibliography}');
+    expect(latex).toContain('\\bibitem{ref1}');
+    expect(latex).toContain('\\bibitem{ref2}');
+    expect(latex).toContain('ChemCrow');
+    expect(latex).toContain('SciAgent');
+  });
+
+  it('includes conclusion section', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('\\section{Conclusion}');
+  });
+
+  it('escapes special LaTeX characters', () => {
+    const outline = makeOutline();
+    outline.abstractDraft = 'Testing 100% accuracy & special chars like $10 cost.';
+    const latex = convertToLatex(outline, makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('100\\%');
+    expect(latex).toContain('\\&');
+    expect(latex).toContain('\\$10');
+  });
+});

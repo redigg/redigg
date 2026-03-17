@@ -283,6 +283,185 @@ export class ScholarTool {
     });
   }
 
+  /**
+   * Snowball expansion: given a set of seed papers, fetch their references and
+   * citers from Semantic Scholar and OpenAlex, returning new papers not already
+   * in the seed set.
+   */
+  async expandCitationGraph(
+    seedPapers: Paper[],
+    options: { maxSeeds?: number; perPaperLimit?: number } = {}
+  ): Promise<Paper[]> {
+    const maxSeeds = options.maxSeeds ?? 5;
+    const perPaperLimit = options.perPaperLimit ?? 3;
+    const existingKeys = new Set(seedPapers.map((p) => this.buildPaperKey(p)));
+
+    // Pick the most-cited seeds to expand from
+    const sortedSeeds = [...seedPapers]
+      .sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0))
+      .slice(0, maxSeeds);
+
+    const allNewPapers: Paper[] = [];
+
+    for (const seed of sortedSeeds) {
+      if (this.shouldDelay) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      const expanded = await this.fetchCitationNeighbors(seed, perPaperLimit);
+      for (const paper of expanded) {
+        const key = this.buildPaperKey(paper);
+        if (!existingKeys.has(key)) {
+          existingKeys.add(key);
+          allNewPapers.push(paper);
+        }
+      }
+    }
+
+    const deduped = this.dedupeAndMerge(allNewPapers);
+    console.log(
+      `[ScholarTool] Citation graph expanded ${sortedSeeds.length} seeds → ${deduped.length} new papers`
+    );
+    return deduped;
+  }
+
+  /**
+   * Fetch references + citations for a single paper via Semantic Scholar
+   * (preferred) or OpenAlex.
+   */
+  private async fetchCitationNeighbors(paper: Paper, limit: number): Promise<Paper[]> {
+    const results: Paper[] = [];
+
+    // Try Semantic Scholar first (richer citation graph)
+    const s2Id = this.resolveSemanticScholarId(paper);
+    if (s2Id) {
+      const [refs, citers] = await Promise.allSettled([
+        this.fetchS2References(s2Id, limit),
+        this.fetchS2Citations(s2Id, limit)
+      ]);
+      if (refs.status === 'fulfilled') results.push(...refs.value);
+      if (citers.status === 'fulfilled') results.push(...citers.value);
+    }
+
+    // Also try OpenAlex if we have a DOI
+    if (paper.doi) {
+      try {
+        const oaRefs = await this.fetchOpenAlexCitations(paper.doi, limit);
+        results.push(...oaRefs);
+      } catch { /* non-critical */ }
+    }
+
+    return results;
+  }
+
+  private resolveSemanticScholarId(paper: Paper): string | undefined {
+    if (paper.externalIds?.ArXiv) return `ArXiv:${paper.externalIds.ArXiv}`;
+    if (paper.doi) return `DOI:${paper.doi}`;
+    const arxivId = this.extractArxivId(paper.url || paper.pdfUrl);
+    if (arxivId) return `ArXiv:${arxivId}`;
+    return undefined;
+  }
+
+  private async fetchS2References(paperId: string, limit: number): Promise<Paper[]> {
+    const fields = 'title,abstract,year,authors,url,externalIds,citationCount,publicationVenue';
+    const params = new URLSearchParams({ fields, limit: String(limit) });
+    const headers: Record<string, string> = { 'User-Agent': 'redigg-scholar-tool/0.1' };
+    if (this.semanticScholarApiKey) headers['x-api-key'] = this.semanticScholarApiKey;
+
+    try {
+      const response = await this.fetchWithRetry(
+        `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(paperId)}/references?${params}`,
+        { headers },
+        1
+      );
+      if (!response.ok) return [];
+      const payload = await response.json();
+      const data = Array.isArray(payload.data) ? payload.data : [];
+      return data
+        .filter((item: any) => item.citedPaper?.title)
+        .map((item: any) => this.parseS2Paper(item.citedPaper));
+    } catch { return []; }
+  }
+
+  private async fetchS2Citations(paperId: string, limit: number): Promise<Paper[]> {
+    const fields = 'title,abstract,year,authors,url,externalIds,citationCount,publicationVenue';
+    const params = new URLSearchParams({ fields, limit: String(limit) });
+    const headers: Record<string, string> = { 'User-Agent': 'redigg-scholar-tool/0.1' };
+    if (this.semanticScholarApiKey) headers['x-api-key'] = this.semanticScholarApiKey;
+
+    try {
+      const response = await this.fetchWithRetry(
+        `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(paperId)}/citations?${params}`,
+        { headers },
+        1
+      );
+      if (!response.ok) return [];
+      const payload = await response.json();
+      const data = Array.isArray(payload.data) ? payload.data : [];
+      return data
+        .filter((item: any) => item.citingPaper?.title)
+        .map((item: any) => this.parseS2Paper(item.citingPaper));
+    } catch { return []; }
+  }
+
+  private parseS2Paper(item: any): Paper {
+    const doi = this.normalizeDoi(item.externalIds?.DOI);
+    const arxivId = item.externalIds?.ArXiv;
+    const externalIds: Record<string, string> = {};
+    if (doi) externalIds.DOI = doi;
+    if (arxivId) externalIds.ArXiv = arxivId;
+
+    return {
+      title: typeof item.title === 'string' ? item.title.trim() : 'Untitled',
+      authors: Array.isArray(item.authors) ? item.authors.map((a: any) => a.name).filter(Boolean) : [],
+      year: Number(item.year) || 0,
+      summary: typeof item.abstract === 'string' && item.abstract.trim() ? item.abstract.trim() : 'No summary',
+      url: item.url || undefined,
+      journal: item.publicationVenue?.name || 'Unknown venue',
+      source: 'semanticscholar',
+      citationCount: Number(item.citationCount) || 0,
+      doi,
+      externalIds: Object.keys(externalIds).length > 0 ? externalIds : undefined
+    };
+  }
+
+  private async fetchOpenAlexCitations(doi: string, limit: number): Promise<Paper[]> {
+    const params = new URLSearchParams({
+      filter: `cites:https://doi.org/${doi}`,
+      'per-page': String(limit),
+      select: 'id,display_name,publication_year,authorships,abstract_inverted_index,primary_location,cited_by_count,doi'
+    });
+    if (this.openAlexEmail) params.set('mailto', this.openAlexEmail);
+
+    try {
+      const response = await this.fetchWithRetry(
+        `https://api.openalex.org/works?${params}`,
+        { headers: { 'User-Agent': 'redigg-scholar-tool/0.1' } },
+        1
+      );
+      if (!response.ok) return [];
+      const payload = await response.json();
+      const results = Array.isArray(payload.results) ? payload.results : [];
+      return results.map((item: any) => {
+        const paperDoi = this.normalizeDoi(item.doi);
+        return {
+          title: typeof item.display_name === 'string' ? item.display_name.trim() : 'Untitled',
+          authors: Array.isArray(item.authorships)
+            ? item.authorships.map((a: any) => a?.author?.display_name).filter(Boolean)
+            : [],
+          year: Number(item.publication_year) || 0,
+          summary: this.reconstructOpenAlexAbstract(item.abstract_inverted_index) || 'No summary',
+          url: item.primary_location?.landing_page_url || item.id,
+          journal: item.primary_location?.source?.display_name || 'OpenAlex',
+          source: 'openalex',
+          citationCount: Number(item.cited_by_count) || 0,
+          doi: paperDoi,
+          externalIds: paperDoi ? { DOI: paperDoi } : undefined
+        } satisfies Paper;
+      });
+    } catch { return []; }
+  }
+
   private reconstructOpenAlexAbstract(index?: Record<string, number[]>): string {
     if (!index || typeof index !== 'object') {
       return '';

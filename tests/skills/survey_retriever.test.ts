@@ -43,6 +43,9 @@ describe('retrieveSurveyPapers', () => {
     const scholar = {
       async searchPapers() {
         return candidatePapers;
+      },
+      async expandCitationGraph() {
+        return [];
       }
     } as any;
 
@@ -93,6 +96,85 @@ describe('retrieveSurveyPapers', () => {
     expect(sectionTitles).not.toContain('Benchmarking Scientific Research Workflows in University Labs');
   });
 
+  it('should expand papers via citation graph snowball retrieval', async () => {
+    const seedPapers: Paper[] = [
+      {
+        title: 'The AI Scientist: Autonomous Scientific Discovery',
+        authors: ['A'],
+        year: 2024,
+        summary: 'An AI scientist system for autonomous scientific discovery and research.',
+        citationCount: 120,
+        source: 'openalex',
+        externalIds: { ArXiv: '2304.05376' }
+      }
+    ];
+
+    const snowballPapers: Paper[] = [
+      {
+        title: 'ChemCrow: Augmenting LLMs with Chemistry Tools for Scientific Research',
+        authors: ['B'],
+        year: 2024,
+        summary: 'An LLM agent augmented with chemistry-specific tools for autonomous research.',
+        citationCount: 80,
+        source: 'semanticscholar'
+      },
+      {
+        title: 'DORA: A Multi-Agent Framework for Scientific Discovery',
+        authors: ['C'],
+        year: 2025,
+        summary: 'A multi-agent scientific discovery framework using AI agents.',
+        citationCount: 30,
+        source: 'semanticscholar'
+      }
+    ];
+
+    const scholar = {
+      async searchPapers() {
+        return seedPapers;
+      },
+      async expandCitationGraph() {
+        return snowballPapers;
+      }
+    } as any;
+
+    const outline: SurveyOutline = {
+      title: 'A Survey of AI Agent for Scientific Research',
+      abstractDraft: 'Draft',
+      taxonomy: ['Systems'],
+      topicProfile: {
+        originalTopic: 'AI Agent for Scientific Research',
+        normalizedTopic: 'ai agent for scientific research',
+        anchorTerms: ['ai', 'agent', 'scientific', 'research'],
+        aliasPhrases: ['AI scientist'],
+        intentFacets: ['system'],
+        preferredPaperTypes: ['system'],
+        sectionFacets: {}
+      },
+      sections: [
+        {
+          id: 'methods',
+          title: 'Methods and Architectures',
+          description: 'Technical approaches for AI agents in science.',
+          searchQueries: ['AI Agent scientific research methods'],
+          targetWordCount: 200
+        }
+      ]
+    };
+
+    const result = await retrieveSurveyPapers(
+      scholar,
+      'AI Agent for Scientific Research',
+      outline,
+      seedPapers,
+      { sectionLimit: 4, perQueryLimit: 4 }
+    );
+
+    // Snowball papers should be added to the overall pool
+    expect(result.papers.length).toBeGreaterThan(seedPapers.length);
+    const titles = result.papers.map((p) => p.title);
+    expect(titles).toContain('ChemCrow: Augmenting LLMs with Chemistry Tools for Scientific Research');
+  });
+
   it('should rerank benchmark and system papers according to section intent', async () => {
     const candidatePapers: Paper[] = [
       {
@@ -132,6 +214,9 @@ describe('retrieveSurveyPapers', () => {
     const scholar = {
       async searchPapers() {
         return candidatePapers;
+      },
+      async expandCitationGraph() {
+        return [];
       }
     } as any;
 

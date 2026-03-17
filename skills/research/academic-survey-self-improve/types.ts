@@ -44,6 +44,7 @@ export interface RetrievalResult {
     queryCount: number;
     totalHits: number;
     deduplicatedCount: number;
+    snowballExpanded?: number;
   };
 }
 
@@ -96,7 +97,9 @@ export interface SurveyQualityReport {
 export interface FinalSurvey {
   title: string;
   markdown: string;
+  latex?: string;
   sections: SectionDraft[];
+  referencedPapers: Paper[];
   wordCount: number;
   citationCount: number;
   citationConsistency: {

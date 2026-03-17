@@ -1,6 +1,7 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { FinalSurvey, SectionDraft, SurveyOutline, SurveyQualityReport } from './types.js';
 import { checkCitationConsistency, countWords, stripGhostCitations } from './utils.js';
+import { convertToLatex } from './latex-converter.js';
 
 /**
  * Clean LLM-generated section content:
@@ -154,10 +155,33 @@ export function assembleSurvey(
   // Run bidirectional consistency check on assembled output
   const consistency = checkCitationConsistency(markdown, referenceCount);
 
+  // Generate LaTeX version
+  let latex: string | undefined;
+  try {
+    const surveyForLatex: FinalSurvey = {
+      title: outline.title,
+      markdown,
+      sections: cleanedSections,
+      referencedPapers: finalPapers,
+      wordCount: countWords(markdown),
+      citationCount: referenceCount,
+      citationConsistency: {
+        ghostCitations: consistency.ghostCitations,
+        orphanReferences: consistency.orphanReferences,
+        isConsistent: consistency.isConsistent
+      }
+    };
+    latex = convertToLatex(outline, surveyForLatex, finalPapers);
+  } catch {
+    // LaTeX generation is non-critical; continue without it
+  }
+
   return {
     title: outline.title,
     markdown,
+    latex,
     sections: cleanedSections,
+    referencedPapers: finalPapers,
     wordCount: countWords(markdown),
     citationCount: referenceCount,
     citationConsistency: {

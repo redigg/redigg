@@ -106,6 +106,16 @@ export function writeSurgeFormat(result: SkillResult, outputDir: string): string
     'utf8'
   );
 
+  // survey.tex — LaTeX source (if available from the skill output)
+  const latexSource = result.final_survey?.latex;
+  if (typeof latexSource === 'string' && latexSource.length > 0) {
+    fs.writeFileSync(
+      path.join(outputDir, 'survey.tex'),
+      latexSource,
+      'utf8'
+    );
+  }
+
   return outputDir;
 }
 

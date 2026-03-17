@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
 import { v4 as uuidv4 } from 'uuid';
@@ -101,6 +102,47 @@ function parseArgs(argv: string[]): CliOptions {
 
 function ensureDirectory(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
+}
+
+/**
+ * Compile a .tex file to PDF using tectonic (or pdflatex as fallback).
+ * Returns the path to the generated PDF, or null if compilation fails.
+ */
+function compileLatexToPdf(texPath: string, outputDir: string): string | null {
+  const pdfOutputPath = path.join(outputDir, 'survey.pdf');
+
+  // Try tectonic first (lightweight, auto-downloads packages)
+  try {
+    execSync(`tectonic --outdir "${outputDir}" "${texPath}"`, {
+      timeout: 120_000,
+      stdio: 'pipe'
+    });
+    if (fs.existsSync(pdfOutputPath) && fs.statSync(pdfOutputPath).size > 1024) {
+      return pdfOutputPath;
+    }
+  } catch {
+    // tectonic not available or failed
+  }
+
+  // Try pdflatex as fallback
+  try {
+    execSync(`pdflatex -interaction=nonstopmode -output-directory="${outputDir}" "${texPath}"`, {
+      timeout: 120_000,
+      stdio: 'pipe'
+    });
+    // Run twice for references
+    execSync(`pdflatex -interaction=nonstopmode -output-directory="${outputDir}" "${texPath}"`, {
+      timeout: 120_000,
+      stdio: 'pipe'
+    });
+    if (fs.existsSync(pdfOutputPath) && fs.statSync(pdfOutputPath).size > 1024) {
+      return pdfOutputPath;
+    }
+  } catch {
+    // pdflatex not available or failed
+  }
+
+  return null;
 }
 
 function createSkillContext(llm: LLMClient, memory: MemoryManager, workspace: string, userId: string): SkillContext {
@@ -221,6 +263,13 @@ async function runSingleBenchmarkCase(args: {
 
     fs.writeFileSync(markdownPath, String(result.formatted_output || result.summary || ''), 'utf8');
 
+    // Write LaTeX source if available
+    const latexSource = result.final_survey?.latex;
+    const texPath = path.join(caseOutputDir, 'survey.tex');
+    if (latexSource) {
+      fs.writeFileSync(texPath, latexSource, 'utf8');
+    }
+
     // Write SurGE and SurveyBench format outputs for external evaluation
     try {
       writeSurgeFormat(result, path.join(caseOutputDir, 'surge'));
@@ -230,16 +279,32 @@ async function runSingleBenchmarkCase(args: {
     }
 
     if (!skipPdf && result.success) {
-      const pdfResult = await pdfSkill.execute(context, {
-        title: result.outline?.title || `A Survey of ${benchmarkCase.topic}`,
-        content: result.formatted_output || result.summary,
-        author: 'Redigg Benchmark',
-        sessionId: `benchmark-${runId}-${benchmarkCase.id}`
-      });
-      pdfPath = typeof pdfResult.file_path === 'string' ? pdfResult.file_path : undefined;
-      if (pdfPath && fs.existsSync(pdfPath)) {
-        fs.copyFileSync(pdfPath, path.join(caseOutputDir, 'survey.pdf'));
-        pdfPath = path.join(caseOutputDir, 'survey.pdf');
+      // Try LaTeX → PDF compilation first (tectonic), fall back to PDFKit
+      let latexPdfGenerated = false;
+      if (latexSource) {
+        try {
+          const compiledPdf = compileLatexToPdf(texPath, caseOutputDir);
+          if (compiledPdf) {
+            pdfPath = compiledPdf;
+            latexPdfGenerated = true;
+          }
+        } catch (latexError) {
+          logger.warn('LaTeX compilation failed, falling back to PDFKit', latexError);
+        }
+      }
+
+      if (!latexPdfGenerated) {
+        const pdfResult = await pdfSkill.execute(context, {
+          title: result.outline?.title || `A Survey of ${benchmarkCase.topic}`,
+          content: result.formatted_output || result.summary,
+          author: 'Redigg Benchmark',
+          sessionId: `benchmark-${runId}-${benchmarkCase.id}`
+        });
+        pdfPath = typeof pdfResult.file_path === 'string' ? pdfResult.file_path : undefined;
+        if (pdfPath && fs.existsSync(pdfPath)) {
+          fs.copyFileSync(pdfPath, path.join(caseOutputDir, 'survey.pdf'));
+          pdfPath = path.join(caseOutputDir, 'survey.pdf');
+        }
       }
     }
 

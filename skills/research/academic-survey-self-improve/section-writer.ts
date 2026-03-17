@@ -75,6 +75,8 @@ Return ONLY valid JSON:
 Requirements for the markdown:
 - Start with a level-2 heading using the exact section title.
 - Follow the rhetorical goal, required moves, and closing move from the section template above.
+- Write at least ${section.targetWordCount} words. Sections shorter than ${Math.round(section.targetWordCount * 0.8)} words are unacceptable.
+- Write 2-3 substantive paragraphs minimum.
 - Synthesize, do not list papers one by one.
 - Every substantive claim must be supported by the evidence cards above.
 - Use citation markers like [1], [2] when making claims.

@@ -43,25 +43,96 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * Extract all citation numbers used in the body text.
+ */
+function extractUsedCitations(sections: SectionDraft[]): Set<number> {
+  const used = new Set<number>();
+  for (const section of sections) {
+    const matches = section.content.matchAll(/\[(\d+)\]/g);
+    for (const match of matches) {
+      const num = Number(match[1]);
+      if (Number.isFinite(num) && num > 0) used.add(num);
+    }
+  }
+  return used;
+}
+
+/**
+ * Remove orphan references (not cited in body) and renumber all citations
+ * so references are contiguous [1], [2], [3]...
+ */
+function pruneAndRenumber(
+  sections: SectionDraft[],
+  papers: Paper[]
+): { sections: SectionDraft[]; papers: Paper[] } {
+  const used = extractUsedCitations(sections);
+  if (used.size === 0) return { sections, papers };
+
+  // Build old→new mapping (only keep cited papers)
+  const renumberMap = new Map<number, number>();
+  const keptPapers: Paper[] = [];
+  let newIndex = 1;
+  for (let i = 0; i < papers.length; i++) {
+    const oldIndex = i + 1;
+    if (used.has(oldIndex)) {
+      renumberMap.set(oldIndex, newIndex);
+      keptPapers.push(papers[i]);
+      newIndex++;
+    }
+  }
+
+  // If nothing was pruned, skip renumbering
+  if (keptPapers.length === papers.length) return { sections, papers };
+
+  // Renumber citations in section content
+  const renumberedSections = sections.map((section) => ({
+    ...section,
+    content: section.content.replace(/\[(\d+)\]/g, (match, num) => {
+      const oldNum = Number(num);
+      const newNum = renumberMap.get(oldNum);
+      return newNum ? `[${newNum}]` : match;
+    })
+  }));
+
+  return { sections: renumberedSections, papers: keptPapers };
+}
+
+/**
+ * Generate a brief conclusion paragraph from the section titles and outline.
+ */
+function generateConclusion(outline: SurveyOutline, sectionTitles: string[]): string {
+  const sectionList = sectionTitles.map((t) => t.replace(/^##\s*/, '')).join(', ');
+  return `## Conclusion\n\nThis survey has examined ${outline.title.replace(/^A Survey of /i, '').toLowerCase()} through the lenses of ${sectionList.toLowerCase()}. The field continues to advance rapidly, with emerging systems demonstrating increasing autonomy in scientific workflows. Key open challenges include improving reliability, ensuring ethical deployment, and developing comprehensive evaluation frameworks. Future work should prioritize bridging the gap between narrow task automation and truly open-ended scientific discovery.`;
+}
+
 export function assembleSurvey(
   outline: SurveyOutline,
   sections: SectionDraft[],
   papers: Paper[],
   qualityReport: SurveyQualityReport
 ): FinalSurvey {
-  const referenceCount = papers.length;
-  const references = papers
-    .map((paper, index) => `${index + 1}. ${paper.title}. ${paper.journal || 'Unknown venue'}, ${paper.year}. ${paper.url || ''}`.trim())
-    .join('\n');
-
   // Strip ghost citations and clean LLM artifacts from each section
-  const cleanedSections = sections.map((section) => ({
+  let cleanedSections = sections.map((section) => ({
     ...section,
     content: cleanSectionContent(
-      stripGhostCitations(section.content, referenceCount),
+      stripGhostCitations(section.content, papers.length),
       section.title
     )
   }));
+
+  // Prune orphan references and renumber citations
+  const pruned = pruneAndRenumber(cleanedSections, papers);
+  cleanedSections = pruned.sections;
+  const finalPapers = pruned.papers;
+  const referenceCount = finalPapers.length;
+
+  const references = finalPapers
+    .map((paper, index) => `${index + 1}. ${paper.title}. ${paper.journal || 'Unknown venue'}, ${paper.year}. ${paper.url || ''}`.trim())
+    .join('\n');
+
+  const sectionTitles = cleanedSections.map((s) => s.title);
+  const conclusion = generateConclusion(outline, sectionTitles);
 
   const markdownParts = [
     `# ${outline.title}`,
@@ -70,6 +141,7 @@ export function assembleSurvey(
     '## Taxonomy',
     ...outline.taxonomy.map((item) => `- ${item}`),
     ...cleanedSections.map((section) => section.content),
+    conclusion,
     '## References',
     references
   ].filter(Boolean);

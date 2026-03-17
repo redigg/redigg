@@ -9,9 +9,21 @@ const DEPTH_SECTION_COUNT: Record<string, number> = {
   deep: 6
 };
 
+const DEPTH_WORD_COUNT: Record<string, number> = {
+  brief: 220,
+  standard: 500,
+  deep: 900
+};
+
+const DEPTH_METHODS_WORD_COUNT: Record<string, number> = {
+  brief: 260,
+  standard: 600,
+  deep: 1000
+};
+
 const DEFAULT_INTENT_FACETS = ['survey', 'benchmark', 'system', 'workflow', 'evaluation'];
 const DEFAULT_PAPER_TYPES = ['survey', 'review', 'benchmark', 'system', 'framework', 'workflow'];
-const MAX_SECTION_QUERIES = 6;
+const MAX_SECTION_QUERIES = 10;
 
 export async function createSurveyOutline(
   context: SkillContext,
@@ -50,7 +62,7 @@ Return ONLY valid JSON with the following schema:
       "description": "string",
       "focusFacets": ["string"],
       "searchQueries": ["string", "string"],
-      "targetWordCount": 180
+      "targetWordCount": ${DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard}
     }
   ]
 }
@@ -81,7 +93,7 @@ function createFallbackOutline(topic: string, depth: string, seedPapers: Paper[]
       title: 'Background and Scope',
       description: `Define the scope, terminology, and problem setting for ${topic}.`,
       searchQueries: [topic, `${topic} overview`, `${topic} survey`],
-      targetWordCount: 220,
+      targetWordCount: DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard,
       focusFacets: ['survey', 'review', 'overview']
     },
     {
@@ -89,7 +101,7 @@ function createFallbackOutline(topic: string, depth: string, seedPapers: Paper[]
       title: 'Core Methods',
       description: `Summarize the main methodological families used in ${topic}.`,
       searchQueries: [`${topic} methods`, `${topic} framework`, `${topic} model`],
-      targetWordCount: 260,
+      targetWordCount: DEPTH_METHODS_WORD_COUNT[depth] || DEPTH_METHODS_WORD_COUNT.standard,
       focusFacets: ['methods', 'framework', 'architecture']
     },
     {
@@ -97,7 +109,7 @@ function createFallbackOutline(topic: string, depth: string, seedPapers: Paper[]
       title: 'Evaluation and Benchmarks',
       description: `Compare datasets, metrics, and empirical findings for ${topic}.`,
       searchQueries: [`${topic} benchmark`, `${topic} evaluation`, `${topic} dataset`],
-      targetWordCount: 220,
+      targetWordCount: DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard,
       focusFacets: ['benchmark', 'evaluation', 'dataset']
     },
     {
@@ -105,7 +117,7 @@ function createFallbackOutline(topic: string, depth: string, seedPapers: Paper[]
       title: 'Applications and Systems',
       description: `Summarize representative systems and application settings for ${topic}.`,
       searchQueries: [`${topic} applications`, `${topic} system`, `${topic} deployment`],
-      targetWordCount: 220,
+      targetWordCount: DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard,
       focusFacets: ['system', 'workflow', 'application']
     },
     {
@@ -113,7 +125,7 @@ function createFallbackOutline(topic: string, depth: string, seedPapers: Paper[]
       title: 'Open Challenges and Future Directions',
       description: `Identify limitations, open challenges, and future directions for ${topic}.`,
       searchQueries: [`${topic} limitations`, `${topic} challenges`, `${topic} future directions`],
-      targetWordCount: 220,
+      targetWordCount: DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard,
       focusFacets: ['limitations', 'challenges', 'future directions']
     }
   ];

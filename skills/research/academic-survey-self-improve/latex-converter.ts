@@ -69,6 +69,67 @@ function convertParagraph(text: string): string {
 /**
  * Convert a full markdown section body to LaTeX blocks.
  */
+/**
+ * Check if a line is a Markdown table separator (e.g. |---|---|---|)
+ */
+function isTableSeparator(line: string): boolean {
+  return /^\|[\s:?-]+(\|[\s:?-]+)+\|?\s*$/.test(line.trim());
+}
+
+/**
+ * Check if a line is a Markdown table row (starts with |)
+ */
+function isTableRow(line: string): boolean {
+  return /^\|.+\|/.test(line.trim());
+}
+
+/**
+ * Parse Markdown table cells from a row
+ */
+function parseTableCells(row: string): string[] {
+  return row.trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+/**
+ * Convert a Markdown table (header + separator + body rows) to LaTeX tabular.
+ */
+function convertMarkdownTable(tableLines: string[]): string {
+  if (tableLines.length < 3) return tableLines.map(convertParagraph).join('\n');
+
+  const headerCells = parseTableCells(tableLines[0]);
+  const colCount = headerCells.length;
+  const colSpec = headerCells.map(() => 'l').join(' ');
+
+  const output: string[] = [];
+  output.push('\\begin{table}[h]');
+  output.push('\\centering');
+  output.push(`\\begin{tabular}{${colSpec}}`);
+  output.push('\\toprule');
+
+  // Header row
+  output.push(headerCells.map((cell) => `\\textbf{${convertParagraph(cell)}}`).join(' & ') + ' \\\\');
+  output.push('\\midrule');
+
+  // Body rows (skip separator at index 1)
+  for (let i = 2; i < tableLines.length; i++) {
+    if (!isTableRow(tableLines[i])) continue;
+    const cells = parseTableCells(tableLines[i]);
+    // Pad or truncate to match header column count
+    const normalized = Array.from({ length: colCount }, (_, j) => cells[j] || '');
+    output.push(normalized.map((cell) => convertParagraph(cell)).join(' & ') + ' \\\\');
+  }
+
+  output.push('\\bottomrule');
+  output.push('\\end{tabular}');
+  output.push('\\end{table}');
+
+  return output.join('\n');
+}
+
 function convertSectionBody(content: string, sectionTitle: string): string {
   // Remove the ## heading line if present
   let body = content.replace(new RegExp(`^##\\s+${escapeRegexStr(sectionTitle)}\\s*\\n+`, 'm'), '');
@@ -78,6 +139,7 @@ function convertSectionBody(content: string, sectionTitle: string): string {
   const output: string[] = [];
   let inList = false;
   let listType: 'itemize' | 'enumerate' | null = null;
+  let tableBuffer: string[] = [];
 
   const flushList = () => {
     if (inList && listType) {
@@ -87,8 +149,27 @@ function convertSectionBody(content: string, sectionTitle: string): string {
     }
   };
 
+  const flushTable = () => {
+    if (tableBuffer.length > 0) {
+      output.push(convertMarkdownTable(tableBuffer));
+      tableBuffer = [];
+    }
+  };
+
   for (const rawLine of lines) {
     const line = rawLine.trim();
+
+    // Table detection: accumulate consecutive table rows
+    if (isTableRow(line) || (tableBuffer.length > 0 && isTableSeparator(line))) {
+      flushList();
+      tableBuffer.push(line);
+      continue;
+    }
+
+    // If we were accumulating a table and hit a non-table line, flush
+    if (tableBuffer.length > 0) {
+      flushTable();
+    }
 
     if (!line) {
       flushList();
@@ -136,6 +217,7 @@ function convertSectionBody(content: string, sectionTitle: string): string {
   }
 
   flushList();
+  flushTable();
   return output.join('\n');
 }
 

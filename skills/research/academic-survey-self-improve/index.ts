@@ -18,8 +18,16 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
     context.log('thinking', `Starting academic survey on: ${topic}`);
     await context.updateProgress?.(10, 'Initializing search', { topic, depth });
 
+    // Depth-aware retrieval parameters
+    const retrievalParams = depth === 'deep'
+      ? { sectionLimit: 8, perQueryLimit: 6, snowballMaxSeeds: 8, snowballPerPaper: 5 }
+      : depth === 'standard'
+        ? { sectionLimit: 6, perQueryLimit: 5, snowballMaxSeeds: 6, snowballPerPaper: 4 }
+        : { sectionLimit: 4, perQueryLimit: 4, snowballMaxSeeds: 5, snowballPerPaper: 3 };
+    const seedLimit = depth === 'deep' ? 8 : depth === 'standard' ? 6 : 5;
+
     const scholar = new ScholarTool();
-    let seedPapers = await scholar.searchPapers(topic, 5);
+    let seedPapers = await scholar.searchPapers(topic, seedLimit);
 
     if (seedPapers.length === 0) {
       context.log('thinking', 'No papers found. Attempting to broaden search...');
@@ -54,7 +62,7 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
     let outline = await createSurveyOutline(context, topic, seedPapers, depth);
 
     await context.updateProgress?.(42, 'Retrieving evidence for each section', { sectionCount: outline.sections.length });
-    let retrieval = await retrieveSurveyPapers(scholar, topic, outline, seedPapers, { sectionLimit: 4, perQueryLimit: 4 });
+    let retrieval = await retrieveSurveyPapers(scholar, topic, outline, seedPapers, retrievalParams);
 
     // Iterative outline refinement: adjust outline based on actual retrieval results
     await context.updateProgress?.(52, 'Refining outline based on retrieval results');
@@ -64,7 +72,7 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
       outline = refinedOutline;
       // Re-retrieve for any new/changed sections
       await context.updateProgress?.(58, 'Re-retrieving evidence for refined outline');
-      retrieval = await retrieveSurveyPapers(scholar, topic, outline, seedPapers, { sectionLimit: 4, perQueryLimit: 4 });
+      retrieval = await retrieveSurveyPapers(scholar, topic, outline, seedPapers, retrievalParams);
     }
 
     const papers = dedupePapers(retrieval.papers);

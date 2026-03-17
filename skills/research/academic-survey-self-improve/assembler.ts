@@ -85,13 +85,13 @@ function pruneAndRenumber(
   // If nothing was pruned, skip renumbering
   if (keptPapers.length === papers.length) return { sections, papers };
 
-  // Renumber citations in section content
+  // Renumber citations in section content; drop citations that reference pruned papers
   const renumberedSections = sections.map((section) => ({
     ...section,
-    content: section.content.replace(/\[(\d+)\]/g, (match, num) => {
+    content: section.content.replace(/\[(\d+)\]/g, (_match, num) => {
       const oldNum = Number(num);
       const newNum = renumberMap.get(oldNum);
-      return newNum ? `[${newNum}]` : match;
+      return newNum ? `[${newNum}]` : ''; // Remove citation if paper was pruned
     })
   }));
 
@@ -112,20 +112,23 @@ export function assembleSurvey(
   papers: Paper[],
   qualityReport: SurveyQualityReport
 ): FinalSurvey {
-  // Strip ghost citations and clean LLM artifacts from each section
+  // Clean LLM artifacts from each section (no ghost strip yet — happens after pruning)
   let cleanedSections = sections.map((section) => ({
     ...section,
-    content: cleanSectionContent(
-      stripGhostCitations(section.content, papers.length),
-      section.title
-    )
+    content: cleanSectionContent(section.content, section.title)
   }));
 
-  // Prune orphan references and renumber citations
+  // Prune orphan references, renumber citations, and drop dangling refs
   const pruned = pruneAndRenumber(cleanedSections, papers);
   cleanedSections = pruned.sections;
   const finalPapers = pruned.papers;
   const referenceCount = finalPapers.length;
+
+  // Now strip any remaining ghost citations (citations > final ref count)
+  cleanedSections = cleanedSections.map((section) => ({
+    ...section,
+    content: stripGhostCitations(section.content, referenceCount)
+  }));
 
   const references = finalPapers
     .map((paper, index) => `${index + 1}. ${paper.title}. ${paper.journal || 'Unknown venue'}, ${paper.year}. ${paper.url || ''}`.trim())

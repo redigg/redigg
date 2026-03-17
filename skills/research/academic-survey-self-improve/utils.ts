@@ -89,7 +89,12 @@ export function parseJsonObject<T>(content: string): T | null {
 }
 
 export function normalizeText(content: string): string {
-  return content.replace(/\r\n/g, '\n').trim();
+  let text = content.replace(/\r\n/g, '\n').trim();
+  // Remove markdown code fences sometimes emitted by LLMs
+  text = text.replace(/^```(?:markdown)?\s*\n/gm, '').replace(/\n```\s*$/gm, '');
+  // Remove common LLM preamble
+  text = text.replace(/^(?:Here(?:'s| is) the (?:revised|improved|updated|rewritten) (?:section|version|content)[^\n]*\n+)/im, '');
+  return text.trim();
 }
 
 export function slugify(value: string): string {

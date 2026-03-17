@@ -5,8 +5,8 @@ import { parseJsonObject, slugify } from './utils.js';
 
 const DEPTH_SECTION_COUNT: Record<string, number> = {
   brief: 3,
-  standard: 4,
-  deep: 5
+  standard: 5,
+  deep: 6
 };
 
 const DEFAULT_INTENT_FACETS = ['survey', 'benchmark', 'system', 'workflow', 'evaluation'];
@@ -56,8 +56,9 @@ Return ONLY valid JSON with the following schema:
 }
 
 Constraints:
-- ${DEPTH_SECTION_COUNT[depth] || DEPTH_SECTION_COUNT.standard} sections.
-- Cover problem setting, methods, evaluation, and open problems when possible.
+- Exactly ${DEPTH_SECTION_COUNT[depth] || DEPTH_SECTION_COUNT.standard} sections.
+- Section titles MUST include one of these canonical keywords: "Background", "Methods", "Evaluation", "Applications", "Challenges". You may extend the title (e.g. "Background and Scope", "Evaluation and Benchmarks") but the canonical keyword must appear in the title.
+- Cover problem setting, methods, evaluation, applications, and open challenges.
 - searchQueries must be concrete literature-search queries.
 - topicProfile should capture aliases and adjacent academic phrases for retrieval.
 - focusFacets should describe the paper types most useful for that section (e.g. survey, benchmark, system).
@@ -162,15 +163,85 @@ function normalizeOutline(
       : fallback.sections[index]?.focusFacets || deriveSectionFacets(section?.title || fallback.sections[index]?.title || '')
   }, fallback.sections[index], topic, topicProfile));
 
+  // Ensure canonical keywords are present; pad with fallback sections if needed
+  const ensuredSections = ensureCanonicalSections(sections, fallback.sections, sectionCount, topic, topicProfile);
+
   return {
     title: parsed.title?.trim() || fallback.title,
     abstractDraft: parsed.abstractDraft?.trim() || fallback.abstractDraft,
     taxonomy: Array.isArray(parsed.taxonomy) && parsed.taxonomy.length > 0
       ? parsed.taxonomy.map((item) => String(item).trim()).filter(Boolean)
       : fallback.taxonomy,
-    sections,
+    sections: ensuredSections,
     topicProfile
   };
+}
+
+const CANONICAL_KEYWORDS = ['background', 'methods', 'evaluation', 'applications', 'challenges'];
+
+function sectionHasCanonical(title: string): boolean {
+  const lower = title.toLowerCase();
+  return CANONICAL_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+/**
+ * Ensure all sections contain a canonical keyword in their title.
+ * If the LLM used a non-standard title, try to map it to the closest canonical keyword.
+ * If sections are fewer than target, pad with fallback sections.
+ */
+function ensureCanonicalSections(
+  sections: OutlineSection[],
+  fallbackSections: OutlineSection[],
+  targetCount: number,
+  topic: string,
+  topicProfile: TopicProfile
+): OutlineSection[] {
+  // Track which canonical keywords are already covered
+  const covered = new Set<string>();
+  for (const section of sections) {
+    const lower = section.title.toLowerCase();
+    for (const kw of CANONICAL_KEYWORDS) {
+      if (lower.includes(kw)) covered.add(kw);
+    }
+  }
+
+  // For sections without a canonical keyword, try to infer and rename
+  const TITLE_HINTS: Record<string, string[]> = {
+    background: ['landscape', 'scope', 'overview', 'introduction', 'foundation', 'context', 'setting'],
+    methods: ['architecture', 'methodology', 'approach', 'framework', 'technique', 'model'],
+    evaluation: ['benchmark', 'metric', 'performance', 'assessment', 'comparison', 'experiment'],
+    applications: ['system', 'deployment', 'platform', 'tool', 'workflow', 'use case', 'real-world'],
+    challenges: ['limitation', 'future', 'direction', 'open problem', 'gap', 'obstacle']
+  };
+
+  const result = sections.map((section) => {
+    if (sectionHasCanonical(section.title)) return section;
+
+    const lower = section.title.toLowerCase();
+    for (const [kw, hints] of Object.entries(TITLE_HINTS)) {
+      if (!covered.has(kw) && hints.some((h) => lower.includes(h))) {
+        covered.add(kw);
+        const canonical = kw.charAt(0).toUpperCase() + kw.slice(1);
+        return { ...section, title: `${canonical}: ${section.title}` };
+      }
+    }
+    return section;
+  });
+
+  // Pad with missing canonical sections from fallback
+  if (result.length < targetCount) {
+    const missing = CANONICAL_KEYWORDS.filter((kw) => !covered.has(kw));
+    for (const kw of missing) {
+      if (result.length >= targetCount) break;
+      const fb = fallbackSections.find((s) => s.title.toLowerCase().includes(kw));
+      if (fb) {
+        result.push(normalizeSection({ ...fb }, fb, topic, topicProfile));
+        covered.add(kw);
+      }
+    }
+  }
+
+  return result;
 }
 
 function normalizeTopicProfile(
@@ -455,6 +526,7 @@ Based on these retrieval results, decide whether to refine the outline:
 3. If papers reveal an important subtopic not covered by any section, add a new section.
 4. Keep the total number of sections at ${sectionCount}.
 5. Do NOT rename sections that are working well.
+6. All section titles MUST contain one of: "Background", "Methods", "Evaluation", "Applications", "Challenges".
 
 If no changes are needed, return {"refined": false}.
 Otherwise, return:

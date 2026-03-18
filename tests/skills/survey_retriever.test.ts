@@ -374,4 +374,186 @@ describe('retrieveSurveyPapers', () => {
     expect(result.papersBySection.evaluation[0].title).toBe('AstaBench: Benchmarking Scientific Research Agents');
     expect(result.papersBySection.systems[0].title).toBe('Denario: A Multi-Agent System for Scientific Discovery');
   });
+
+  it('should keep foreign-domain application papers out of background-heavy sections when purer survey papers exist', async () => {
+    const candidatePapers: Paper[] = [
+      {
+        title: 'A Survey of LLM Reasoning and Deliberation',
+        authors: ['A'],
+        year: 2025,
+        summary: 'A survey of large language model reasoning, deliberate inference, evaluation settings, and open challenges.',
+        citationCount: 40,
+        source: 'openalex'
+      },
+      {
+        title: 'Tree of Thoughts: Deliberate Problem Solving with Large Language Models',
+        authors: ['B'],
+        year: 2023,
+        summary: 'A methods paper on deliberate search, reasoning trees, and inference-time planning for large language models.',
+        citationCount: 200,
+        source: 'openalex'
+      },
+      {
+        title: 'Legal Deliberation Systems with Large Language Models',
+        authors: ['C'],
+        year: 2025,
+        summary: 'A legal application system for judicial reasoning and deliberation support with large language models.',
+        citationCount: 14,
+        source: 'openalex'
+      },
+      {
+        title: 'Clinical Deliberation with LLMs for Healthcare Decision Support',
+        authors: ['D'],
+        year: 2025,
+        summary: 'A clinical healthcare application for deliberative reasoning and decision support using large language models.',
+        citationCount: 10,
+        source: 'arxiv'
+      }
+    ];
+
+    const scholar = {
+      async searchPapers() {
+        return candidatePapers;
+      },
+      async expandCitationGraph() {
+        return [];
+      }
+    } as any;
+
+    const outline: SurveyOutline = {
+      title: 'A Survey of LLM Reasoning and Deliberation',
+      abstractDraft: 'Draft',
+      taxonomy: ['Reasoning', 'Deliberation'],
+      topicProfile: {
+        originalTopic: 'LLM Reasoning and Deliberation',
+        normalizedTopic: 'llm reasoning and deliberation',
+        anchorTerms: ['llm', 'reasoning', 'deliberation'],
+        aliasPhrases: ['large language model reasoning', 'deliberate reasoning'],
+        intentFacets: ['survey', 'methods', 'evaluation'],
+        preferredPaperTypes: ['survey', 'review', 'benchmark', 'system', 'framework', 'workflow'],
+        sectionFacets: {
+          background: ['survey', 'review', 'overview']
+        }
+      },
+      sections: [
+        {
+          id: 'background',
+          title: 'Background and Scope',
+          description: 'Define the problem setting and survey the main landscape.',
+          searchQueries: ['LLM reasoning and deliberation survey'],
+          targetWordCount: 500,
+          focusFacets: ['survey', 'overview'],
+          queryPlan: [
+            { query: 'LLM reasoning and deliberation survey', facet: 'survey', weight: 1, source: 'base' }
+          ]
+        }
+      ]
+    };
+
+    const result = await retrieveSurveyPapers(
+      scholar,
+      'LLM Reasoning and Deliberation',
+      outline,
+      [candidatePapers[0]],
+      { sectionLimit: 2, perQueryLimit: 4 }
+    );
+
+    const sectionTitles = result.papersBySection.background.map((paper) => paper.title);
+    expect(sectionTitles[0]).toBe('A Survey of LLM Reasoning and Deliberation');
+    expect(sectionTitles).not.toContain('Legal Deliberation Systems with Large Language Models');
+    expect(sectionTitles).not.toContain('Clinical Deliberation with LLMs for Healthcare Decision Support');
+  });
+
+  it('should prefer core methods papers over foreign-domain applications in methods sections', async () => {
+    const candidatePapers: Paper[] = [
+      {
+        title: 'Tree of Thoughts: Deliberate Reasoning and Deliberation with Large Language Models',
+        authors: ['A'],
+        year: 2023,
+        summary: 'A methods paper on deliberate reasoning, deliberation, search trees, and inference-time planning for large language models.',
+        citationCount: 200,
+        source: 'openalex'
+      },
+      {
+        title: 'Reasoning via Planning for Language Model Deliberation',
+        authors: ['B'],
+        year: 2025,
+        summary: 'A methods and workflow paper on planning-based deliberation for large language models.',
+        citationCount: 34,
+        source: 'arxiv'
+      },
+      {
+        title: 'Legal Deliberation Systems with Large Language Models',
+        authors: ['C'],
+        year: 2025,
+        summary: 'A legal application system for judicial reasoning and deliberation support with large language models.',
+        citationCount: 14,
+        source: 'openalex'
+      },
+      {
+        title: 'Clinical Deliberation with LLMs for Healthcare Decision Support',
+        authors: ['D'],
+        year: 2025,
+        summary: 'A clinical healthcare application for deliberative reasoning and decision support using large language models.',
+        citationCount: 10,
+        source: 'arxiv'
+      }
+    ];
+
+    const scholar = {
+      async searchPapers() {
+        return candidatePapers;
+      },
+      async expandCitationGraph() {
+        return [];
+      }
+    } as any;
+
+    const outline: SurveyOutline = {
+      title: 'A Survey of LLM Reasoning and Deliberation',
+      abstractDraft: 'Draft',
+      taxonomy: ['Reasoning', 'Deliberation'],
+      topicProfile: {
+        originalTopic: 'LLM Reasoning and Deliberation',
+        normalizedTopic: 'llm reasoning and deliberation',
+        anchorTerms: ['llm', 'reasoning', 'deliberation'],
+        aliasPhrases: ['large language model reasoning', 'deliberate reasoning'],
+        intentFacets: ['methods', 'workflow'],
+        preferredPaperTypes: ['survey', 'review', 'benchmark', 'system', 'framework', 'workflow'],
+        sectionFacets: {
+          methods: ['methods', 'workflow', 'planning', 'architecture']
+        }
+      },
+      sections: [
+        {
+          id: 'methods',
+          title: 'Core Methods',
+          description: 'Summarize core reasoning, planning, and deliberation methods.',
+          searchQueries: ['LLM reasoning and deliberation methods'],
+          targetWordCount: 600,
+          focusFacets: ['methods', 'workflow', 'planning'],
+          queryPlan: [
+            { query: 'LLM reasoning and deliberation methods', facet: 'methods', weight: 1, source: 'base' }
+          ]
+        }
+      ]
+    };
+
+    const result = await retrieveSurveyPapers(
+      scholar,
+      'LLM Reasoning and Deliberation',
+      outline,
+      [candidatePapers[0]],
+      { sectionLimit: 2, perQueryLimit: 4 }
+    );
+
+    const sectionTitles = result.papersBySection.methods.map((paper) => paper.title);
+    expect(sectionTitles).toEqual(expect.arrayContaining([
+      'Tree of Thoughts: Deliberate Reasoning and Deliberation with Large Language Models',
+      'Reasoning via Planning for Language Model Deliberation'
+    ]));
+    expect(sectionTitles).toContain('Reasoning via Planning for Language Model Deliberation');
+    expect(sectionTitles).not.toContain('Legal Deliberation Systems with Large Language Models');
+    expect(sectionTitles).not.toContain('Clinical Deliberation with LLMs for Healthcare Decision Support');
+  });
 });

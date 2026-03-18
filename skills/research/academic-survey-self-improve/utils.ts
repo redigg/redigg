@@ -1,6 +1,8 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { ClaimAlignment, EvidenceCard, OutlineSection, TopicProfile } from './types.js';
 
+type SectionIntent = 'background' | 'methods' | 'evaluation' | 'applications' | 'challenges' | 'generic';
+
 const BROAD_ANCHOR_TERMS = new Set([
   'research',
   'scientific',
@@ -59,6 +61,15 @@ const FACET_TO_PAPER_TYPES: Record<string, string[]> = {
   'future direction': ['challenges'],
   'open challenges': ['challenges'],
   'open problems': ['challenges']
+};
+
+const DOMAIN_SPECIFIC_TOKENS: Record<string, string[]> = {
+  legal: ['legal', 'law', 'court', 'judicial'],
+  medical: ['medical', 'clinical', 'healthcare', 'patient', 'hospital'],
+  finance: ['finance', 'financial', 'banking', 'trading', 'fintech'],
+  education: ['education', 'educational', 'student', 'classroom', 'pedagogy'],
+  chemistry: ['chemistry', 'chemical', 'molecule', 'molecular'],
+  biology: ['biology', 'biological', 'genomic', 'genomics', 'biomedical']
 };
 
 export interface AnchorAssessment {
@@ -195,6 +206,15 @@ export function scorePaperForSection(
     score += supportiveTypeMatches.length * 0.8;
     score += tierBonus;
     score += mismatchPenalty;
+    score += computeSectionPurityAdjustment(
+      paper,
+      haystack,
+      section,
+      topicProfile,
+      assessment,
+      paperTypeSignals,
+      preferredPaperTypes
+    );
   }
 
   return Number(score.toFixed(3));
@@ -277,8 +297,30 @@ export function filterPapersByAnchors(
   }
 
   const assessed = papers
-    .map((paper) => ({ paper, assessment: assessPaperAnchors(paper, topicProfile, section) }))
-    .sort((a, b) => b.assessment.score - a.assessment.score || (b.paper.year || 0) - (a.paper.year || 0));
+    .map((paper) => {
+      const assessment = assessPaperAnchors(paper, topicProfile, section);
+      const paperText = buildPaperMatchText(paper);
+      const paperTypeSignals = assessment.paperTypeSignals.length > 0
+        ? assessment.paperTypeSignals
+        : detectPaperTypeSignals(paperText);
+      const preferredPaperTypes = inferPreferredPaperTypes(section, topicProfile);
+      const purityAdjustment = computeSectionPurityAdjustment(
+        paper,
+        paperText,
+        section,
+        topicProfile,
+        assessment,
+        paperTypeSignals,
+        preferredPaperTypes
+      );
+
+      return {
+        paper,
+        assessment,
+        purityAdjustedScore: assessment.score + purityAdjustment
+      };
+    })
+    .sort((a, b) => b.purityAdjustedScore - a.purityAdjustedScore || (b.paper.year || 0) - (a.paper.year || 0));
 
   const strong = assessed.filter((item) => item.assessment.tier === 'strong');
   const weak = assessed.filter((item) => item.assessment.tier === 'weak');
@@ -426,6 +468,31 @@ function normalizeFacetTerms(terms: string[]): string[] {
   ));
 }
 
+function inferSectionIntent(section: OutlineSection): SectionIntent {
+  const sectionTerms = normalizeFacetTerms([
+    section.title,
+    section.description,
+    ...(section.focusFacets || [])
+  ]).join(' ');
+
+  if (sectionTerms.includes('background') || sectionTerms.includes('scope') || sectionTerms.includes('overview')) {
+    return 'background';
+  }
+  if (sectionTerms.includes('method') || sectionTerms.includes('architecture') || sectionTerms.includes('approach')) {
+    return 'methods';
+  }
+  if (sectionTerms.includes('evaluation') || sectionTerms.includes('benchmark') || sectionTerms.includes('dataset')) {
+    return 'evaluation';
+  }
+  if (sectionTerms.includes('application') || sectionTerms.includes('system') || sectionTerms.includes('workflow') || sectionTerms.includes('deployment')) {
+    return 'applications';
+  }
+  if (sectionTerms.includes('challenge') || sectionTerms.includes('limitation') || sectionTerms.includes('future')) {
+    return 'challenges';
+  }
+  return 'generic';
+}
+
 function detectPaperTypeSignals(text: string): string[] {
   return Object.entries(PAPER_TYPE_PATTERNS)
     .filter(([, pattern]) => pattern.test(text))
@@ -464,6 +531,68 @@ function inferPreferredPaperTypes(section: OutlineSection, topicProfile: TopicPr
   }
 
   return preferred;
+}
+
+/**
+ * Safe section-aware rerank:
+ * - boost papers that match the section's rhetorical intent
+ * - gently demote foreign-domain application papers in non-application sections
+ * The adjustment is bounded so anchor relevance still dominates final ranking.
+ */
+function computeSectionPurityAdjustment(
+  paper: Paper,
+  paperText: string,
+  section: OutlineSection,
+  topicProfile: TopicProfile,
+  assessment: AnchorAssessment,
+  paperTypeSignals: string[],
+  preferredPaperTypes: Set<string>
+): number {
+  const sectionIntent = inferSectionIntent(section);
+  const preferredTypeMatches = paperTypeSignals.filter((signal) => preferredPaperTypes.has(signal));
+  const hasPreferredTypeMatch = preferredTypeMatches.length > 0;
+  const hasSurveySignal = paperTypeSignals.includes('survey');
+  const hasBenchmarkSignal = paperTypeSignals.includes('benchmark') || paperTypeSignals.includes('evaluation');
+  const hasMethodSignal = paperTypeSignals.includes('methods') || paperTypeSignals.includes('workflow') || paperTypeSignals.includes('system');
+  const hasApplicationSignal = paperTypeSignals.includes('application');
+  const hasChallengeSignal = paperTypeSignals.includes('challenges');
+  const foreignDomains = detectForeignDomains(paperText, topicProfile);
+  const hasExplicitMethodCue = /\b(method|approach|architecture|framework|planning|search|algorithm|inference|decoding)\b/i.test(paperText);
+
+  let adjustment = 0;
+
+  if (sectionIntent === 'background') {
+    if (hasSurveySignal) adjustment += 3.2;
+    if (hasBenchmarkSignal) adjustment += 0.8;
+    if (!hasSurveySignal && hasApplicationSignal && !hasPreferredTypeMatch) adjustment -= 2.8;
+    if (!hasSurveySignal && hasMethodSignal && !hasBenchmarkSignal) adjustment -= 0.9;
+  } else if (sectionIntent === 'methods') {
+    if (hasMethodSignal) adjustment += 2.6;
+    if (hasExplicitMethodCue) adjustment += 1.2;
+    if (hasSurveySignal) adjustment += 0.6;
+    if (hasApplicationSignal && !hasMethodSignal && !hasPreferredTypeMatch) adjustment -= 3.1;
+    if (hasApplicationSignal && foreignDomains.length > 0 && !hasExplicitMethodCue) adjustment -= 2.6;
+  } else if (sectionIntent === 'evaluation') {
+    if (hasBenchmarkSignal) adjustment += 3;
+    if (hasSurveySignal) adjustment += 0.7;
+    if (hasApplicationSignal && !hasBenchmarkSignal && !hasPreferredTypeMatch) adjustment -= 2.4;
+  } else if (sectionIntent === 'applications') {
+    if (hasApplicationSignal || hasMethodSignal) adjustment += 2.2;
+  } else if (sectionIntent === 'challenges') {
+    if (hasChallengeSignal) adjustment += 2.6;
+    if (hasSurveySignal) adjustment += 1;
+    if (hasApplicationSignal && !hasChallengeSignal && !hasPreferredTypeMatch) adjustment -= 1.6;
+  }
+
+  if (sectionIntent !== 'applications' && hasApplicationSignal && foreignDomains.length > 0 && !hasPreferredTypeMatch) {
+    adjustment -= Math.min(4, foreignDomains.length * 1.8);
+  }
+
+  if (assessment.aliasMatches.length > 0 && hasPreferredTypeMatch) {
+    adjustment += 0.4;
+  }
+
+  return Number(adjustment.toFixed(3));
 }
 
 function extractClaimAlignmentsFromContent(content: string): Array<{ claim: string; citations: number[] }> {
@@ -537,6 +666,19 @@ function normalizeMatchToken(token: string): string {
   }
 
   return token;
+}
+
+function detectForeignDomains(paperText: string, topicProfile: TopicProfile): string[] {
+  const paperTokens = new Set(tokenizeForMatch(paperText));
+  const topicTokens = new Set(tokenizeForMatch([
+    topicProfile.originalTopic,
+    topicProfile.normalizedTopic,
+    ...(topicProfile.aliasPhrases || [])
+  ].join(' ')));
+
+  return Object.entries(DOMAIN_SPECIFIC_TOKENS)
+    .filter(([, cues]) => cues.some((cue) => paperTokens.has(normalizeMatchToken(cue)) && !topicTokens.has(normalizeMatchToken(cue))))
+    .map(([domain]) => domain);
 }
 
 function buildPaperMatchText(paper: Paper): string {

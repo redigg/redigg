@@ -230,6 +230,18 @@ function escapeRegexStr(str: string): string {
 }
 
 /**
+ * Strip mermaid code blocks and their captions from markdown text.
+ */
+function stripMermaidBlocks(text: string): string {
+  return text
+    // ```mermaid ... ``` followed by optional *Figure N: caption*
+    .replace(/```mermaid[\s\S]*?```\s*\n*(?:\*Figure\s+\d+:[^*]*\*)?/g, '')
+    // Catch any remaining bare ```mermaid blocks
+    .replace(/```mermaid[\s\S]*?```/g, '')
+    .trim();
+}
+
+/**
  * Format a paper reference in LaTeX bibliography style.
  */
 /**
@@ -327,7 +339,8 @@ ${abstractText}
 `;
 
   // Introduction — extract from assembled markdown if available
-  const introFromMarkdown = extractIntroductionFromMarkdown(finalSurvey.markdown);
+  const introRaw = extractIntroductionFromMarkdown(finalSurvey.markdown);
+  const introFromMarkdown = introRaw ? stripMermaidBlocks(introRaw) : null;
   const introSection = introFromMarkdown
     ? `\\section{Introduction}\n${convertSectionBody(introFromMarkdown, 'Introduction')}`
     : '';
@@ -343,7 +356,7 @@ ${abstractText}
   const bodySections = finalSurvey.sections.map((section) => {
     const sectionTitle = escapeLatex(section.title);
     // Strip mermaid code blocks from body before converting (they're in LaTeX as TikZ)
-    const cleanedContent = section.content.replace(/```mermaid[\s\S]*?```\n*\*Figure \d+:[^*]*\*/g, '');
+    const cleanedContent = stripMermaidBlocks(section.content);
     const body = convertSectionBody(cleanedContent, section.title);
     const sectionFigure = figures?.find((f) => f.sectionId === section.sectionId);
     const figureBlock = sectionFigure ? `\n\n${formatTikzFigure(sectionFigure, figCounter++)}` : '';
@@ -408,7 +421,13 @@ function formatTikzFigure(figure: SurveyFigure, figNum?: number): string {
     .replace(/\u2013/g, '--')
     .replace(/\u2018|\u2019/g, "'")
     .replace(/\u201C|\u201D/g, '"')
-    .replace(new RegExp('\\\\n(?![a-z])', 'g'), '\\\\');
+    .replace(new RegExp('\\\\n(?![a-z])', 'g'), '\\\\')
+    // Fix \footnotesize/\small/\tiny used as node options (causes stack overflow)
+    // e.g. \node[..., \footnotesize] → \node[..., font=\footnotesize]
+    .replace(/,\s*\\(footnotesize|small|tiny|scriptsize|normalsize|large)\b/g, ', font=\\$1')
+    // Also handle when it's the only or first option
+    .replace(/\[\s*\\(footnotesize|small|tiny|scriptsize|normalsize|large)\s*,/g, '[font=\\$1,')
+    .replace(/\[\s*\\(footnotesize|small|tiny|scriptsize|normalsize|large)\s*\]/g, '[font=\\$1]');
   // Wrap TikZ code in figure environment with batchmode to prevent halting on TikZ errors
   return `\\batchmode
 \\begin{figure}[htbp]

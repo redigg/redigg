@@ -30,6 +30,8 @@ import type {
 dotenv.config({ override: true });
 
 const logger = createLogger('SurveyBenchmark');
+const DEFAULT_CASE_RETRY_ATTEMPTS = 3;
+const DEFAULT_CASE_RETRY_DELAY_MS = 1_500;
 
 class BenchmarkOpenAIClient implements LLMClient {
   private openai: OpenAI;
@@ -103,6 +105,10 @@ function parseArgs(argv: string[]): CliOptions {
 
 function ensureDirectory(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -235,11 +241,20 @@ function formatAggregateScore(score: number | null, failureCategory?: BenchmarkF
 
 export function summarizeBenchmarkResults(results: SurveyBenchmarkTopicResult[]): Pick<
   SurveyBenchmarkRunSummary,
-  'scoredCaseCount' | 'excludedCaseCount' | 'infrastructureFailureCount' | 'executionFailureCount' | 'passedCount' | 'averageScore'
+  | 'totalAttemptCount'
+  | 'retriedCaseCount'
+  | 'scoredCaseCount'
+  | 'excludedCaseCount'
+  | 'infrastructureFailureCount'
+  | 'executionFailureCount'
+  | 'passedCount'
+  | 'averageScore'
 > {
   const scoredResults = results.filter(
     (result) => result.countedInAggregate && typeof result.aggregateScore === 'number'
   );
+  const totalAttemptCount = results.reduce((sum, result) => sum + Math.max(1, result.attemptCount || 1), 0);
+  const retriedCaseCount = results.filter((result) => (result.attemptCount || 1) > 1).length;
   const excludedCaseCount = results.filter((result) => !result.countedInAggregate).length;
   const infrastructureFailureCount = results.filter((result) => result.failureCategory === 'infrastructure').length;
   const executionFailureCount = results.filter((result) => result.failureCategory === 'execution').length;
@@ -251,6 +266,8 @@ export function summarizeBenchmarkResults(results: SurveyBenchmarkTopicResult[])
     : null;
 
   return {
+    totalAttemptCount,
+    retriedCaseCount,
     scoredCaseCount: scoredResults.length,
     excludedCaseCount,
     infrastructureFailureCount,
@@ -267,6 +284,8 @@ function buildSummaryMarkdown(summary: SurveyBenchmarkRunSummary): string {
   lines.push(`- Run ID: \`${summary.runId}\``);
   lines.push(`- Generated At: ${summary.generatedAt}`);
   lines.push(`- Cases: ${summary.caseCount}`);
+  lines.push(`- Total Attempts: ${summary.totalAttemptCount}`);
+  lines.push(`- Retried Cases: ${summary.retriedCaseCount}`);
   lines.push(`- Scored Cases: ${summary.scoredCaseCount}`);
   lines.push(`- Passed (>=70): ${summary.passedCount}`);
   lines.push(`- Excluded Cases: ${summary.excludedCaseCount}`);
@@ -274,14 +293,14 @@ function buildSummaryMarkdown(summary: SurveyBenchmarkRunSummary): string {
   lines.push(`- Execution Failures: ${summary.executionFailureCount}`);
   lines.push(`- Average Score (scored cases only): ${summary.averageScore ?? 'N/A'}`);
   lines.push('');
-  lines.push('| Case | Score | Retrieved | Referenced | References | Claim Alignments | Quality Gate | Strict QA | PDF | SurGE Composite |');
-  lines.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |');
+  lines.push('| Case | Attempts | Score | Retrieved | Referenced | References | Claim Alignments | Topic Purity | Quality Gate | Strict QA | PDF | SurGE Composite |');
+  lines.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |');
 
   for (const result of summary.results) {
     const surgeComposite = result.surgeMetrics ? (result.surgeMetrics.composite * 100).toFixed(1) : 'N/A';
     const strictQa = result.llmQa ? `${result.llmQa.score}${result.llmQa.passed ? '' : ' (fail)'}` : 'N/A';
     lines.push(
-      `| ${result.benchmarkCase.id} | ${formatAggregateScore(result.aggregateScore, result.failureCategory)} | ${result.summary.retrievedPaperCount} | ${result.summary.referencedPaperCount} | ${result.summary.referenceCount} | ${result.summary.claimAlignmentCount} | ${result.scorecard.qualityGate.score} | ${strictQa} | ${result.summary.pdfGenerated ? 'yes' : 'no'} | ${surgeComposite} |`
+      `| ${result.benchmarkCase.id} | ${result.attemptCount} | ${formatAggregateScore(result.aggregateScore, result.failureCategory)} | ${result.summary.retrievedPaperCount} | ${result.summary.referencedPaperCount} | ${result.summary.referenceCount} | ${result.summary.claimAlignmentCount} | ${result.scorecard.topicPurity.score} | ${result.scorecard.qualityGate.score} | ${strictQa} | ${result.summary.pdfGenerated ? 'yes' : 'no'} | ${surgeComposite} |`
     );
   }
 
@@ -292,6 +311,7 @@ function buildSummaryMarkdown(summary: SurveyBenchmarkRunSummary): string {
   for (const result of summary.results) {
     lines.push(`### ${result.benchmarkCase.id}`);
     lines.push(`- Topic: ${result.benchmarkCase.topic}`);
+    lines.push(`- Attempts: ${result.attemptCount}`);
     lines.push(`- Score: ${formatAggregateScore(result.aggregateScore, result.failureCategory)}`);
     lines.push(`- Counted In Aggregate: ${result.countedInAggregate ? 'yes' : 'no'}`);
     lines.push(`- Retrieved Papers: ${result.summary.retrievedPaperCount}`);
@@ -300,6 +320,7 @@ function buildSummaryMarkdown(summary: SurveyBenchmarkRunSummary): string {
     lines.push(`- Coverage: ${result.scorecard.coverage.score}`);
     lines.push(`- Citations: ${result.scorecard.citations.score}`);
     lines.push(`- References: ${result.scorecard.references.score}`);
+    lines.push(`- Topic Purity: ${result.scorecard.topicPurity.score}`);
     lines.push(`- PDF: ${result.scorecard.pdf.score}`);
     lines.push(`- Quality Gate: ${result.scorecard.qualityGate.score}`);
     if (result.llmQa) {
@@ -328,21 +349,22 @@ async function runSingleBenchmarkCase(args: {
   llm: LLMClient;
   runId: string;
   outputDir: string;
+  attempt: number;
   depthOverride?: 'brief' | 'standard' | 'deep';
   skipPdf: boolean;
 }): Promise<SurveyBenchmarkTopicResult> {
-  const { benchmarkCase, llm, runId, outputDir, depthOverride, skipPdf } = args;
+  const { benchmarkCase, llm, runId, outputDir, attempt, depthOverride, skipPdf } = args;
   const startedAt = new Date().toISOString();
   const startedMs = Date.now();
   const caseOutputDir = path.join(outputDir, benchmarkCase.id);
   ensureDirectory(caseOutputDir);
 
-  const storage = new SQLiteStorage(path.join(caseOutputDir, 'benchmark.db'));
+  const storage = new SQLiteStorage(path.join(caseOutputDir, `benchmark-attempt-${attempt}.db`));
   const memory = new MemoryManager(storage);
   const skill = new AcademicSurveySelfImproveSkill();
   const pdfSkill = new PdfGeneratorSkill();
   const qualityManager = new QualityManager(llm);
-  const userId = `benchmark-${runId}`;
+  const userId = `benchmark-${runId}-${benchmarkCase.id}-attempt-${attempt}`;
   const context = createSkillContext(llm, memory, caseOutputDir, userId);
 
   const markdownPath = path.join(caseOutputDir, 'survey.md');
@@ -393,7 +415,7 @@ async function runSingleBenchmarkCase(args: {
           title: result.outline?.title || `A Survey of ${benchmarkCase.topic}`,
           content: result.formatted_output || result.summary,
           author: 'Redigg Benchmark',
-          sessionId: `benchmark-${runId}-${benchmarkCase.id}`
+          sessionId: `benchmark-${runId}-${benchmarkCase.id}-attempt-${attempt}`
         });
         pdfPath = typeof pdfResult.file_path === 'string' ? pdfResult.file_path : undefined;
         if (pdfPath && fs.existsSync(pdfPath)) {
@@ -432,6 +454,7 @@ async function runSingleBenchmarkCase(args: {
     const topicResult: SurveyBenchmarkTopicResult = {
       benchmarkCase,
       success: Boolean(result.success),
+      attemptCount: attempt,
       startedAt,
       completedAt: new Date().toISOString(),
       durationMs: Date.now() - startedMs,
@@ -461,6 +484,7 @@ async function runSingleBenchmarkCase(args: {
     const topicResult: SurveyBenchmarkTopicResult = {
       benchmarkCase,
       success: false,
+      attemptCount: attempt,
       startedAt,
       completedAt: new Date().toISOString(),
       durationMs: Date.now() - startedMs,
@@ -471,6 +495,7 @@ async function runSingleBenchmarkCase(args: {
         coverage: { score: 0, maxScore: 100, passed: false, details: ['未生成覆盖结果'] },
         citations: { score: 0, maxScore: 100, passed: false, details: ['未生成引用结果'] },
         references: { score: 0, maxScore: 100, passed: false, details: ['未生成参考文献结果'] },
+        topicPurity: { score: 0, maxScore: 100, passed: false, details: ['未生成 topic purity 结果'] },
         pdf: { score: 0, maxScore: 100, passed: false, details: ['PDF 未生成'] },
         qualityGate: { score: 0, maxScore: 100, passed: false, details: ['质量门未执行'] }
       },
@@ -497,6 +522,43 @@ async function runSingleBenchmarkCase(args: {
   } finally {
     storage.close();
   }
+}
+
+export async function runBenchmarkCaseWithRetry(args: {
+  runCase: (attempt: number) => Promise<SurveyBenchmarkTopicResult>;
+  maxAttempts?: number;
+  initialDelayMs?: number;
+  sleepFn?: (ms: number) => Promise<void>;
+}): Promise<SurveyBenchmarkTopicResult> {
+  const maxAttempts = Math.max(1, args.maxAttempts ?? DEFAULT_CASE_RETRY_ATTEMPTS);
+  const initialDelayMs = Math.max(0, args.initialDelayMs ?? DEFAULT_CASE_RETRY_DELAY_MS);
+  const sleepFn = args.sleepFn ?? sleep;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = await args.runCase(attempt);
+    const normalizedResult = result.attemptCount === attempt
+      ? result
+      : { ...result, attemptCount: attempt };
+    const shouldRetry = !normalizedResult.success &&
+      normalizedResult.failureCategory === 'infrastructure' &&
+      attempt < maxAttempts;
+
+    if (!shouldRetry) {
+      return normalizedResult;
+    }
+
+    const retryDelayMs = initialDelayMs * attempt;
+    logger.warn('Retrying benchmark case after infrastructure failure', {
+      caseId: normalizedResult.benchmarkCase.id,
+      attempt,
+      maxAttempts,
+      retryDelayMs,
+      error: normalizedResult.error
+    });
+    await sleepFn(retryDelayMs);
+  }
+
+  throw new Error('Benchmark retry loop exited unexpectedly.');
 }
 
 export async function runSurveyBenchmark(options: CliOptions = { skipPdf: false }): Promise<SurveyBenchmarkRunSummary> {
@@ -528,13 +590,16 @@ export async function runSurveyBenchmark(options: CliOptions = { skipPdf: false 
   for (const benchmarkCase of selectedCases) {
     logger.info(`Running benchmark case: ${benchmarkCase.id}`, { topic: benchmarkCase.topic });
     results.push(
-      await runSingleBenchmarkCase({
-        benchmarkCase,
-        llm,
-        runId,
-        outputDir,
-        depthOverride: options.depth,
-        skipPdf: options.skipPdf
+      await runBenchmarkCaseWithRetry({
+        runCase: async (attempt) => runSingleBenchmarkCase({
+          benchmarkCase,
+          llm,
+          runId,
+          outputDir,
+          attempt,
+          depthOverride: options.depth,
+          skipPdf: options.skipPdf
+        })
       })
     );
   }
@@ -545,6 +610,8 @@ export async function runSurveyBenchmark(options: CliOptions = { skipPdf: false 
     generatedAt: new Date().toISOString(),
     outputDir,
     caseCount: results.length,
+    totalAttemptCount: summaryStats.totalAttemptCount,
+    retriedCaseCount: summaryStats.retriedCaseCount,
     scoredCaseCount: summaryStats.scoredCaseCount,
     excludedCaseCount: summaryStats.excludedCaseCount,
     infrastructureFailureCount: summaryStats.infrastructureFailureCount,
@@ -573,6 +640,7 @@ async function main(): Promise<void> {
   console.log('\nSurvey benchmark baseline complete.');
   console.log(`Run ID: ${summary.runId}`);
   console.log(`Average Score: ${summary.averageScore ?? 'N/A'}`);
+  console.log(`Attempts: ${summary.totalAttemptCount} total (${summary.retriedCaseCount} retried cases)`);
   console.log(`Passed: ${summary.passedCount}/${summary.scoredCaseCount} scored cases`);
   if (summary.excludedCaseCount > 0) {
     console.log(`Excluded Cases: ${summary.excludedCaseCount} (${summary.infrastructureFailureCount} infrastructure failures)`);

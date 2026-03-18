@@ -25,6 +25,7 @@ export interface SurveyBenchmarkTopicScorecard {
   coverage: BenchmarkMetric;
   citations: BenchmarkMetric;
   references: BenchmarkMetric;
+  topicPurity: BenchmarkMetric;
   pdf: BenchmarkMetric;
   qualityGate: BenchmarkMetric;
 }
@@ -41,6 +42,7 @@ export interface SurgeStyleMetricsSummary {
 export interface SurveyBenchmarkTopicResult {
   benchmarkCase: SurveyBenchmarkCase;
   success: boolean;
+  attemptCount: number;
   startedAt: string;
   completedAt: string;
   durationMs: number;
@@ -78,6 +80,8 @@ export interface SurveyBenchmarkRunSummary {
   generatedAt: string;
   outputDir: string;
   caseCount: number;
+  totalAttemptCount: number;
+  retriedCaseCount: number;
   scoredCaseCount: number;
   excludedCaseCount: number;
   infrastructureFailureCount: number;

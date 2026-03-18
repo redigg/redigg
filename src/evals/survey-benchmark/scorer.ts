@@ -15,12 +15,48 @@ interface BenchmarkArtifacts {
   };
 }
 
+type SectionIntent = 'background' | 'methods' | 'evaluation' | 'applications' | 'challenges' | 'generic';
+
+const PAPER_TYPE_ALIASES: Record<string, string> = {
+  application: 'application',
+  applications: 'application',
+  architecture: 'architecture',
+  benchmark: 'benchmark',
+  benchmarks: 'benchmark',
+  challenge: 'challenges',
+  challenges: 'challenges',
+  evaluation: 'evaluation',
+  evaluations: 'evaluation',
+  framework: 'framework',
+  method: 'methods',
+  methods: 'methods',
+  survey: 'survey',
+  surveys: 'survey',
+  system: 'system',
+  systems: 'system',
+  workflow: 'workflow',
+  workflows: 'workflow'
+};
+
+const FOREIGN_DOMAIN_KEYWORDS: Array<{ name: string; keywords: string[] }> = [
+  { name: 'legal', keywords: ['legal', 'law', 'court', 'judicial'] },
+  { name: 'healthcare', keywords: ['healthcare', 'medical', 'clinical', 'patient', 'diagnosis'] },
+  { name: 'finance', keywords: ['finance', 'financial', 'banking', 'trading'] },
+  { name: 'robotics', keywords: ['robot', 'robotics', 'manipulation'] },
+  { name: 'education', keywords: ['education', 'classroom', 'student', 'pedagog'] }
+];
+
 function clampScore(value: number, maxScore = 100): number {
   return Math.max(0, Math.min(maxScore, Math.round(value)));
 }
 
 function normalizeText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function normalizePaperTypeSignal(signal: string): string {
+  const normalized = normalizeText(String(signal || ''));
+  return PAPER_TYPE_ALIASES[normalized] || normalized;
 }
 
 function countWords(content: string): number {
@@ -50,7 +86,7 @@ function inferPaperTypeCoverage(result: SkillResult): Set<string> {
     for (const evidence of evidenceCards) {
       const signals = Array.isArray(evidence.paperTypeSignals) ? evidence.paperTypeSignals : [];
       for (const signal of signals) {
-        paperTypes.add(String(signal).toLowerCase());
+        paperTypes.add(normalizePaperTypeSignal(signal));
       }
     }
   }
@@ -64,6 +100,107 @@ function inferClaimAlignmentCount(result: SkillResult): number {
     const alignments = Array.isArray(section.claimAlignments) ? section.claimAlignments : [];
     return count + alignments.length;
   }, 0);
+}
+
+function inferSectionIntent(sectionTitle: string): SectionIntent {
+  const normalized = normalizeText(sectionTitle);
+
+  if (/\b(background|scope|motivation|problem|setting|overview|introduction)\b/.test(normalized)) {
+    return 'background';
+  }
+  if (/\b(method|methods|approach|approaches|framework|frameworks|architecture|architectures|reasoning)\b/.test(normalized)) {
+    return 'methods';
+  }
+  if (/\b(evaluation|evaluations|benchmark|benchmarks|assessment)\b/.test(normalized)) {
+    return 'evaluation';
+  }
+  if (/\b(application|applications|system|systems|case|cases|domain)\b/.test(normalized)) {
+    return 'applications';
+  }
+  if (/\b(challenge|challenges|open problem|future direction|limitation|limitations)\b/.test(normalized)) {
+    return 'challenges';
+  }
+
+  return 'generic';
+}
+
+function sectionSupportsIntent(intent: SectionIntent, normalizedSignals: Set<string>): boolean {
+  if (intent === 'background') {
+    return normalizedSignals.has('survey') || normalizedSignals.has('benchmark') || normalizedSignals.has('evaluation');
+  }
+  if (intent === 'methods') {
+    return ['methods', 'workflow', 'system', 'framework', 'architecture'].some((signal) => normalizedSignals.has(signal));
+  }
+  if (intent === 'evaluation') {
+    return normalizedSignals.has('benchmark') || normalizedSignals.has('evaluation');
+  }
+  if (intent === 'applications') {
+    return ['application', 'system', 'workflow'].some((signal) => normalizedSignals.has(signal));
+  }
+  if (intent === 'challenges') {
+    return normalizedSignals.has('challenges') || normalizedSignals.has('survey');
+  }
+
+  return normalizedSignals.size > 0;
+}
+
+function sectionText(section: any): string {
+  const evidenceCards = Array.isArray(section?.evidenceCards) ? section.evidenceCards : [];
+  const evidenceText = evidenceCards.map((card: any) =>
+    [card.title, card.groundedClaim, card.keyContribution, card.limitationHint].filter(Boolean).join(' ')
+  );
+
+  return [
+    section?.title,
+    section?.content,
+    ...evidenceText
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function countAnchorMatches(text: string, anchorTerms: string[]): number {
+  const normalized = ` ${normalizeText(text)} `;
+  const matchedAnchors = new Set<string>();
+
+  for (const anchorTerm of anchorTerms) {
+    const normalizedAnchor = normalizeText(anchorTerm);
+    if (!normalizedAnchor) continue;
+    if (normalized.includes(` ${normalizedAnchor} `)) {
+      matchedAnchors.add(normalizedAnchor);
+    }
+  }
+
+  return matchedAnchors.size;
+}
+
+function detectForeignDomains(text: string, benchmarkCase: SurveyBenchmarkCase): string[] {
+  const normalizedText = normalizeText(text);
+  const topicText = normalizeText([benchmarkCase.topic, ...benchmarkCase.anchorTerms].join(' '));
+  const detected: string[] = [];
+
+  for (const domain of FOREIGN_DOMAIN_KEYWORDS) {
+    const topicAlreadyIncludesDomain = domain.keywords.some((keyword) => topicText.includes(normalizeText(keyword)));
+    if (topicAlreadyIncludesDomain) {
+      continue;
+    }
+
+    if (domain.keywords.some((keyword) => normalizedText.includes(normalizeText(keyword)))) {
+      detected.push(domain.name);
+    }
+  }
+
+  return detected;
+}
+
+function preferredTypeSatisfied(paperTypeCoverage: Set<string>, preferredType: string): boolean {
+  const normalizedPreferredType = normalizePaperTypeSignal(preferredType);
+
+  if (normalizedPreferredType === 'methods') {
+    return ['methods', 'workflow', 'system', 'framework', 'architecture'].some((type) => paperTypeCoverage.has(type));
+  }
+
+  return paperTypeCoverage.has(normalizedPreferredType);
 }
 
 // ── Structure ──────────────────────────────────────────────────────────
@@ -138,7 +275,7 @@ function scoreCoverage(benchmarkCase: SurveyBenchmarkCase, result: SkillResult):
 
   // Paper type coverage (40)
   const paperTypeCoverage = inferPaperTypeCoverage(result);
-  const matchedTypes = benchmarkCase.preferredPaperTypes.filter((type) => paperTypeCoverage.has(type));
+  const matchedTypes = benchmarkCase.preferredPaperTypes.filter((type) => preferredTypeSatisfied(paperTypeCoverage, type));
   score += (matchedTypes.length / benchmarkCase.preferredPaperTypes.length) * 40;
   details.push(`目标论文类型覆盖 ${matchedTypes.length}/${benchmarkCase.preferredPaperTypes.length}`);
 
@@ -156,6 +293,95 @@ function scoreCoverage(benchmarkCase: SurveyBenchmarkCase, result: SkillResult):
 
   return {
     score: clampScore(score),
+    maxScore: 100,
+    passed: score >= 70,
+    details
+  };
+}
+
+// ── Topic Purity ───────────────────────────────────────────────────────
+
+function scoreTopicPurity(benchmarkCase: SurveyBenchmarkCase, result: SkillResult): BenchmarkMetric {
+  const details: string[] = [];
+  const sections = Array.isArray(result.sections) ? result.sections : [];
+
+  if (sections.length === 0) {
+    return {
+      score: 0,
+      maxScore: 100,
+      passed: false,
+      details: ['未生成章节，无法评估 topic purity']
+    };
+  }
+
+  let totalSectionScore = 0;
+  let foreignLeakSectionCount = 0;
+  const foreignDomains = new Set<string>();
+
+  for (const section of sections) {
+    const evidenceCards = Array.isArray(section.evidenceCards) ? section.evidenceCards : [];
+    const intent = inferSectionIntent(String(section.title || ''));
+    const normalizedSectionText = sectionText(section);
+    const anchorMatches = countAnchorMatches(normalizedSectionText, benchmarkCase.anchorTerms);
+    const anchorScore = Math.min(20, (anchorMatches / Math.max(1, Math.min(benchmarkCase.anchorTerms.length, 2))) * 20);
+
+    if (evidenceCards.length === 0) {
+      totalSectionScore += anchorScore + 10;
+      details.push(`${section.title}: 缺少 evidence card，topic purity 仅靠 anchor 保底`);
+      continue;
+    }
+
+    const supportingEvidenceCount = evidenceCards.filter((card: any) => {
+      const normalizedSignals = new Set<string>(
+        (Array.isArray(card.paperTypeSignals) ? card.paperTypeSignals : []).map((signal: string) => normalizePaperTypeSignal(signal))
+      );
+      return sectionSupportsIntent(intent, normalizedSignals);
+    }).length;
+
+    const intentScore = (supportingEvidenceCount / evidenceCards.length) * 70;
+    let leakagePenalty = 0;
+
+    if (intent !== 'applications') {
+      const foreignCardCount = evidenceCards.filter((card: any) => {
+        const cardText = [card.title, card.groundedClaim, card.keyContribution, card.limitationHint].filter(Boolean).join(' ');
+        const domains = detectForeignDomains(cardText, benchmarkCase);
+        if (domains.length > 0) {
+          domains.forEach((domain) => foreignDomains.add(domain));
+        }
+
+        const normalizedSignals = new Set<string>(
+          (Array.isArray(card.paperTypeSignals) ? card.paperTypeSignals : []).map((signal: string) => normalizePaperTypeSignal(signal))
+        );
+        const isApplicationLike = normalizedSignals.has('application');
+        return domains.length > 0 && isApplicationLike;
+      }).length;
+
+      if (foreignCardCount > 0) {
+        foreignLeakSectionCount += 1;
+        leakagePenalty = Math.min(25, (foreignCardCount / evidenceCards.length) * 25);
+      }
+    }
+
+    const sectionScore = clampScore(intentScore + anchorScore + 10 - leakagePenalty);
+    totalSectionScore += sectionScore;
+
+    details.push(
+      `${section.title}: intent 对齐 ${supportingEvidenceCount}/${evidenceCards.length}, anchor ${anchorMatches}, leakage penalty ${leakagePenalty.toFixed(0)}`
+    );
+  }
+
+  const score = clampScore(totalSectionScore / sections.length);
+  if (foreignLeakSectionCount > 0) {
+    details.push(`非 applications 章节出现外域泄漏 ${foreignLeakSectionCount} 处`);
+  } else {
+    details.push('未发现明显的非 applications 外域泄漏');
+  }
+  if (foreignDomains.size > 0) {
+    details.push(`检测到外域信号: ${[...foreignDomains].join(', ')}`);
+  }
+
+  return {
+    score,
     maxScore: 100,
     passed: score >= 70,
     details
@@ -371,21 +597,22 @@ export function scoreSurveyBenchmarkCase(
     coverage: scoreCoverage(benchmarkCase, result),
     citations: scoreCitations(benchmarkCase, result),
     references: scoreReferences(benchmarkCase, result),
+    topicPurity: scoreTopicPurity(benchmarkCase, result),
     pdf: scorePdf(result, artifacts),
     qualityGate: scoreQualityGate(result, artifacts.externalQa)
   };
 }
 
 export function aggregateSurveyBenchmarkScore(scorecard: SurveyBenchmarkTopicScorecard): number {
-  // Weights: content quality (citations + references) = 40%, structure = 20%,
-  // coverage = 15%, quality gate = 15%, PDF = 10%
+  // Rebalanced to reduce structure/PDF saturation and reflect section-level topical fit.
   const baseScore = clampScore(
-    scorecard.structure.score * 0.20 +
-      scorecard.coverage.score * 0.15 +
-      scorecard.citations.score * 0.25 +
-      scorecard.references.score * 0.15 +
-      scorecard.pdf.score * 0.10 +
-      scorecard.qualityGate.score * 0.15
+    scorecard.structure.score * 0.14 +
+      scorecard.coverage.score * 0.14 +
+      scorecard.citations.score * 0.22 +
+      scorecard.references.score * 0.16 +
+      scorecard.topicPurity.score * 0.18 +
+      scorecard.pdf.score * 0.05 +
+      scorecard.qualityGate.score * 0.11
   );
 
   // A failed quality gate should fail the benchmark, even if structural metrics are high.

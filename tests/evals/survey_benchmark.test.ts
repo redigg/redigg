@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { aggregateSurveyBenchmarkScore, scoreSurveyBenchmarkCase } from '../../src/evals/survey-benchmark/scorer.js';
 import { computeSurgeMetrics } from '../../src/evals/survey-benchmark/metrics.js';
 import { SURVEY_BENCHMARK_CASES } from '../../src/evals/survey-benchmark/dataset.js';
-import { classifyBenchmarkError, summarizeBenchmarkResults } from '../../src/evals/survey-benchmark/run.js';
+import { classifyBenchmarkError, runBenchmarkCaseWithRetry, summarizeBenchmarkResults } from '../../src/evals/survey-benchmark/run.js';
 
 describe('survey benchmark scorer', () => {
   it('should score a grounded survey result with reasonable aggregate score', () => {
@@ -97,6 +97,7 @@ Grounded challenges synthesis [7][8].
     expect(scorecard.coverage.score).toBeGreaterThanOrEqual(70);
     expect(scorecard.citations.score).toBeGreaterThanOrEqual(70);
     expect(scorecard.references.score).toBeGreaterThanOrEqual(70);
+    expect(scorecard.topicPurity.score).toBeGreaterThanOrEqual(70);
     expect(scorecard.qualityGate.score).toBe(82);
     expect(aggregate).toBeGreaterThanOrEqual(70);
 
@@ -206,15 +207,18 @@ Grounded challenges synthesis [5][6][7][8].
     const summary = summarizeBenchmarkResults([
       {
         aggregateScore: 92,
+        attemptCount: 1,
         countedInAggregate: true
       },
       {
         aggregateScore: null,
+        attemptCount: 3,
         countedInAggregate: false,
         failureCategory: 'infrastructure'
       },
       {
         aggregateScore: 40,
+        attemptCount: 1,
         countedInAggregate: true,
         failureCategory: 'execution'
       }
@@ -222,6 +226,8 @@ Grounded challenges synthesis [5][6][7][8].
 
     expect(summary.scoredCaseCount).toBe(2);
     expect(summary.excludedCaseCount).toBe(1);
+    expect(summary.totalAttemptCount).toBe(5);
+    expect(summary.retriedCaseCount).toBe(1);
     expect(summary.infrastructureFailureCount).toBe(1);
     expect(summary.executionFailureCount).toBe(1);
     expect(summary.passedCount).toBe(1);
@@ -232,5 +238,207 @@ Grounded challenges synthesis [5][6][7][8].
     expect(classifyBenchmarkError(new Error('Connection error while contacting provider'))).toBe('infrastructure');
     expect(classifyBenchmarkError(new Error('UND_ERR_SOCKET disconnected'))).toBe('infrastructure');
     expect(classifyBenchmarkError(new Error('Unhandled TypeError in section writer'))).toBe('execution');
+  });
+
+  it('should retry infrastructure failures at case level and stop after success', async () => {
+    const benchmarkCase = SURVEY_BENCHMARK_CASES[0];
+    const attempts: number[] = [];
+    const delays: number[] = [];
+
+    const result = await runBenchmarkCaseWithRetry({
+      maxAttempts: 3,
+      initialDelayMs: 25,
+      sleepFn: async (ms) => {
+        delays.push(ms);
+      },
+      runCase: async (attempt) => {
+        attempts.push(attempt);
+
+        if (attempt === 1) {
+          return {
+            benchmarkCase,
+            success: false,
+            attemptCount: attempt,
+            countedInAggregate: false,
+            aggregateScore: null,
+            scorecard: {} as any,
+            outputPaths: {} as any,
+            summary: {} as any,
+            startedAt: '',
+            completedAt: '',
+            durationMs: 10,
+            failureCategory: 'infrastructure',
+            error: 'Connection error'
+          };
+        }
+
+        return {
+          benchmarkCase,
+          success: true,
+          attemptCount: attempt,
+          countedInAggregate: true,
+          aggregateScore: 88,
+          scorecard: {} as any,
+          outputPaths: {} as any,
+          summary: {} as any,
+          startedAt: '',
+          completedAt: '',
+          durationMs: 10
+        };
+      }
+    });
+
+    expect(attempts).toEqual([1, 2]);
+    expect(delays).toEqual([25]);
+    expect(result.success).toBe(true);
+    expect(result.attemptCount).toBe(2);
+    expect(result.aggregateScore).toBe(88);
+  });
+
+  it('should not retry execution failures', async () => {
+    const benchmarkCase = SURVEY_BENCHMARK_CASES[0];
+    const attempts: number[] = [];
+
+    const result = await runBenchmarkCaseWithRetry({
+      maxAttempts: 3,
+      sleepFn: async () => undefined,
+      runCase: async (attempt) => {
+        attempts.push(attempt);
+        return {
+          benchmarkCase,
+          success: false,
+          attemptCount: attempt,
+          countedInAggregate: true,
+          aggregateScore: 0,
+          scorecard: {} as any,
+          outputPaths: {} as any,
+          summary: {} as any,
+          startedAt: '',
+          completedAt: '',
+          durationMs: 10,
+          failureCategory: 'execution',
+          error: 'TypeError in scorer'
+        };
+      }
+    });
+
+    expect(attempts).toEqual([1]);
+    expect(result.failureCategory).toBe('execution');
+    expect(result.attemptCount).toBe(1);
+  });
+
+  it('should reward section-level topic purity and penalize foreign-domain leakage', () => {
+    const benchmarkCase = SURVEY_BENCHMARK_CASES[1];
+    const sharedPapers = Array.from({ length: 8 }, (_, index) => ({
+      title: `Reference ${index + 1}`,
+      source: index % 2 === 0 ? 'arxiv' : 'openalex'
+    }));
+
+    const highPurityResult = {
+      outline: {
+        title: 'LLM Reasoning and Deliberation',
+        taxonomy: ['reasoning', 'planning', 'evaluation', 'applications']
+      },
+      papers: sharedPapers,
+      sections: [
+        {
+          title: 'Background and Problem Setting',
+          evidenceCards: [{ paperTypeSignals: ['survey'], citation: 1, title: 'Survey of LLM Reasoning', groundedClaim: 'Reasoning survey', keyContribution: '', limitationHint: '' }],
+          claimAlignments: [{ claim: 'Background claim', citations: [1], evidenceTitles: ['Survey of LLM Reasoning'] }],
+          content: 'LLM reasoning and deliberation surveys frame the field.'
+        },
+        {
+          title: 'Methods for Reasoning and Deliberation',
+          evidenceCards: [{ paperTypeSignals: ['method', 'framework'], citation: 2, title: 'Tree Search for LLM Deliberation', groundedClaim: 'Method paper', keyContribution: '', limitationHint: '' }],
+          claimAlignments: [{ claim: 'Methods claim', citations: [2], evidenceTitles: ['Tree Search for LLM Deliberation'] }],
+          content: 'Methods focus on inference-time search and planning for LLM reasoning.'
+        },
+        {
+          title: 'Evaluation and Benchmarks',
+          evidenceCards: [{ paperTypeSignals: ['benchmark', 'evaluation'], citation: 3, title: 'Benchmarking LLM Deliberation', groundedClaim: 'Benchmark paper', keyContribution: '', limitationHint: '' }],
+          claimAlignments: [{ claim: 'Evaluation claim', citations: [3], evidenceTitles: ['Benchmarking LLM Deliberation'] }],
+          content: 'Evaluation uses reasoning benchmarks for deliberation quality.'
+        },
+        {
+          title: 'Applications and Systems',
+          evidenceCards: [{ paperTypeSignals: ['application', 'system'], citation: 4, title: 'Agentic Deliberation System', groundedClaim: 'Application paper', keyContribution: '', limitationHint: '' }],
+          claimAlignments: [{ claim: 'Application claim', citations: [4], evidenceTitles: ['Agentic Deliberation System'] }],
+          content: 'Applications deploy LLM reasoning systems in broader workflows.'
+        },
+        {
+          title: 'Challenges and Future Directions',
+          evidenceCards: [{ paperTypeSignals: ['challenges'], citation: 5, title: 'Open Problems in LLM Reasoning', groundedClaim: 'Challenge paper', keyContribution: '', limitationHint: '' }],
+          claimAlignments: [{ claim: 'Challenge claim', citations: [5], evidenceTitles: ['Open Problems in LLM Reasoning'] }],
+          content: 'Challenges include scaling reasoning depth and reliability.'
+        }
+      ],
+      formatted_output: `# LLM Reasoning and Deliberation
+
+## Abstract
+
+Survey.
+
+## Background and Problem Setting
+
+Reasoning survey [1].
+
+## Methods for Reasoning and Deliberation
+
+Inference-time search for LLM deliberation [2].
+
+## Evaluation and Benchmarks
+
+Benchmarks for reasoning quality [3].
+
+## Applications and Systems
+
+Applications of LLM deliberation systems [4].
+
+## Challenges and Future Directions
+
+Open problems for reasoning systems [5].
+
+## References
+
+1. Ref
+2. Ref
+3. Ref
+4. Ref
+5. Ref
+6. Ref
+7. Ref
+8. Ref`,
+      quality_report: {
+        overallScore: 80
+      }
+    };
+
+    const lowPurityResult = {
+      ...highPurityResult,
+      sections: [
+        {
+          title: 'Background and Problem Setting',
+          evidenceCards: [{ paperTypeSignals: ['application'], citation: 1, title: 'Legal Deliberation Systems', groundedClaim: 'Legal workflow', keyContribution: '', limitationHint: '' }],
+          claimAlignments: [{ claim: 'Background claim', citations: [1], evidenceTitles: ['Legal Deliberation Systems'] }],
+          content: 'Legal deliberation systems dominate the section.'
+        },
+        {
+          title: 'Methods for Reasoning and Deliberation',
+          evidenceCards: [{ paperTypeSignals: ['application'], citation: 2, title: 'Clinical Deliberation Assistant', groundedClaim: 'Clinical workflow', keyContribution: '', limitationHint: '' }],
+          claimAlignments: [{ claim: 'Methods claim', citations: [2], evidenceTitles: ['Clinical Deliberation Assistant'] }],
+          content: 'Clinical application workflows replace core methods.'
+        },
+        highPurityResult.sections[2],
+        highPurityResult.sections[3],
+        highPurityResult.sections[4]
+      ]
+    };
+
+    const highPurityScorecard = scoreSurveyBenchmarkCase(benchmarkCase, highPurityResult as any, {});
+    const lowPurityScorecard = scoreSurveyBenchmarkCase(benchmarkCase, lowPurityResult as any, {});
+
+    expect(highPurityScorecard.topicPurity.score).toBeGreaterThan(lowPurityScorecard.topicPurity.score);
+    expect(lowPurityScorecard.topicPurity.details.join(' ')).toContain('外域');
+    expect(aggregateSurveyBenchmarkScore(highPurityScorecard)).toBeGreaterThan(aggregateSurveyBenchmarkScore(lowPurityScorecard));
   });
 });

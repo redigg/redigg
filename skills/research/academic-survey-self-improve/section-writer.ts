@@ -41,13 +41,16 @@ Anti-patterns to avoid:
 ${template.antiPatterns.map((a) => `- ${a}`).join('\n')}
 Closing move: ${template.closingMove}`;
 
+    const subheadingGuidance = section.targetWordCount >= 400
+      ? `\nSub-heading requirement: Use 2-3 sub-headings (### level) to organize this section. Each sub-heading should cover a distinct theme, method family, or evaluation dimension. Do NOT use generic sub-headings like "Overview" or "Summary".`
+      : '';
     const prompt = `
 [SURVEY_SECTION_DRAFT]
 Topic: ${topic}
 Section title: ${section.title}
 Section goal: ${section.description}
 Target word count: ${section.targetWordCount}
-${templateBlock}
+${templateBlock}${subheadingGuidance}
 
 Evidence cards:
 ${evidenceCards.map((card) => {
@@ -83,6 +86,7 @@ Requirements for the markdown:
 - Mention at least two distinct evidence cards when more than one is available.
 - Do not introduce systems, benchmarks, datasets, or claims that are absent from the evidence cards.
 - Avoid all listed anti-patterns.
+- Prioritize evidence cards that are most specific to this section's theme. If a paper appears generic, give more space to papers with stronger section-specific relevance.
 Requirements for claimMappings:
 - Include 2-4 core sentence-level claims from the markdown body.
 - Each claim must appear verbatim or near-verbatim in the markdown.
@@ -114,7 +118,8 @@ Requirements for claimMappings:
       paperCount: sectionPapers.length,
       citations,
       evidenceCards,
-      claimAlignments
+      claimAlignments,
+      targetWordCount: section.targetWordCount
     });
   }
 

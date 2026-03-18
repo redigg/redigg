@@ -94,7 +94,7 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
     await context.updateProgress?.(95, 'Assembling final survey document', {
       overallScore: reviewed.qualityReport.overallScore
     });
-    const finalSurvey = assembleSurvey(outline, reviewed.sections, papers, reviewed.qualityReport);
+    const finalSurvey = await assembleSurvey(outline, reviewed.sections, papers, reviewed.qualityReport, context);
 
     await context.updateProgress?.(100, 'Survey complete', {
       wordCount: finalSurvey.wordCount,

@@ -1,6 +1,7 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
+import type { SkillContext } from '../../../src/skills/types.js';
 import type { FinalSurvey, SectionDraft, SurveyOutline, SurveyQualityReport } from './types.js';
-import { checkCitationConsistency, countWords, stripGhostCitations } from './utils.js';
+import { checkCitationConsistency, countWords, normalizeText, stripGhostCitations } from './utils.js';
 import { convertToLatex } from './latex-converter.js';
 
 /**
@@ -18,6 +19,9 @@ function cleanSectionContent(content: string, sectionTitle: string): string {
 
   // Remove common LLM preamble lines
   cleaned = cleaned.replace(/^(?:Here(?:'s| is) the (?:revised|improved|updated|rewritten) (?:section|version|content)[^\n]*\n+)/im, '');
+
+  // Remove template artifact leaks (e.g. "Closing move:" prefix from section templates)
+  cleaned = cleaned.replace(/\b(Closing move|Opening move|Required move|Rhetorical goal)\s*:\s*/gi, '');
 
   // If the content has the section heading duplicated, keep only the first occurrence
   const headingPattern = new RegExp(`^(##\\s+${escapeRegex(sectionTitle)}\\s*\\n)`, 'gm');
@@ -100,19 +104,65 @@ function pruneAndRenumber(
 }
 
 /**
- * Generate a brief conclusion paragraph from the section titles and outline.
+ * Generate a conclusion using LLM based on actual section content.
+ * Falls back to a template if LLM call fails.
  */
-function generateConclusion(outline: SurveyOutline, sectionTitles: string[]): string {
+async function generateConclusion(
+  context: SkillContext | null,
+  outline: SurveyOutline,
+  sections: SectionDraft[]
+): Promise<string> {
+  if (!context) {
+    return generateFallbackConclusion(outline, sections.map((s) => s.title));
+  }
+
+  const sectionSummaries = sections.map((s) => {
+    const firstParagraph = s.content.replace(/^##[^\n]*\n+/, '').split('\n\n')[0] || '';
+    return `- ${s.title}: ${firstParagraph.slice(0, 200)}...`;
+  }).join('\n');
+
+  const prompt = `Write a conclusion section (## Conclusion) for a survey titled "${outline.title}".
+
+The survey covers these sections:
+${sectionSummaries}
+
+Requirements:
+- Start with "## Conclusion"
+- 150-250 words
+- Summarize the key findings across sections (do NOT repeat section content verbatim)
+- Identify 2-3 concrete open challenges or future directions
+- End with a forward-looking statement about the field
+- Do NOT use generic platitudes — be specific to the surveyed evidence
+- Do NOT include citations [N] in the conclusion`;
+
+  try {
+    const response = await context.llm.chat([
+      { role: 'system', content: 'You write concise, specific survey conclusions.' },
+      { role: 'user', content: prompt }
+    ]);
+    const content = normalizeText(response.content);
+    if (content && content.length > 50) {
+      return content.startsWith('## ') ? content : `## Conclusion\n\n${content}`;
+    }
+  } catch {
+    // Fall through to template
+  }
+
+  return generateFallbackConclusion(outline, sections.map((s) => s.title));
+}
+
+function generateFallbackConclusion(outline: SurveyOutline, sectionTitles: string[]): string {
   const sectionList = sectionTitles.map((t) => t.replace(/^##\s*/, '')).join(', ');
   return `## Conclusion\n\nThis survey has examined ${outline.title.replace(/^A Survey of /i, '').toLowerCase()} through the lenses of ${sectionList.toLowerCase()}. The field continues to advance rapidly, with emerging systems demonstrating increasing autonomy in scientific workflows. Key open challenges include improving reliability, ensuring ethical deployment, and developing comprehensive evaluation frameworks. Future work should prioritize bridging the gap between narrow task automation and truly open-ended scientific discovery.`;
 }
 
-export function assembleSurvey(
+export async function assembleSurvey(
   outline: SurveyOutline,
   sections: SectionDraft[],
   papers: Paper[],
-  qualityReport: SurveyQualityReport
-): FinalSurvey {
+  qualityReport: SurveyQualityReport,
+  context?: SkillContext
+): Promise<FinalSurvey> {
   // Clean LLM artifacts from each section (no ghost strip yet — happens after pruning)
   let cleanedSections = sections.map((section) => ({
     ...section,
@@ -135,8 +185,7 @@ export function assembleSurvey(
     .map((paper, index) => `${index + 1}. ${paper.title}. ${paper.journal || 'Unknown venue'}, ${paper.year}. ${paper.url || ''}`.trim())
     .join('\n');
 
-  const sectionTitles = cleanedSections.map((s) => s.title);
-  const conclusion = generateConclusion(outline, sectionTitles);
+  const conclusion = await generateConclusion(context || null, outline, cleanedSections);
 
   const markdownParts = [
     `# ${outline.title}`,

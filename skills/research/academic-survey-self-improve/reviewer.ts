@@ -191,14 +191,20 @@ async function rewriteSection(
   const claimSummary = section.claimAlignments
     .map((item) => `- Claim: ${item.claim}\n  Citations: ${item.citations.join(', ')}`)
     .join('\n');
+  const target = section.targetWordCount || 200;
+  const subheadingGuidance = target >= 400
+    ? `\nIMPORTANT: Use 2-3 sub-headings (### level) to organize content within this section. Each sub-heading should cover a distinct theme or method family.`
+    : '';
   const prompt = `
 [SURVEY_SECTION_REWRITE]
 Topic: ${topic}
 Section template: ${template.label} (${template.kind})
 Rhetorical goal: ${template.rhetoricalGoal}
+Target word count: ${target} (minimum ${Math.round(target * 0.75)} words)
 Required moves:
 ${template.requiredMoves.map((m) => `- ${m}`).join('\n')}
 Closing move: ${template.closingMove}
+${subheadingGuidance}
 
 Improve the following survey section using these suggestions:
 ${suggestions.join('\n') || 'Improve clarity and evidence grounding.'}
@@ -296,6 +302,18 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     suggestions.push('Expand the section with a clearer synthesis of the retrieved evidence.');
     scorePenalty += 10;
     forceRewrite = true;
+  }
+
+  // Depth enforcement: check against targetWordCount
+  const target = section.targetWordCount || 200;
+  const minAcceptable = Math.round(target * 0.75);
+  if (wordCount < minAcceptable && wordCount >= 80) {
+    issues.push(`Section is ${wordCount} words but target is ${target} (minimum ${minAcceptable}).`);
+    suggestions.push(`Expand the section to at least ${minAcceptable} words by deepening synthesis of the evidence cards. Add sub-headings (###) to organize longer content.`);
+    scorePenalty += Math.min(15, Math.round((1 - wordCount / target) * 20));
+    forceRewrite = true;
+  } else if (wordCount >= minAcceptable) {
+    strengths.push(`Word count ${wordCount} meets target ${target}`);
   }
 
   // --- template-kind-specific checks ---

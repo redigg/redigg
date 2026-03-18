@@ -103,6 +103,7 @@ describe('reviewSurveySections', () => {
         content: '## Applications and Systems\n\nSystems such as Denario and The AI Scientist demonstrate workflow orchestration, tool coordination, and end-to-end discovery loops across literature search, experimentation, and manuscript preparation [1][2]. In both cases, the evidence emphasizes that system-level design choices matter because orchestration determines whether specialized modules can share intermediate findings and reuse outputs across steps [1][2]. The section therefore has grounded system evidence, multiple citations, and an explicit synthesis of how workflow structure affects research quality and deployment robustness [1][2].',
         paperCount: 2,
         citations: [1, 2],
+        targetWordCount: 80,
         claimAlignments: [
           {
             claim: 'Systems such as Denario and The AI Scientist demonstrate workflow orchestration, tool coordination, and end-to-end discovery loops across literature search, experimentation, and manuscript preparation.',

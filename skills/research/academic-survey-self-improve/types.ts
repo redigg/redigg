@@ -75,6 +75,7 @@ export interface SectionDraft {
   citations: number[];
   evidenceCards: EvidenceCard[];
   claimAlignments: ClaimAlignment[];
+  targetWordCount?: number;
 }
 
 export interface SectionReview {

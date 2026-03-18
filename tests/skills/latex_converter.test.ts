@@ -105,12 +105,11 @@ describe('LaTeX Converter', () => {
     expect(latex).toContain('This survey examines AI agents');
   });
 
-  it('includes taxonomy section', () => {
+  it('includes keywords after abstract', () => {
     const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
 
-    expect(latex).toContain('\\section{Taxonomy}');
+    expect(latex).toContain('\\textbf{Keywords:}');
     expect(latex).toContain('Task-based agents');
-    expect(latex).toContain('\\begin{itemize}');
   });
 
   it('includes body sections', () => {

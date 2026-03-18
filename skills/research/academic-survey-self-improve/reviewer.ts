@@ -209,7 +209,7 @@ ${subheadingGuidance}
 Improve the following survey section using these suggestions:
 ${suggestions.join('\n') || 'Improve clarity and evidence grounding.'}
 
-You must stay within the following evidence cards:
+You must stay within the following evidence cards. NEVER fabricate specific numbers, percentages, or statistics not present in the evidence cards:
 ${evidenceSummary || 'No evidence cards available.'}
 
 Current claim-to-citation alignments:

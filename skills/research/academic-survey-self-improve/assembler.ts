@@ -23,23 +23,13 @@ function cleanSectionContent(content: string, sectionTitle: string): string {
   // Remove template artifact leaks (e.g. "Closing move:" prefix from section templates)
   cleaned = cleaned.replace(/\b(Closing move|Opening move|Required move|Rhetorical goal)\s*:\s*/gi, '');
 
-  // If the content has the section heading duplicated, keep only the first occurrence
-  const headingPattern = new RegExp(`^(##\\s+${escapeRegex(sectionTitle)}\\s*\\n)`, 'gm');
-  const matches = cleaned.match(headingPattern);
-  if (matches && matches.length > 1) {
-    // Remove all but the first occurrence
-    let found = false;
-    cleaned = cleaned.replace(headingPattern, (match) => {
-      if (!found) { found = true; return match; }
-      return '';
-    });
-  }
+  // Remove ALL ## level headings from the body — the assembler will prepend the
+  // canonical heading.  This catches mismatched titles produced by LLM rewrites
+  // (e.g. "## Background and Scope" when the outline title is "Background and Evolution").
+  cleaned = cleaned.replace(/^##\s+[^\n]+\n*/gm, '');
 
-  // Ensure section starts with its heading
-  const hasHeading = cleaned.trimStart().startsWith(`## ${sectionTitle}`);
-  if (!hasHeading) {
-    cleaned = `## ${sectionTitle}\n\n${cleaned.trimStart()}`;
-  }
+  // Re-prepend the single canonical heading
+  cleaned = `## ${sectionTitle}\n\n${cleaned.trimStart()}`;
 
   return cleaned.replace(/\n{4,}/g, '\n\n\n').trim();
 }
@@ -187,19 +177,24 @@ export async function assembleSurvey(
 
   const conclusion = await generateConclusion(context || null, outline, cleanedSections);
 
+  // Embed taxonomy as a compact paragraph in the abstract footer rather than a standalone section
+  const taxonomyLine = outline.taxonomy.length > 0
+    ? `\n\n**Keywords**: ${outline.taxonomy.join(', ')}`
+    : '';
+
   const markdownParts = [
     `# ${outline.title}`,
     '## Abstract',
-    outline.abstractDraft,
-    '## Taxonomy',
-    ...outline.taxonomy.map((item) => `- ${item}`),
+    outline.abstractDraft + taxonomyLine,
     ...cleanedSections.map((section) => section.content),
     conclusion,
     '## References',
     references
   ].filter(Boolean);
 
-  const markdown = markdownParts.join('\n\n');
+  // Final ghost-citation strip on the fully assembled markdown
+  // (catches citations introduced by LLM conclusion or rewrite that escaped per-section strip)
+  const markdown = stripGhostCitations(markdownParts.join('\n\n'), referenceCount);
 
   // Run bidirectional consistency check on assembled output
   const consistency = checkCitationConsistency(markdown, referenceCount);

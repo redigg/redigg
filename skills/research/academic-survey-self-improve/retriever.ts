@@ -28,6 +28,8 @@ export async function retrieveSurveyPapers(
   const papersBySection: Record<string, Paper[]> = {};
   let totalHits = 0;
   let queryCount = 0;
+  // Track papers already assigned to previous sections — used for diversity scoring
+  const assignedPaperTitles = new Set<string>();
 
   for (const section of outline.sections) {
     const sectionPapers: Paper[] = [];
@@ -76,7 +78,14 @@ export async function retrieveSurveyPapers(
       Math.min(sectionLimit, 2)
     ).slice(0, sectionLimit);
 
-    papersBySection[section.id] = ranked.length > 0 ? ranked : seedFallback;
+    // Apply cross-section diversity: deprioritize papers already assigned to earlier sections
+    const diversified = applyDiversityPenalty(ranked.length > 0 ? ranked : seedFallback, assignedPaperTitles, sectionLimit);
+    papersBySection[section.id] = diversified;
+
+    // Record assigned papers for subsequent sections
+    for (const paper of diversified) {
+      assignedPaperTitles.add(paper.title.toLowerCase());
+    }
   }
 
   let papers = dedupePapers([
@@ -229,4 +238,24 @@ function rankPapersForSection(
     if (scoreDiff !== 0) return scoreDiff;
     return (b.year || 0) - (a.year || 0);
   });
+}
+
+/**
+ * Re-sort papers to promote diversity: papers not yet assigned to any previous
+ * section are boosted; papers already used elsewhere are pushed down.
+ * Guarantees at least `limit` papers are returned, filling with repeats if needed.
+ */
+function applyDiversityPenalty(
+  papers: Paper[],
+  assignedTitles: Set<string>,
+  limit: number
+): Paper[] {
+  if (assignedTitles.size === 0 || papers.length === 0) return papers.slice(0, limit);
+
+  const fresh = papers.filter((p) => !assignedTitles.has(p.title.toLowerCase()));
+  const reused = papers.filter((p) => assignedTitles.has(p.title.toLowerCase()));
+
+  // Prefer fresh papers, but keep at least 1 reused paper for cross-section coherence
+  const result = [...fresh, ...reused].slice(0, limit);
+  return result.length > 0 ? result : papers.slice(0, limit);
 }

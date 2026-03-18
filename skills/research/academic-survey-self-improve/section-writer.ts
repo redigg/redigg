@@ -29,6 +29,9 @@ export async function writeSurveySections(
     const evidenceCards = buildEvidenceCards(sectionPapers, citations, section, outline.topicProfile);
     const template = resolveSectionWritingTemplate(section, outline.topicProfile);
 
+    const tableBlock = template.tableGuidance
+      ? `\nTable requirement: ${template.tableGuidance}`
+      : '';
     const templateBlock = `
 Section template: ${template.label} (${template.kind})
 Rhetorical goal: ${template.rhetoricalGoal}
@@ -39,7 +42,7 @@ Citation guidance:
 ${template.citationGuidance.map((g) => `- ${g}`).join('\n')}
 Anti-patterns to avoid:
 ${template.antiPatterns.map((a) => `- ${a}`).join('\n')}
-Closing move: ${template.closingMove}`;
+Closing move: ${template.closingMove}${tableBlock}`;
 
     const subheadingGuidance = section.targetWordCount >= 400
       ? `\nSub-heading requirement: Use 2-3 sub-headings (### level) to organize this section. Each sub-heading should cover a distinct theme, method family, or evaluation dimension. Do NOT use generic sub-headings like "Overview" or "Summary".`
@@ -85,6 +88,7 @@ Requirements for the markdown:
 - Use citation markers like [1], [2] when making claims.
 - Mention at least two distinct evidence cards when more than one is available.
 - Do not introduce systems, benchmarks, datasets, or claims that are absent from the evidence cards.
+- NEVER fabricate specific numbers, percentages, or statistics (e.g. "80% of tasks", "3x more errors") unless they appear verbatim in an evidence card. If no number is available, describe the finding qualitatively.
 - Avoid all listed anti-patterns.
 - Prioritize evidence cards that are most specific to this section's theme. If a paper appears generic, give more space to papers with stronger section-specific relevance.
 Requirements for claimMappings:

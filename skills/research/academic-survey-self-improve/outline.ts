@@ -74,6 +74,7 @@ Constraints:
 - searchQueries must be concrete literature-search queries.
 - topicProfile should capture aliases and adjacent academic phrases for retrieval.
 - focusFacets should describe the paper types most useful for that section (e.g. survey, benchmark, system).
+- taxonomy MUST be classification dimensions or sub-categories specific to this topic (e.g. "Autonomous Discovery Systems", "Human-AI Co-pilot Frameworks", "Evaluation Benchmarks"). Do NOT use generic field names like "Artificial Intelligence" or "Scientific Research".
 `;
 
   const response = await context.llm.chat([

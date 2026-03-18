@@ -9,6 +9,7 @@ export interface SectionWritingTemplate {
   citationGuidance: string[];
   antiPatterns: string[];
   closingMove: string;
+  tableGuidance?: string;
 }
 
 const TEMPLATE_MAP: Record<SectionTemplateKind, SectionWritingTemplate> = {
@@ -83,7 +84,8 @@ const TEMPLATE_MAP: Record<SectionTemplateKind, SectionWritingTemplate> = {
       'Do not claim strong performance without tying it to an explicit benchmark or metric.',
       'Do not ignore what current evaluations fail to capture.'
     ],
-    closingMove: 'End by stating which benchmark gap or evaluation blind spot limits confidence in the field today.'
+    closingMove: 'End by stating which benchmark gap or evaluation blind spot limits confidence in the field today.',
+    tableGuidance: 'Include a Markdown comparison table summarizing key benchmarks/datasets (columns: Name, Task Types, Scale, Key Metric, Limitation).'
   },
   systems: {
     kind: 'systems',
@@ -107,7 +109,8 @@ const TEMPLATE_MAP: Record<SectionTemplateKind, SectionWritingTemplate> = {
       'Do not reduce the section to abstract method families.',
       'Do not describe applications without clarifying how the full system is organized.'
     ],
-    closingMove: 'End by stating what system-level capability remains hard to achieve in practical deployment.'
+    closingMove: 'End by stating what system-level capability remains hard to achieve in practical deployment.',
+    tableGuidance: 'Include a Markdown comparison table of representative systems (columns: System, Architecture, Key Capability, Limitation).'
   },
   challenges: {
     kind: 'challenges',

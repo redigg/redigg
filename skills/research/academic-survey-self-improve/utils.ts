@@ -237,7 +237,11 @@ export function assessPaperAnchors(
   let tier: AnchorAssessment['tier'] = 'off-topic';
   if (aliasMatches.length > 0 || titleTechnicalAnchorCoverage >= 2 || (hasTitleScopedMatch && hasSupportiveSignal)) {
     tier = 'strong';
-  } else if (hasTitleScopedMatch && (hasSupportiveSignal || broadAnchorCoverage >= 1)) {
+  } else if (hasTitleScopedMatch && hasSupportiveSignal) {
+    // Require both a title-scoped technical anchor AND a supportive signal (facet or paper type match)
+    tier = 'weak';
+  } else if (hasTitleScopedMatch && technicalAnchorCoverage >= 2 && broadAnchorCoverage >= 1) {
+    // Fallback weak: title match + multiple technical anchors in body + at least 1 broad anchor
     tier = 'weak';
   }
 

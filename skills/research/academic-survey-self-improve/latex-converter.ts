@@ -283,14 +283,9 @@ export function convertToLatex(
 \\begin{abstract}
 ${abstractText}
 \\end{abstract}
-`;
 
-  // Taxonomy section
-  const taxonomyItems = outline.taxonomy.map((item) => `  \\item ${convertParagraph(item)}`).join('\n');
-  const taxonomySection = `\\section{Taxonomy}
-\\begin{itemize}
-${taxonomyItems}
-\\end{itemize}
+\\noindent\\textbf{Keywords:} ${outline.taxonomy.map((item) => escapeLatex(item)).join(', ')}
+\\bigskip
 `;
 
   // Body sections
@@ -300,10 +295,11 @@ ${taxonomyItems}
     return `\\section{${sectionTitle}}\n${body}`;
   }).join('\n\n');
 
-  // Conclusion
-  const conclusionBody = convertParagraph(
-    generateConclusionText(outline, finalSurvey.sections.map((s) => s.title))
-  );
+  // Conclusion — extract from assembled markdown if available
+  const conclusionFromMarkdown = extractConclusionFromMarkdown(finalSurvey.markdown);
+  const conclusionBody = conclusionFromMarkdown
+    ? convertSectionBody(conclusionFromMarkdown, 'Conclusion')
+    : convertParagraph(generateConclusionText(outline, finalSurvey.sections.map((s) => s.title)));
   const conclusionSection = `\\section{Conclusion}\n${conclusionBody}`;
 
   // References
@@ -313,8 +309,6 @@ ${references}
 \\end{thebibliography}`;
 
   return `${preamble}
-${taxonomySection}
-
 ${bodySections}
 
 ${conclusionSection}
@@ -323,6 +317,12 @@ ${referencesSection}
 
 \\end{document}
 `;
+}
+
+function extractConclusionFromMarkdown(markdown: string): string | null {
+  const match = markdown.match(/## Conclusion\s*\n+([\s\S]*?)(?=\n## |\n*$)/);
+  if (!match || !match[1] || match[1].trim().length < 30) return null;
+  return match[1].trim();
 }
 
 function generateConclusionText(outline: SurveyOutline, sectionTitles: string[]): string {

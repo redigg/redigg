@@ -1,4 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as crypto from 'crypto';
 
 export type PaperSource = 'arxiv' | 'openalex' | 'semanticscholar';
 
@@ -17,18 +20,73 @@ export interface Paper {
   relevanceScore?: number;
 }
 
+export interface ScholarCacheOptions {
+  /** Enable disk caching of search results */
+  enabled: boolean;
+  /** Cache directory path (default: workspace/.cache/scholar) */
+  cacheDir?: string;
+  /** TTL in milliseconds (default: 24 hours) */
+  ttlMs?: number;
+}
+
+interface CacheEntry<T> {
+  timestamp: number;
+  data: T;
+}
+
 export class ScholarTool {
   private parser: XMLParser;
   private readonly openAlexApiKey = process.env.OPENALEX_API_KEY?.trim();
   private readonly openAlexEmail = process.env.OPENALEX_EMAIL?.trim();
   private readonly semanticScholarApiKey = process.env.SEMANTIC_SCHOLAR_API_KEY?.trim();
   private readonly shouldDelay = !(process.env.NODE_ENV === 'test' || process.env.VITEST === 'true');
+  private readonly cacheOptions: ScholarCacheOptions;
+  private readonly cacheDir: string;
+  private readonly cacheTtlMs: number;
 
-  constructor() {
+  constructor(cacheOptions?: ScholarCacheOptions) {
     this.parser = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: '@_'
     });
+    this.cacheOptions = cacheOptions || { enabled: false };
+    this.cacheDir = this.cacheOptions.cacheDir || path.join(process.cwd(), 'workspace', '.cache', 'scholar');
+    this.cacheTtlMs = this.cacheOptions.ttlMs ?? 24 * 60 * 60 * 1000; // 24h default
+  }
+
+  // ─── Cache helpers ──────────────────────────────────────────────
+  private cacheKey(prefix: string, ...parts: string[]): string {
+    const hash = crypto.createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16);
+    return `${prefix}_${hash}.json`;
+  }
+
+  private readCache<T>(key: string): T | null {
+    if (!this.cacheOptions.enabled) return null;
+    try {
+      const filePath = path.join(this.cacheDir, key);
+      if (!fs.existsSync(filePath)) return null;
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const entry: CacheEntry<T> = JSON.parse(raw);
+      if (Date.now() - entry.timestamp > this.cacheTtlMs) {
+        // Expired — delete and return null
+        fs.unlinkSync(filePath);
+        return null;
+      }
+      return entry.data;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeCache<T>(key: string, data: T): void {
+    if (!this.cacheOptions.enabled) return;
+    try {
+      fs.mkdirSync(this.cacheDir, { recursive: true });
+      const entry: CacheEntry<T> = { timestamp: Date.now(), data };
+      fs.writeFileSync(path.join(this.cacheDir, key), JSON.stringify(entry), 'utf8');
+    } catch {
+      // Cache write failure is non-critical
+    }
   }
 
   private async fetchWithRetry(url: string, options: RequestInit, maxRetries: number = 3): Promise<Response> {
@@ -75,6 +133,14 @@ export class ScholarTool {
   async searchPapers(topic: string, limit: number = 5): Promise<Paper[]> {
     console.log(`[ScholarTool] Searching multiple sources for: ${topic}`);
 
+    // Check cache first
+    const key = this.cacheKey('search', topic, String(limit));
+    const cached = this.readCache<Paper[]>(key);
+    if (cached) {
+      console.log(`[ScholarTool] Cache hit for: ${topic} (${cached.length} papers)`);
+      return cached;
+    }
+
     try {
       const perSourceLimit = Math.max(limit * 2, 6);
       const results = await Promise.allSettled([
@@ -100,6 +166,9 @@ export class ScholarTool {
       console.log(
         `[ScholarTool] Aggregated ${papers.length} raw hits into ${deduped.length} unique papers, returning ${finalPapers.length}`
       );
+
+      // Write to cache
+      this.writeCache(key, finalPapers);
 
       return finalPapers;
     } catch (error) {
@@ -294,6 +363,16 @@ export class ScholarTool {
   ): Promise<Paper[]> {
     const maxSeeds = options.maxSeeds ?? 5;
     const perPaperLimit = options.perPaperLimit ?? 3;
+
+    // Check cache — use seed paper titles as cache key
+    const seedKeys = seedPapers.map((p) => p.title).sort().join('|');
+    const key = this.cacheKey('cite', seedKeys, String(maxSeeds), String(perPaperLimit));
+    const cached = this.readCache<Paper[]>(key);
+    if (cached) {
+      console.log(`[ScholarTool] Cache hit for citation graph (${cached.length} papers)`);
+      return cached;
+    }
+
     const existingKeys = new Set(seedPapers.map((p) => this.buildPaperKey(p)));
 
     // Pick the most-cited seeds to expand from
@@ -310,9 +389,9 @@ export class ScholarTool {
 
       const expanded = await this.fetchCitationNeighbors(seed, perPaperLimit);
       for (const paper of expanded) {
-        const key = this.buildPaperKey(paper);
-        if (!existingKeys.has(key)) {
-          existingKeys.add(key);
+        const pkey = this.buildPaperKey(paper);
+        if (!existingKeys.has(pkey)) {
+          existingKeys.add(pkey);
           allNewPapers.push(paper);
         }
       }
@@ -322,6 +401,10 @@ export class ScholarTool {
     console.log(
       `[ScholarTool] Citation graph expanded ${sortedSeeds.length} seeds → ${deduped.length} new papers`
     );
+
+    // Write to cache
+    this.writeCache(key, deduped);
+
     return deduped;
   }
 

@@ -27,7 +27,8 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
         : { sectionLimit: 4, perQueryLimit: 4, snowballMaxSeeds: 5, snowballPerPaper: 3 };
     const seedLimit = depth === 'deep' ? 8 : depth === 'standard' ? 6 : 5;
 
-    const scholar = new ScholarTool();
+    const useCache = params.useCache === true || process.env.SCHOLAR_CACHE === 'true';
+    const scholar = new ScholarTool(useCache ? { enabled: true } : undefined);
     let seedPapers = await scholar.searchPapers(topic, seedLimit);
 
     if (seedPapers.length === 0) {

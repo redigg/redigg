@@ -262,7 +262,8 @@ async function runSingleBenchmarkCase(args: {
   try {
     const result = await skill.execute(context, {
       topic: benchmarkCase.topic,
-      depth: depthOverride || benchmarkCase.depth
+      depth: depthOverride || benchmarkCase.depth,
+      useCache: true
     });
 
     fs.writeFileSync(markdownPath, String(result.formatted_output || result.summary || ''), 'utf8');

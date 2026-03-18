@@ -1,6 +1,7 @@
 import { ScholarTool, type Paper } from '../../../src/skills/lib/ScholarTool.js';
-import type { OutlineSection, RetrievalResult, SurveyOutline } from './types.js';
-import { assessPaperAnchors, dedupePapers, filterPapersByAnchors, scorePaperForSection } from './utils.js';
+import type { SkillContext } from '../../../src/skills/types.js';
+import type { OutlineSection, RetrievalResult, SectionDraft, SurveyOutline } from './types.js';
+import { assessPaperAnchors, countWords, dedupePapers, filterPapersByAnchors, normalizeText, parseJsonObject, scorePaperForSection } from './utils.js';
 
 interface RetrieveOptions {
   sectionLimit?: number;
@@ -258,4 +259,120 @@ function applyDiversityPenalty(
   // Prefer fresh papers, but keep at least 1 reused paper for cross-section coherence
   const result = [...fresh, ...reused].slice(0, limit);
   return result.length > 0 ? result : papers.slice(0, limit);
+}
+
+// ─── T6: Gap-filling supplementary retrieval ────────────────────────
+
+interface GapAnalysis {
+  sectionId: string;
+  sectionTitle: string;
+  gaps: string[];
+  supplementaryQueries: string[];
+}
+
+/**
+ * Analyze drafted sections to identify evidence gaps, then retrieve
+ * supplementary papers to fill those gaps. Returns updated papersBySection
+ * with newly found papers merged in.
+ */
+export async function fillRetrievalGaps(
+  context: SkillContext,
+  scholar: ScholarTool,
+  outline: SurveyOutline,
+  sections: SectionDraft[],
+  existingPapers: Paper[],
+  papersBySection: Record<string, Paper[]>,
+  options: { perQueryLimit?: number; maxGapQueries?: number } = {}
+): Promise<{ papersBySection: Record<string, Paper[]>; papers: Paper[]; gapsFilled: number }> {
+  const perQueryLimit = options.perQueryLimit ?? 3;
+  const maxGapQueries = options.maxGapQueries ?? 2;
+  const shouldDelay = !(process.env.NODE_ENV === 'test' || process.env.VITEST === 'true');
+
+  // Step 1: identify gaps via LLM
+  const gaps = await analyzeGaps(context, outline, sections);
+  if (gaps.length === 0) {
+    return { papersBySection, papers: existingPapers, gapsFilled: 0 };
+  }
+
+  // Step 2: retrieve supplementary papers for each gap
+  let gapsFilled = 0;
+  const allNewPapers: Paper[] = [];
+
+  for (const gap of gaps) {
+    const queries = gap.supplementaryQueries.slice(0, maxGapQueries);
+    const section = outline.sections.find((s) => s.id === gap.sectionId);
+    if (!section || queries.length === 0) continue;
+
+    for (const query of queries) {
+      if (shouldDelay) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      const hits = await scholar.searchPapers(query, perQueryLimit);
+      const useful = outline.topicProfile
+        ? filterBatchByRelevance(hits, section, outline.topicProfile)
+        : hits;
+      allNewPapers.push(...useful);
+    }
+
+    // Merge new papers into this section
+    const current = papersBySection[gap.sectionId] || [];
+    const merged = dedupePapers([...current, ...allNewPapers]);
+    const filtered = outline.topicProfile
+      ? filterPapersByAnchors(merged, outline.topicProfile, section, current.length + 3)
+      : merged;
+    if (filtered.length > current.length) {
+      papersBySection[gap.sectionId] = filtered;
+      gapsFilled++;
+    }
+  }
+
+  const papers = dedupePapers([...existingPapers, ...allNewPapers]);
+  return { papersBySection, papers, gapsFilled };
+}
+
+async function analyzeGaps(
+  context: SkillContext,
+  outline: SurveyOutline,
+  sections: SectionDraft[]
+): Promise<GapAnalysis[]> {
+  const sectionSummaries = sections.map((s) => {
+    const wc = countWords(s.content);
+    const citeCount = new Set(Array.from(s.content.matchAll(/\[(\d+)\]/g)).map((m) => m[1])).size;
+    return `- ${s.title} (${wc} words, ${citeCount} citations, ${s.evidenceCards.length} evidence cards)`;
+  }).join('\n');
+
+  const prompt = `Analyze these survey sections for evidence gaps.
+
+Survey topic: ${outline.title}
+Sections:
+${sectionSummaries}
+
+For each section that has a gap, suggest 1-2 targeted search queries that would fill that gap.
+A "gap" means: a section that (1) has fewer than 3 evidence cards, OR (2) lacks a specific sub-topic mentioned in the outline but not covered in the draft, OR (3) relies on a single paper for most claims.
+
+Return ONLY valid JSON array (empty [] if no gaps):
+[
+  {
+    "sectionId": "section_id",
+    "sectionTitle": "Section Title",
+    "gaps": ["description of gap"],
+    "supplementaryQueries": ["search query 1", "search query 2"]
+  }
+]`;
+
+  try {
+    const response = await context.llm.chat([
+      { role: 'system', content: 'You analyze academic survey sections for evidence gaps.' },
+      { role: 'user', content: prompt }
+    ]);
+    const parsed = parseJsonObject<GapAnalysis[]>(normalizeText(response.content));
+    if (Array.isArray(parsed)) {
+      return parsed.filter((g) =>
+        g.sectionId && g.supplementaryQueries && g.supplementaryQueries.length > 0
+      );
+    }
+    return [];
+  } catch {
+    return [];
+  }
 }

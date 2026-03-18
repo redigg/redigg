@@ -1,7 +1,7 @@
 import { Skill, SkillContext, SkillParams, SkillResult } from '../../../src/skills/types.js';
 import { ScholarTool, type Paper } from '../../../src/skills/lib/ScholarTool.js';
 import { createSurveyOutline, refineOutline } from './outline.js';
-import { retrieveSurveyPapers } from './retriever.js';
+import { fillRetrievalGaps, retrieveSurveyPapers } from './retriever.js';
 import { writeSurveySections } from './section-writer.js';
 import { reviewSurveySections } from './reviewer.js';
 import { assembleSurvey } from './assembler.js';
@@ -80,11 +80,52 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
 
     await this.persistPapers(context, papers);
 
-    await context.updateProgress?.(70, 'Writing section drafts', {
+    await context.updateProgress?.(65, 'Writing section drafts', {
       sectionCount: outline.sections.length,
       deduplicatedPapers: retrieval.searchMetadata.deduplicatedCount
     });
-    const draftedSections = await writeSurveySections(context, topic, outline, retrieval.papersBySection, paperIndexMap);
+    let currentPapersBySection = retrieval.papersBySection;
+    let currentPapers = papers;
+    const draftedSections = await writeSurveySections(context, topic, outline, currentPapersBySection, paperIndexMap);
+
+    // T6: Gap-filling supplementary retrieval — analyze drafts for evidence gaps
+    await context.updateProgress?.(78, 'Analyzing evidence gaps and retrieving supplementary papers');
+    try {
+      const gapResult = await fillRetrievalGaps(
+        context, scholar, outline, draftedSections, currentPapers, currentPapersBySection,
+        { perQueryLimit: retrievalParams.perQueryLimit, maxGapQueries: 2 }
+      );
+      if (gapResult.gapsFilled > 0) {
+        context.log('thinking', `Filled ${gapResult.gapsFilled} evidence gaps with supplementary retrieval`);
+        currentPapersBySection = gapResult.papersBySection;
+        currentPapers = gapResult.papers;
+        // Rebuild paper index with new papers
+        const allPapers = dedupePapers(currentPapers);
+        const updatedIndexMap = new Map(allPapers.map((p, i) => [p.title.toLowerCase(), i + 1]));
+        // Re-write sections that got new evidence
+        const sectionsToRewrite = draftedSections.filter((s) => {
+          const oldCount = (retrieval.papersBySection[s.sectionId] || []).length;
+          const newCount = (currentPapersBySection[s.sectionId] || []).length;
+          return newCount > oldCount;
+        });
+        if (sectionsToRewrite.length > 0) {
+          context.log('thinking', `Re-writing ${sectionsToRewrite.length} sections with new evidence`);
+          const rewritten = await writeSurveySections(
+            context, topic, outline, currentPapersBySection, updatedIndexMap
+          );
+          // Merge: replace only sections that had gaps filled
+          const rewrittenIds = new Set(sectionsToRewrite.map((s) => s.sectionId));
+          for (let i = 0; i < draftedSections.length; i++) {
+            if (rewrittenIds.has(draftedSections[i].sectionId)) {
+              const replacement = rewritten.find((r) => r.sectionId === draftedSections[i].sectionId);
+              if (replacement) draftedSections[i] = replacement;
+            }
+          }
+        }
+      }
+    } catch {
+      // Gap-filling is non-critical; continue without it
+    }
 
     await context.updateProgress?.(85, 'Reviewing and refining survey sections', {
       sectionCount: draftedSections.length

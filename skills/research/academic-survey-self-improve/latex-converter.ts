@@ -251,6 +251,11 @@ export function convertToLatex(
   const title = escapeLatex(outline.title);
   const abstractText = convertParagraph(outline.abstractDraft);
 
+  // Short title for running header (truncate at 60 chars)
+  const shortTitle = outline.title.length > 60
+    ? escapeLatex(outline.title.slice(0, 57) + '...')
+    : title;
+
   const preamble = `\\documentclass[11pt,a4paper]{article}
 
 % Packages
@@ -258,6 +263,7 @@ export function convertToLatex(
 \\usepackage[T1]{fontenc}
 \\usepackage{times}
 \\usepackage[margin=1in]{geometry}
+\\usepackage{fancyhdr}
 \\usepackage{hyperref}
 \\usepackage{url}
 \\usepackage{graphicx}
@@ -271,6 +277,14 @@ export function convertToLatex(
   citecolor=blue,
   urlcolor=blue
 }
+
+% Running header
+\\pagestyle{fancy}
+\\fancyhf{}
+\\fancyhead[L]{\\small\\textit{${shortTitle}}}
+\\fancyhead[R]{\\small\\thepage}
+\\renewcommand{\\headrulewidth}{0.4pt}
+\\fancypagestyle{plain}{\\fancyhf{}\\fancyfoot[C]{\\small\\thepage}\\renewcommand{\\headrulewidth}{0pt}}
 
 \\title{${title}}
 \\author{Redigg AI Research}
@@ -302,11 +316,15 @@ ${abstractText}
     : convertParagraph(generateConclusionText(outline, finalSurvey.sections.map((s) => s.title)));
   const conclusionSection = `\\section{Conclusion}\n${conclusionBody}`;
 
-  // References
+  // References — use \small and reduced item separation to avoid trailing blank space
   const references = papers.map((paper, index) => formatReference(paper, index)).join('\n\n');
-  const referencesSection = `\\begin{thebibliography}{${papers.length}}
+  const referencesSection = `{\\small
+\\setlength{\\itemsep}{2pt}
+\\setlength{\\parsep}{0pt}
+\\begin{thebibliography}{${papers.length}}
 ${references}
-\\end{thebibliography}`;
+\\end{thebibliography}
+}`;
 
   return `${preamble}
 ${bodySections}

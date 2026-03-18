@@ -200,7 +200,7 @@ async function rewriteSection(
 Topic: ${topic}
 Section template: ${template.label} (${template.kind})
 Rhetorical goal: ${template.rhetoricalGoal}
-Target word count: ${target} (minimum ${Math.round(target * 0.75)} words)
+CRITICAL LENGTH REQUIREMENT: Write at least ${target} words, aim for ${Math.round(target * 1.1)} words. The current draft was rejected for being too short. Expand each paragraph with deeper analysis and add new paragraphs.
 Required moves:
 ${template.requiredMoves.map((m) => `- ${m}`).join('\n')}
 Closing move: ${template.closingMove}

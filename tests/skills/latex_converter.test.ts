@@ -98,6 +98,22 @@ describe('LaTeX Converter', () => {
     expect(latex).toContain('\\end{abstract}');
   });
 
+  it('includes running header with fancyhdr', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('\\usepackage{fancyhdr}');
+    expect(latex).toContain('\\pagestyle{fancy}');
+    expect(latex).toContain('\\fancyhead[L]');
+    expect(latex).toContain('\\fancyhead[R]');
+  });
+
+  it('uses compact bibliography', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('\\small');
+    expect(latex).toContain('\\setlength{\\itemsep}');
+  });
+
   it('includes title and abstract', () => {
     const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
 

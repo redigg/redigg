@@ -6,6 +6,10 @@ import type { FinalSurvey, SectionDraft, SurveyFigure, SurveyOutline } from './t
  */
 function escapeLatex(text: string): string {
   return text
+    .replace(/\u2014/g, '---')   // em-dash
+    .replace(/\u2013/g, '--')    // en-dash
+    .replace(/\u2018|\u2019/g, "'") // smart single quotes
+    .replace(/\u201C|\u201D/g, '"') // smart double quotes
     .replace(/\\/g, '\\textbackslash{}')
     .replace(/[&%$#_{}]/g, (ch) => `\\${ch}`)
     .replace(/~/g, '\\textasciitilde{}')
@@ -52,7 +56,7 @@ function convertParagraph(text: string): string {
     return `CITEPLACEHOLDER${idx}ENDCITE`;
   });
 
-  // Escape LaTeX special chars in the body text
+  // Escape LaTeX special chars in the body text (includes Unicode dash conversion)
   protected_ = escapeLatex(protected_);
 
   // Convert inline markdown
@@ -228,12 +232,25 @@ function escapeRegexStr(str: string): string {
 /**
  * Format a paper reference in LaTeX bibliography style.
  */
+/**
+ * Strip non-Latin characters that may break fonts (Cyrillic, CJK, etc.)
+ * and normalize Unicode hyphens to ASCII.
+ */
+function sanitizeForLatexFont(text: string): string {
+  return text
+    .replace(/\u2010|\u2011|\u2012/g, '-')  // Unicode hyphens → ASCII hyphen
+    .replace(/[\u0400-\u04FF]+/g, '')        // Strip Cyrillic
+    .replace(/[\u4E00-\u9FFF]+/g, '')        // Strip CJK
+    .replace(/\s{2,}/g, ' ')                 // Collapse extra spaces
+    .trim();
+}
+
 function formatReference(paper: Paper, index: number): string {
   const authors = Array.isArray(paper.authors) && paper.authors.length > 0
-    ? escapeLatex(paper.authors.join(', '))
+    ? escapeLatex(sanitizeForLatexFont(paper.authors.join(', ')))
     : 'Unknown Authors';
-  const title = escapeLatex(paper.title);
-  const venue = escapeLatex(paper.journal || 'Unknown venue');
+  const title = escapeLatex(sanitizeForLatexFont(paper.title));
+  const venue = escapeLatex(sanitizeForLatexFont(paper.journal || 'Unknown venue'));
   const year = paper.year || 'n.d.';
   const url = paper.url ? `\\url{${paper.url}}` : '';
 
@@ -270,9 +287,10 @@ export function convertToLatex(
 \\usepackage{graphicx}
 \\usepackage{booktabs}
 \\usepackage{amsmath}
+\\usepackage{amssymb}
 \\usepackage{enumitem}
 \\usepackage{tikz}
-\\usetikzlibrary{shapes,arrows,positioning,fit,calc}
+\\usetikzlibrary{shapes,arrows,positioning,fit,calc,matrix,backgrounds,decorations.pathreplacing}
 
 \\hypersetup{
   colorlinks=true,
@@ -383,13 +401,23 @@ function generateConclusionText(outline: SurveyOutline, sectionTitles: string[])
 function formatTikzFigure(figure: SurveyFigure, figNum?: number): string {
   const label = figure.label || `fig:${figure.sectionId}`;
   const caption = escapeLatex(figure.caption);
-  // Wrap TikZ code in figure environment with error protection
-  return `\\begin{figure}[htbp]
+  // Sanitize TikZ code: replace Unicode chars that break ptmr8t
+  // Also fix LLM-generated \n literals inside node text → LaTeX \\ line break
+  const sanitizedTikz = figure.tikzCode
+    .replace(/\u2014/g, '---')
+    .replace(/\u2013/g, '--')
+    .replace(/\u2018|\u2019/g, "'")
+    .replace(/\u201C|\u201D/g, '"')
+    .replace(new RegExp('\\\\n(?![a-z])', 'g'), '\\\\');
+  // Wrap TikZ code in figure environment with batchmode to prevent halting on TikZ errors
+  return `\\batchmode
+\\begin{figure}[htbp]
 \\centering
 \\resizebox{0.9\\columnwidth}{!}{%
-${figure.tikzCode}
+${sanitizedTikz}
 }
 \\caption{${caption}}
 \\label{${label}}
-\\end{figure}`;
+\\end{figure}
+\\scrollmode`;
 }

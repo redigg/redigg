@@ -113,7 +113,7 @@ function compileLatexToPdf(texPath: string, outputDir: string): string | null {
 
   // Try tectonic first (lightweight, auto-downloads packages)
   try {
-    execSync(`tectonic --outdir "${outputDir}" "${texPath}"`, {
+    execSync(`tectonic --keep-logs -Z continue-on-errors --outdir "${outputDir}" "${texPath}"`, {
       timeout: 120_000,
       stdio: 'pipe'
     });

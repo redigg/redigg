@@ -106,11 +106,15 @@ function convertMarkdownTable(tableLines: string[]): string {
 
   const headerCells = parseTableCells(tableLines[0]);
   const colCount = headerCells.length;
-  const colSpec = headerCells.map(() => 'l').join(' ');
+  // Use p{} columns with calculated widths to prevent overflow
+  // Reserve ~0.5cm per column for padding, distribute remaining width evenly
+  const colWidth = Math.max(1.5, (15 - colCount * 0.5) / colCount);
+  const colSpec = headerCells.map(() => `p{${colWidth.toFixed(1)}cm}`).join(' ');
 
   const output: string[] = [];
   output.push('\\begin{table}[h]');
   output.push('\\centering');
+  output.push('\\small');
   output.push(`\\begin{tabular}{${colSpec}}`);
   output.push('\\toprule');
 
@@ -137,6 +141,8 @@ function convertMarkdownTable(tableLines: string[]): string {
 function convertSectionBody(content: string, sectionTitle: string): string {
   // Remove the ## heading line if present
   let body = content.replace(new RegExp(`^##\\s+${escapeRegexStr(sectionTitle)}\\s*\\n+`, 'm'), '');
+  // Strip LLM meta-commentary that sometimes leaks into section content
+  body = stripLlmMetaText(body);
   body = body.trim();
 
   const lines = body.split('\n');
@@ -207,6 +213,14 @@ function convertSectionBody(content: string, sectionTitle: string): string {
       continue;
     }
 
+    // Sub-sub-heading (#### level) → \paragraph
+    const subSubHeadingMatch = line.match(/^####\s+(.*)$/);
+    if (subSubHeadingMatch) {
+      flushList();
+      output.push(`\\paragraph{${escapeLatex(subSubHeadingMatch[1])}}`);
+      continue;
+    }
+
     // Sub-heading (### level)
     const subHeadingMatch = line.match(/^###\s+(.*)$/);
     if (subHeadingMatch) {
@@ -242,8 +256,23 @@ function stripMermaidBlocks(text: string): string {
 }
 
 /**
- * Format a paper reference in LaTeX bibliography style.
+ * Strip LLM meta-commentary that leaks into section drafts.
+ * Examples: "Here's the expanded...", "This revision:", "Key improvements:"
  */
+function stripLlmMetaText(text: string): string {
+  const metaPatterns = [
+    // Opening meta-lines: "Here's the ...", "Below is ...", "I've expanded ..."
+    /^(?:Here(?:'s| is) (?:the|an|a) (?:expanded|restructured|revised|updated|improved|rewritten)[\s\S]*?:)\s*\n/gm,
+    // Trailing self-assessment blocks: "This revision:", "Key improvements:", "Changes made:"
+    /\n(?:This (?:revision|version|section|rewrite)|Key (?:improvements|changes)|Changes (?:made|include)|Note:|Summary of changes):[\s\S]*$/gm,
+  ];
+  let result = text;
+  for (const pattern of metaPatterns) {
+    result = result.replace(pattern, '\n');
+  }
+  return result;
+}
+
 /**
  * Strip non-Latin characters that may break fonts (Cyrillic, CJK, etc.)
  * and normalize Unicode hyphens to ASCII.
@@ -301,6 +330,7 @@ export function convertToLatex(
 \\usepackage{amsmath}
 \\usepackage{amssymb}
 \\usepackage{enumitem}
+\\usepackage{adjustbox}
 \\usepackage{tikz}
 \\usetikzlibrary{shapes,arrows,positioning,fit,calc,matrix,backgrounds,decorations.pathreplacing}
 
@@ -416,7 +446,7 @@ function formatTikzFigure(figure: SurveyFigure, figNum?: number): string {
   const caption = escapeLatex(figure.caption);
   // Sanitize TikZ code: replace Unicode chars that break ptmr8t
   // Also fix LLM-generated \n literals inside node text → LaTeX \\ line break
-  const sanitizedTikz = figure.tikzCode
+  let sanitizedTikz = figure.tikzCode
     .replace(/\u2014/g, '---')
     .replace(/\u2013/g, '--')
     .replace(/\u2018|\u2019/g, "'")
@@ -428,13 +458,30 @@ function formatTikzFigure(figure: SurveyFigure, figNum?: number): string {
     // Also handle when it's the only or first option
     .replace(/\[\s*\\(footnotesize|small|tiny|scriptsize|normalsize|large)\s*,/g, '[font=\\$1,')
     .replace(/\[\s*\\(footnotesize|small|tiny|scriptsize|normalsize|large)\s*\]/g, '[font=\\$1]');
+
+  // Shrink text width to prevent overlap: 3cm→2cm, 2.5cm→1.8cm
+  sanitizedTikz = sanitizedTikz
+    .replace(/text width\s*=\s*3cm/g, 'text width=2cm')
+    .replace(/text width\s*=\s*2\.5cm/g, 'text width=1.8cm');
+
+  // Use xscale on tikzpicture to uniformly spread ALL coordinates (nodes + draw lines + arrows)
+  // This avoids the bug where regex-based node spreading desynchronizes nodes from arrows
+  if (sanitizedTikz.includes('\\begin{tikzpicture}[')) {
+    if (!/xscale\s*=/.test(sanitizedTikz)) {
+      sanitizedTikz = sanitizedTikz.replace('\\begin{tikzpicture}[', '\\begin{tikzpicture}[xscale=1.3, ');
+    }
+  } else if (sanitizedTikz.includes('\\begin{tikzpicture}')) {
+    sanitizedTikz = sanitizedTikz.replace('\\begin{tikzpicture}', '\\begin{tikzpicture}[xscale=1.3]');
+  }
+
   // Wrap TikZ code in figure environment with batchmode to prevent halting on TikZ errors
+  // Use adjustbox to scale down if too wide, with max height to prevent page-dominating figures
   return `\\batchmode
 \\begin{figure}[htbp]
 \\centering
-\\resizebox{0.9\\columnwidth}{!}{%
+\\begin{adjustbox}{max width=\\columnwidth, max height=0.35\\textheight, keepaspectratio, center}
 ${sanitizedTikz}
-}
+\\end{adjustbox}
 \\caption{${caption}}
 \\label{${label}}
 \\end{figure}

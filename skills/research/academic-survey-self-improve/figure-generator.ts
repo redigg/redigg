@@ -49,23 +49,24 @@ Return ONLY valid JSON:
 
 CRITICAL TikZ layout rules (you MUST follow ALL of these):
 - Use \\node with explicit (x,y) coordinates — do NOT rely on automatic positioning
-- Every node MUST have: text width=3cm, align=center, minimum height=0.8cm
-- Horizontal spacing between sibling nodes: at least 3.5cm center-to-center
-- Vertical spacing between levels: at least 1.8cm
+- Every node MUST have: text width=2.5cm, align=center, minimum height=0.7cm, draw, rounded corners
+- Horizontal spacing between sibling nodes: at least 4cm center-to-center
+- Vertical spacing between levels: at least 2cm
 - Root node at (0,0), children spread evenly below
-- Max 3 levels deep, max 8 leaf nodes
+- MAXIMUM 2 levels deep, MAXIMUM 5 child nodes (keep it simple and clean!)
+- If there are more than 5 sections, group related sections into 3-4 high-level categories
 - For font size, use font=\\small or font=\\footnotesize as a NODE OPTION (e.g. \\node[font=\\small, ...])
 - NEVER put \\footnotesize or \\small directly as a node option without font= prefix
 - Use \\draw[->, >=stealth] for arrows — NO dashed criss-crossing lines
 - Do NOT use \\matrix, forest, or child syntax — use explicit \\node and \\draw only
 - Do NOT use \\n for line breaks — use \\\\\\\\ inside node text
-- Keep total diagram width under 14cm and height under 10cm
-- Node labels must be SHORT (max 3 words per line, max 2 lines)
+- Keep total diagram width under 12cm and height under 6cm
+- Node labels must be SHORT (max 2 words per line, max 2 lines)
 
 Mermaid requirements:
 - Use 'graph TD' (top-down) layout
 - Use descriptive short labels (max 25 chars)
-- Max 12 nodes`;
+- Max 8 nodes`;
 
   try {
     const response = await context.llm.chat([
@@ -95,10 +96,9 @@ async function generateSectionFigure(
   section: SectionDraft
 ): Promise<SurveyFigure | null> {
   // Only generate figures for certain section types
+  // Skip "comparison" — it produces ugly TikZ grids that duplicate table content
   const figureTypes: Record<string, string> = {
     methods: 'workflow',
-    benchmark: 'comparison',
-    systems: 'comparison',
     background: 'timeline'
   };
 

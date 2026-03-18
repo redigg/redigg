@@ -9,6 +9,10 @@ import type {
 
 interface BenchmarkArtifacts {
   pdfPath?: string;
+  externalQa?: {
+    score: number;
+    passed: boolean;
+  };
 }
 
 function clampScore(value: number, maxScore = 100): number {
@@ -315,15 +319,42 @@ function scorePdf(result: SkillResult, artifacts: BenchmarkArtifacts): Benchmark
 
 // ── Quality Gate ───────────────────────────────────────────────────────
 
-function scoreQualityGate(result: SkillResult): BenchmarkMetric {
+function scoreQualityGate(
+  result: SkillResult,
+  externalQa?: BenchmarkArtifacts['externalQa']
+): BenchmarkMetric {
   const details: string[] = [];
-  const overallScore = Number(result.quality_report?.overallScore || 0);
-  details.push(`workflow 质量门分数 ${overallScore}`);
+  const workflowScore = clampScore(Number(result.quality_report?.overallScore || 0));
+  details.push(`workflow 质量门分数 ${workflowScore}`);
+
+  if (!externalQa) {
+    return {
+      score: workflowScore,
+      maxScore: 100,
+      passed: workflowScore >= 70,
+      details
+    };
+  }
+
+  const llmQaScore = clampScore(Number(externalQa.score || 0));
+  const discrepancy = Math.abs(workflowScore - llmQaScore);
+  const disagreementPenalty = Math.max(0, discrepancy - 10);
+  const calibratedScore = clampScore(Math.min(workflowScore, llmQaScore) - disagreementPenalty);
+
+  details.push(`strict LLM QA 分数 ${llmQaScore}`);
+  details.push(`质量分歧 ${discrepancy}`);
+  if (disagreementPenalty > 0) {
+    details.push(`分歧惩罚 -${disagreementPenalty}`);
+  }
+  details.push(`校准后质量门分数 ${calibratedScore}`);
+  if (!externalQa.passed) {
+    details.push('strict LLM QA 未通过，aggregate score 将被质量门封顶');
+  }
 
   return {
-    score: clampScore(overallScore),
+    score: calibratedScore,
     maxScore: 100,
-    passed: overallScore >= 70,
+    passed: workflowScore >= 70 && externalQa.passed && calibratedScore >= 70,
     details
   };
 }
@@ -341,14 +372,14 @@ export function scoreSurveyBenchmarkCase(
     citations: scoreCitations(benchmarkCase, result),
     references: scoreReferences(benchmarkCase, result),
     pdf: scorePdf(result, artifacts),
-    qualityGate: scoreQualityGate(result)
+    qualityGate: scoreQualityGate(result, artifacts.externalQa)
   };
 }
 
 export function aggregateSurveyBenchmarkScore(scorecard: SurveyBenchmarkTopicScorecard): number {
   // Weights: content quality (citations + references) = 40%, structure = 20%,
   // coverage = 15%, quality gate = 15%, PDF = 10%
-  return clampScore(
+  const baseScore = clampScore(
     scorecard.structure.score * 0.20 +
       scorecard.coverage.score * 0.15 +
       scorecard.citations.score * 0.25 +
@@ -356,4 +387,7 @@ export function aggregateSurveyBenchmarkScore(scorecard: SurveyBenchmarkTopicSco
       scorecard.pdf.score * 0.10 +
       scorecard.qualityGate.score * 0.15
   );
+
+  // A failed quality gate should fail the benchmark, even if structural metrics are high.
+  return scorecard.qualityGate.passed ? baseScore : Math.min(baseScore, 69);
 }

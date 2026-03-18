@@ -64,6 +64,9 @@ const FACET_TO_PAPER_TYPES: Record<string, string[]> = {
 export interface AnchorAssessment {
   anchorCoverage: number;
   technicalAnchorCoverage: number;
+  broadAnchorCoverage: number;
+  titleAnchorCoverage: number;
+  titleTechnicalAnchorCoverage: number;
   aliasMatches: string[];
   facetMatches: string[];
   paperTypeSignals: string[];
@@ -157,7 +160,7 @@ export function scorePaperForSection(
   topicProfile?: TopicProfile,
   section?: OutlineSection
 ): number {
-  const haystack = `${paper.title} ${paper.summary}`.toLowerCase();
+  const haystack = buildPaperMatchText(paper);
   const keywordScore = keywords.reduce((acc, keyword) => {
     if (!keyword) return acc;
     const escaped = keyword.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -204,48 +207,46 @@ export function assessPaperAnchors(
 ): AnchorAssessment {
   const focusFacets = normalizeFacetTerms([
     ...(section.focusFacets || []),
-    ...((topicProfile?.sectionFacets?.[section.id]) || []),
-    ...(topicProfile?.intentFacets || []),
-    ...(topicProfile?.preferredPaperTypes || [])
+    ...((topicProfile?.sectionFacets?.[section.id]) || [])
   ]);
-  const text = normalizeMatchText([
-    paper.title,
-    paper.summary,
-    paper.journal,
-    ...(paper.authors || [])
-  ].filter(Boolean).join(' '));
+  const text = buildPaperMatchText(paper);
   const tokens = new Set(tokenizeForMatch(text));
+  const titleText = normalizeMatchText(paper.title || '');
+  const titleTokens = new Set(tokenizeForMatch(titleText));
   const anchors = normalizeAnchorTerms(topicProfile?.anchorTerms || []);
   const technicalAnchors = anchors.filter((anchor) => !BROAD_ANCHOR_TERMS.has(anchor));
+  const preferredPaperTypes = topicProfile ? inferPreferredPaperTypes(section, topicProfile) : new Set<string>();
   const aliasMatches = (topicProfile?.aliasPhrases || []).filter((alias) => {
     const normalizedAlias = normalizeMatchText(alias);
     return normalizedAlias.length > 0 && text.includes(normalizedAlias);
   });
   const anchorCoverage = anchors.filter((anchor) => tokens.has(anchor)).length;
   const technicalAnchorCoverage = technicalAnchors.filter((anchor) => tokens.has(anchor)).length;
+  const broadAnchorCoverage = Math.max(0, anchorCoverage - technicalAnchorCoverage);
+  const titleAnchorCoverage = anchors.filter((anchor) => titleTokens.has(anchor)).length;
+  const titleTechnicalAnchorCoverage = technicalAnchors.filter((anchor) => titleTokens.has(anchor)).length;
   const facetMatches = focusFacets.filter((facet) => {
     const normalizedFacet = normalizeMatchText(facet);
     return normalizedFacet.length > 0 && text.includes(normalizedFacet);
   });
   const paperTypeSignals = detectPaperTypeSignals(text);
-  const hasSupportiveSignal = facetMatches.length > 0 || paperTypeSignals.length > 0;
+  const preferredTypeMatches = paperTypeSignals.filter((signal) => preferredPaperTypes.has(signal));
+  const hasSupportiveSignal = facetMatches.length > 0 || preferredTypeMatches.length > 0;
+  const hasTitleScopedMatch = titleTechnicalAnchorCoverage >= 1 || aliasMatches.length > 0;
 
   let tier: AnchorAssessment['tier'] = 'off-topic';
-  if (
-    aliasMatches.length > 0 ||
-    (technicalAnchorCoverage >= 1 && (anchorCoverage >= 2 || hasSupportiveSignal))
-  ) {
+  if (aliasMatches.length > 0 || titleTechnicalAnchorCoverage >= 2 || (hasTitleScopedMatch && hasSupportiveSignal)) {
     tier = 'strong';
-  } else if (
-    technicalAnchorCoverage >= 1 ||
-    (anchorCoverage >= 2 && hasSupportiveSignal)
-  ) {
+  } else if (hasTitleScopedMatch && (hasSupportiveSignal || broadAnchorCoverage >= 1)) {
     tier = 'weak';
   }
 
   return {
     anchorCoverage,
     technicalAnchorCoverage,
+    broadAnchorCoverage,
+    titleAnchorCoverage,
+    titleTechnicalAnchorCoverage,
     aliasMatches,
     facetMatches,
     paperTypeSignals,
@@ -286,7 +287,7 @@ export function filterPapersByAnchors(
   }
 
   const fallback = weak.slice(0, minimumKeep).map((item) => item.paper);
-  return fallback.length > 0 ? fallback : papers;
+  return fallback;
 }
 
 export function buildEvidenceCards(
@@ -532,6 +533,15 @@ function normalizeMatchToken(token: string): string {
   }
 
   return token;
+}
+
+function buildPaperMatchText(paper: Paper): string {
+  const summarySnippet = (paper.summary || '').slice(0, 1200);
+  return normalizeMatchText([
+    paper.title,
+    summarySnippet,
+    paper.journal
+  ].filter(Boolean).join(' '));
 }
 
 function fallbackContribution(paper: Paper): string {

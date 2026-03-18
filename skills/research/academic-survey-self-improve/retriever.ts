@@ -69,8 +69,14 @@ export async function retrieveSurveyPapers(
     );
     const ranked = rankPapersForSection(anchorFiltered, section, outline.topicProfile)
       .slice(0, sectionLimit);
+    const seedFallback = filterPapersByAnchors(
+      rankPapersForSection(seedPapers, section, outline.topicProfile),
+      outline.topicProfile,
+      section,
+      Math.min(sectionLimit, 2)
+    ).slice(0, sectionLimit);
 
-    papersBySection[section.id] = ranked.length > 0 ? ranked : seedPapers.slice(0, sectionLimit);
+    papersBySection[section.id] = ranked.length > 0 ? ranked : seedFallback;
   }
 
   let papers = dedupePapers([
@@ -175,8 +181,8 @@ function hasEnoughQualityPapers(
   return qualityCount >= EARLY_STOP_THRESHOLD;
 }
 
-/** Filter a search batch: keep papers with at least weak relevance; if batch
- *  quality is below threshold, return all (degrade gracefully instead of dropping everything) */
+/** Filter a search batch: keep only papers with at least weak section relevance.
+ *  If a batch is mostly noise, drop the noise instead of letting it spill into evidence cards. */
 function filterBatchByRelevance(
   papers: Paper[],
   section: OutlineSection,
@@ -197,8 +203,8 @@ function filterBatchByRelevance(
     return relevant.map((item) => item.paper);
   }
 
-  // If batch is mostly off-topic, keep all to avoid losing the few useful ones
-  return papers;
+  // If batch is mostly off-topic, still keep the relevant minority instead of the whole batch.
+  return relevant.map((item) => item.paper);
 }
 
 function rankPapersForSection(

@@ -107,4 +107,97 @@ Grounded challenges synthesis [7][8].
     expect(surgeMetrics.structuralSimilarity).toBeGreaterThan(0.5);
     expect(surgeMetrics.composite).toBeGreaterThan(0);
   });
+
+  it('should calibrate aggregate score down when strict LLM QA fails', () => {
+    const benchmarkCase = SURVEY_BENCHMARK_CASES[0];
+    const result = {
+      outline: {
+        title: 'A Survey of AI Agent for Scientific Research',
+        taxonomy: ['systems', 'benchmarks', 'workflows', 'challenges']
+      },
+      papers: Array.from({ length: 8 }, (_, index) => ({
+        title: `Reference ${index + 1}`,
+        source: index % 2 === 0 ? 'arxiv' : 'openalex'
+      })),
+      sections: [
+        {
+          title: 'Background and Scope',
+          evidenceCards: [{ paperTypeSignals: ['survey'], citation: 1 }],
+          claimAlignments: [{ claim: 'Background claim', citations: [1], evidenceTitles: ['Reference 1'] }]
+        },
+        {
+          title: 'Core Methods',
+          evidenceCards: [{ paperTypeSignals: ['system', 'workflow'], citation: 2 }],
+          claimAlignments: [{ claim: 'Methods claim', citations: [2], evidenceTitles: ['Reference 2'] }]
+        },
+        {
+          title: 'Evaluation and Benchmarks',
+          evidenceCards: [{ paperTypeSignals: ['benchmark', 'evaluation'], citation: 3 }],
+          claimAlignments: [{ claim: 'Benchmark claim', citations: [3], evidenceTitles: ['Reference 3'] }]
+        },
+        {
+          title: 'Applications and Systems',
+          evidenceCards: [{ paperTypeSignals: ['system', 'workflow'], citation: 4 }],
+          claimAlignments: [{ claim: 'Systems claim', citations: [4], evidenceTitles: ['Reference 4'] }]
+        },
+        {
+          title: 'Open Challenges',
+          evidenceCards: [{ paperTypeSignals: ['challenges'], citation: 5 }],
+          claimAlignments: [{ claim: 'Challenge claim', citations: [5], evidenceTitles: ['Reference 5'] }]
+        }
+      ],
+      formatted_output: `# A Survey of AI Agent for Scientific Research
+
+## Abstract
+
+This survey reviews the field and provides a structured synthesis.
+
+## Background and Scope
+
+Grounded discussion [1][2].
+
+## Core Methods
+
+Grounded methods synthesis [2][3].
+
+## Evaluation and Benchmarks
+
+Grounded benchmark synthesis [3][4].
+
+## Applications and Systems
+
+Grounded systems synthesis [4][5].
+
+## Open Challenges
+
+Grounded challenges synthesis [5][6][7][8].
+
+## References
+
+1. Ref
+2. Ref
+3. Ref
+4. Ref
+5. Ref
+6. Ref
+7. Ref
+8. Ref`,
+      quality_report: {
+        overallScore: 80
+      }
+    };
+
+    const scorecard = scoreSurveyBenchmarkCase(benchmarkCase, result as any, {
+      externalQa: {
+        score: 65,
+        passed: false
+      }
+    });
+    const aggregate = aggregateSurveyBenchmarkScore(scorecard);
+
+    expect(scorecard.qualityGate.score).toBeLessThan(70);
+    expect(scorecard.qualityGate.passed).toBe(false);
+    expect(scorecard.qualityGate.details.join(' ')).toContain('strict LLM QA 未通过');
+    expect(aggregate).toBeLessThan(70);
+  });
 });

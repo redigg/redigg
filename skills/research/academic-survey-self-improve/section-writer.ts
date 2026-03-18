@@ -91,6 +91,7 @@ Requirements for the markdown:
 - NEVER fabricate specific numbers, percentages, or statistics (e.g. "80% of tasks", "3x more errors") unless they appear verbatim in an evidence card. If no number is available, describe the finding qualitatively.
 - Avoid all listed anti-patterns.
 - Prioritize evidence cards that are most specific to this section's theme. If a paper appears generic, give more space to papers with stronger section-specific relevance.
+- VOCABULARY DIVERSITY: Vary your vocabulary across sentences. Avoid repeating the same phrases (e.g. "demonstrates", "highlights", "underscores") more than twice. Use diverse academic verbs and sentence structures.
 Requirements for claimMappings:
 - Include 2-4 core sentence-level claims from the markdown body.
 - Each claim must appear verbatim or near-verbatim in the markdown.

@@ -1,6 +1,6 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { SkillContext } from '../../../src/skills/types.js';
-import type { FinalSurvey, SectionDraft, SurveyOutline, SurveyQualityReport } from './types.js';
+import type { FinalSurvey, SectionDraft, SurveyFigure, SurveyOutline, SurveyQualityReport } from './types.js';
 import { checkCitationConsistency, countWords, normalizeText, stripGhostCitations } from './utils.js';
 import { convertToLatex } from './latex-converter.js';
 
@@ -254,15 +254,17 @@ async function addSectionTransitions(
     const curr = sections[i];
 
     try {
-      const prompt = `Write ONE transition sentence (15-30 words) that connects the end of a section titled "${prev.title}" to the beginning of a section titled "${curr.title}" in an academic survey.
+      // Get the first paragraph after the heading to avoid redundancy
+      const firstPara = curr.content.replace(/^## [^\n]+\n+/, '').split('\n\n')[0] || '';
+      const prompt = `Write ONE transition sentence (20-35 words) connecting a section titled "${prev.title}" to a section titled "${curr.title}" in an academic survey.
 
-The transition should:
-- Reference what was covered in the previous section
-- Motivate why the next section follows naturally
-- Be in academic tone
-- NOT include citations
+The FIRST paragraph of the next section begins: "${firstPara.slice(0, 150)}..."
 
-Return ONLY the single sentence, no quotes.`;
+Requirements:
+- Bridge from the previous section's topic to this section's topic
+- Do NOT repeat the first paragraph's opening — complement it
+- Academic tone, no citations [N]
+- Return ONLY the single sentence, no quotes`;
 
       const response = await context.llm.chat([
         { role: 'system', content: 'You write smooth academic transitions.' },
@@ -287,6 +289,29 @@ Return ONLY the single sentence, no quotes.`;
   return result;
 }
 
+/**
+ * Embed Mermaid figure blocks at the end of matching sections.
+ */
+function embedMermaidFigures(sections: SectionDraft[], figures: SurveyFigure[]): SectionDraft[] {
+  if (figures.length === 0) return sections;
+
+  let figureCounter = 1; // Start at 2 if taxonomy figure exists
+  const hasTaxonomy = figures.some((f) => f.sectionId === '_taxonomy');
+  if (hasTaxonomy) figureCounter = 2;
+
+  return sections.map((section) => {
+    const sectionFigure = figures.find((f) => f.sectionId === section.sectionId);
+    if (!sectionFigure) return section;
+
+    const figNum = figureCounter++;
+    const figBlock = `\n\n\`\`\`mermaid\n${sectionFigure.mermaidCode}\n\`\`\`\n\n*Figure ${figNum}: ${sectionFigure.caption}*`;
+    return {
+      ...section,
+      content: section.content + figBlock
+    };
+  });
+}
+
 function generateFallbackIntroduction(outline: SurveyOutline, sectionTitles: string[]): string {
   const topic = outline.title.replace(/^A Survey of /i, '').replace(/^Survey on /i, '');
   const roadmap = sectionTitles.map((t, i) => `Section ${i + 2} covers ${t.toLowerCase()}`).join(', ');
@@ -298,7 +323,8 @@ export async function assembleSurvey(
   sections: SectionDraft[],
   papers: Paper[],
   qualityReport: SurveyQualityReport,
-  context?: SkillContext
+  context?: SkillContext,
+  figures?: SurveyFigure[]
 ): Promise<FinalSurvey> {
   // Clean LLM artifacts from each section (no ghost strip yet — happens after pruning)
   let cleanedSections = sections.map((section) => ({
@@ -333,9 +359,18 @@ export async function assembleSurvey(
   // W2: Add transition sentences between consecutive sections
   const transitionedSections = await addSectionTransitions(context || null, cleanedSections);
 
+  // Embed Mermaid figures into markdown sections
+  const figuredSections = embedMermaidFigures(transitionedSections, figures || []);
+
   // Embed taxonomy as a compact paragraph in the abstract footer rather than a standalone section
   const taxonomyLine = outline.taxonomy.length > 0
     ? `\n\n**Keywords**: ${outline.taxonomy.join(', ')}`
+    : '';
+
+  // Taxonomy figure (if available) goes after introduction
+  const taxonomyFigureMd = figures?.find((f) => f.sectionId === '_taxonomy');
+  const taxonomyBlock = taxonomyFigureMd
+    ? `\`\`\`mermaid\n${taxonomyFigureMd.mermaidCode}\n\`\`\`\n\n*Figure 1: ${taxonomyFigureMd.caption}*`
     : '';
 
   const markdownParts = [
@@ -343,7 +378,8 @@ export async function assembleSurvey(
     '## Abstract',
     abstractText + taxonomyLine,
     introduction,
-    ...transitionedSections.map((section) => section.content),
+    taxonomyBlock,
+    ...figuredSections.map((section) => section.content),
     conclusion,
     '## References',
     references
@@ -372,7 +408,7 @@ export async function assembleSurvey(
         isConsistent: consistency.isConsistent
       }
     };
-    latex = convertToLatex(outline, surveyForLatex, finalPapers);
+    latex = convertToLatex(outline, surveyForLatex, finalPapers, figures);
   } catch {
     // LaTeX generation is non-critical; continue without it
   }
@@ -382,6 +418,7 @@ export async function assembleSurvey(
     markdown,
     latex,
     sections: cleanedSections,
+    figures: figures && figures.length > 0 ? figures : undefined,
     referencedPapers: finalPapers,
     wordCount: countWords(markdown),
     citationCount: referenceCount,

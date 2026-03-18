@@ -1,5 +1,5 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
-import type { FinalSurvey, SectionDraft, SurveyOutline } from './types.js';
+import type { FinalSurvey, SectionDraft, SurveyFigure, SurveyOutline } from './types.js';
 
 /**
  * Escape special LaTeX characters in plain text.
@@ -246,7 +246,8 @@ function formatReference(paper: Paper, index: number): string {
 export function convertToLatex(
   outline: SurveyOutline,
   finalSurvey: FinalSurvey,
-  papers: Paper[]
+  papers: Paper[],
+  figures?: SurveyFigure[]
 ): string {
   const title = escapeLatex(outline.title);
   const abstractText = convertParagraph(outline.abstractDraft);
@@ -270,6 +271,8 @@ export function convertToLatex(
 \\usepackage{booktabs}
 \\usepackage{amsmath}
 \\usepackage{enumitem}
+\\usepackage{tikz}
+\\usetikzlibrary{shapes,arrows,positioning,fit,calc}
 
 \\hypersetup{
   colorlinks=true,
@@ -311,11 +314,22 @@ ${abstractText}
     ? `\\section{Introduction}\n${convertSectionBody(introFromMarkdown, 'Introduction')}`
     : '';
 
-  // Body sections
+  // Taxonomy figure (if available) — placed after introduction
+  const taxonomyFigure = figures?.find((f) => f.sectionId === '_taxonomy');
+  const taxonomyFigureLatex = taxonomyFigure
+    ? formatTikzFigure(taxonomyFigure)
+    : '';
+
+  // Body sections with embedded TikZ figures
+  let figCounter = taxonomyFigure ? 2 : 1;
   const bodySections = finalSurvey.sections.map((section) => {
     const sectionTitle = escapeLatex(section.title);
-    const body = convertSectionBody(section.content, section.title);
-    return `\\section{${sectionTitle}}\n${body}`;
+    // Strip mermaid code blocks from body before converting (they're in LaTeX as TikZ)
+    const cleanedContent = section.content.replace(/```mermaid[\s\S]*?```\n*\*Figure \d+:[^*]*\*/g, '');
+    const body = convertSectionBody(cleanedContent, section.title);
+    const sectionFigure = figures?.find((f) => f.sectionId === section.sectionId);
+    const figureBlock = sectionFigure ? `\n\n${formatTikzFigure(sectionFigure, figCounter++)}` : '';
+    return `\\section{${sectionTitle}}\n${body}${figureBlock}`;
   }).join('\n\n');
 
   // Conclusion — extract from assembled markdown if available
@@ -336,7 +350,7 @@ ${references}
 }`;
 
   return `${preamble}
-${introSection ? introSection + '\n\n' : ''}${bodySections}
+${introSection ? introSection + '\n\n' : ''}${taxonomyFigureLatex ? taxonomyFigureLatex + '\n\n' : ''}${bodySections}
 
 ${conclusionSection}
 
@@ -361,4 +375,21 @@ function extractConclusionFromMarkdown(markdown: string): string | null {
 function generateConclusionText(outline: SurveyOutline, sectionTitles: string[]): string {
   const sectionList = sectionTitles.map((t) => t.replace(/^##\s*/, '')).join(', ');
   return `This survey has examined ${outline.title.replace(/^A Survey of /i, '').toLowerCase()} through the lenses of ${sectionList.toLowerCase()}. The field continues to advance rapidly, with emerging systems demonstrating increasing autonomy in scientific workflows. Key open challenges include improving reliability, ensuring ethical deployment, and developing comprehensive evaluation frameworks. Future work should prioritize bridging the gap between narrow task automation and truly open-ended scientific discovery.`;
+}
+
+/**
+ * Format a TikZ figure wrapped in a LaTeX figure environment.
+ */
+function formatTikzFigure(figure: SurveyFigure, figNum?: number): string {
+  const label = figure.label || `fig:${figure.sectionId}`;
+  const caption = escapeLatex(figure.caption);
+  // Wrap TikZ code in figure environment with error protection
+  return `\\begin{figure}[htbp]
+\\centering
+\\resizebox{0.9\\columnwidth}{!}{%
+${figure.tikzCode}
+}
+\\caption{${caption}}
+\\label{${label}}
+\\end{figure}`;
 }

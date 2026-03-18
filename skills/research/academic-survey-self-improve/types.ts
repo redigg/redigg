@@ -95,11 +95,21 @@ export interface SurveyQualityReport {
   suggestions: string[];
 }
 
+export interface SurveyFigure {
+  sectionId: string;
+  figureType: 'taxonomy' | 'timeline' | 'comparison' | 'workflow' | 'distribution';
+  caption: string;
+  label: string;
+  tikzCode: string;
+  mermaidCode: string;
+}
+
 export interface FinalSurvey {
   title: string;
   markdown: string;
   latex?: string;
   sections: SectionDraft[];
+  figures?: SurveyFigure[];
   referencedPapers: Paper[];
   wordCount: number;
   citationCount: number;

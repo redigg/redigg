@@ -5,6 +5,7 @@ import { fillRetrievalGaps, retrieveSurveyPapers } from './retriever.js';
 import { writeSurveySections } from './section-writer.js';
 import { reviewSurveySections } from './reviewer.js';
 import { assembleSurvey } from './assembler.js';
+import { generateSurveyFigures } from './figure-generator.js';
 import { dedupePapers } from './utils.js';
 
 export default class AcademicSurveySelfImproveSkill implements Skill {
@@ -132,10 +133,22 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
     });
     const reviewed = await reviewSurveySections(context, topic, draftedSections);
 
+    // Generate figures for key sections
+    await context.updateProgress?.(90, 'Generating survey figures and diagrams');
+    let figures: Awaited<ReturnType<typeof generateSurveyFigures>> = [];
+    try {
+      figures = await generateSurveyFigures(context, outline, reviewed.sections);
+      if (figures.length > 0) {
+        context.log('thinking', `Generated ${figures.length} figures for survey`);
+      }
+    } catch {
+      // Figure generation is non-critical
+    }
+
     await context.updateProgress?.(95, 'Assembling final survey document', {
       overallScore: reviewed.qualityReport.overallScore
     });
-    const finalSurvey = await assembleSurvey(outline, reviewed.sections, papers, reviewed.qualityReport, context);
+    const finalSurvey = await assembleSurvey(outline, reviewed.sections, papers, reviewed.qualityReport, context, figures);
 
     await context.updateProgress?.(100, 'Survey complete', {
       wordCount: finalSurvey.wordCount,

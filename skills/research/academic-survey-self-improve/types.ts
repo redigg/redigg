@@ -19,6 +19,13 @@ export interface ExpandedQuery {
   source: 'base' | 'alias' | 'facet' | 'section' | 'fallback';
 }
 
+export interface SubSection {
+  id: string;
+  title: string;
+  description: string;
+  targetWordCount: number;
+}
+
 export interface OutlineSection {
   id: string;
   title: string;
@@ -27,6 +34,7 @@ export interface OutlineSection {
   targetWordCount: number;
   focusFacets?: string[];
   queryPlan?: ExpandedQuery[];
+  subSections?: SubSection[];
 }
 
 export interface SurveyOutline {

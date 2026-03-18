@@ -44,16 +44,29 @@ Anti-patterns to avoid:
 ${template.antiPatterns.map((a) => `- ${a}`).join('\n')}
 Closing move: ${template.closingMove}${tableBlock}`;
 
-    const subheadingGuidance = section.targetWordCount >= 400
-      ? `\nSub-heading requirement: Use 2-3 sub-headings (### level) to organize this section. Each sub-heading should cover a distinct theme, method family, or evaluation dimension. Do NOT use generic sub-headings like "Overview" or "Summary".`
+    // Build sub-section plan from outline if available
+    const subSections = section.subSections || [];
+    let subSectionPlan = '';
+    if (subSections.length > 0) {
+      subSectionPlan = `\nSub-section plan (use ### headings for each):
+${subSections.map((sub, i) => `${i + 1}. ### ${sub.title} (~${sub.targetWordCount} words) — ${sub.description}`).join('\n')}
+Each sub-section MUST appear as a ### heading in the output. Write at least ${Math.round(subSections[0].targetWordCount * 0.8)} words per sub-section.`;
+    } else if (section.targetWordCount >= 400) {
+      subSectionPlan = `\nSub-heading requirement: Use 2-3 sub-headings (### level) to organize this section. Each sub-heading should cover a distinct theme, method family, or evaluation dimension. Do NOT use generic sub-headings like "Overview" or "Summary".`;
+    }
+
+    // Comparison table instruction for methods/benchmark/systems sections
+    const comparisonTableInstruction = template.tableGuidance
+      ? `\nComparison table requirement: ${template.tableGuidance} The table MUST use valid Markdown table syntax (| col1 | col2 | ... |). Place the table after the relevant analysis paragraph, not at the very end.`
       : '';
+
     const prompt = `
 [SURVEY_SECTION_DRAFT]
 Topic: ${topic}
 Section title: ${section.title}
 Section goal: ${section.description}
 Target word count: ${section.targetWordCount}
-${templateBlock}${subheadingGuidance}
+${templateBlock}${subSectionPlan}${comparisonTableInstruction}
 
 Evidence cards:
 ${evidenceCards.map((card) => {

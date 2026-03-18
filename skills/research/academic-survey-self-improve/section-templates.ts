@@ -59,7 +59,8 @@ const TEMPLATE_MAP: Record<SectionTemplateKind, SectionWritingTemplate> = {
       'Do not write a generic background section.',
       'Do not collapse the section into a loose list of systems without methodological comparison.'
     ],
-    closingMove: 'End by identifying which methodological uncertainty carries over into evaluation or deployment.'
+    closingMove: 'End by identifying which methodological uncertainty carries over into evaluation or deployment.',
+    tableGuidance: 'Include a Markdown comparison table of representative methods (columns: Method/System, Category, Key Technique, Strengths, Limitations).'
   },
   benchmark: {
     kind: 'benchmark',

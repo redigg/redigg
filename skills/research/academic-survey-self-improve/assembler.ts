@@ -208,16 +208,34 @@ async function generateIntroduction(
 
   const sectionTitles = sections.map((s) => s.title).join(', ');
 
+  const sectionBriefs = sections.map((s) => {
+    const body = s.content.replace(/^##[^\n]*\n+/, '').split('\n\n')[0] || '';
+    return `- ${s.title}: ${body.slice(0, 150)}...`;
+  }).join('\n');
+
   const prompt = `Write an Introduction section (## Introduction) for a survey titled "${outline.title}".
 
 The survey has these sections: ${sectionTitles}
 
+Section content summaries:
+${sectionBriefs}
+
 Requirements:
 - Start with "## Introduction"
-- 200-300 words
-- Paragraph 1: Motivate the topic — why is it important now?
-- Paragraph 2: State the survey's scope and what it covers
-- Paragraph 3: Provide a roadmap ("Section 2 covers..., Section 3 examines..., etc.")
+- 500-800 words (this is a substantial section, NOT a brief paragraph)
+- Structure the introduction as follows:
+
+(a) **Background** (1-2 paragraphs): Motivate the topic — why is it important now? What recent developments make this survey timely? Describe the broader context and practical significance.
+
+(b) **Motivation and Gaps** (1 paragraph): What gaps exist in the current literature? Why is a new survey needed? What does this survey offer that prior surveys do not?
+
+(c) **Contributions** (bulleted list): State 3-5 specific contributions of this survey. Use a bulleted list format:
+- We provide a comprehensive taxonomy of ...
+- We systematically compare ...
+- We identify key open challenges ...
+
+(d) **Section Roadmap** (1 paragraph): Describe the organization. "The remainder of this survey is organized as follows. Section 2 covers..., Section 3 examines..., ..." Map each section number to its title and a one-sentence description.
+
 - Do NOT include citations [N]
 - Do NOT overlap with the abstract — the introduction should complement it
 - Return ONLY the markdown section`;
@@ -314,8 +332,27 @@ function embedMermaidFigures(sections: SectionDraft[], figures: SurveyFigure[]):
 
 function generateFallbackIntroduction(outline: SurveyOutline, sectionTitles: string[]): string {
   const topic = outline.title.replace(/^A Survey of /i, '').replace(/^Survey on /i, '');
-  const roadmap = sectionTitles.map((t, i) => `Section ${i + 2} covers ${t.toLowerCase()}`).join(', ');
-  return `## Introduction\n\nThe rapid advancement of ${topic.toLowerCase()} has created both unprecedented opportunities and significant challenges across multiple domains. As the field matures, there is an increasing need for a comprehensive synthesis that maps the current landscape and identifies critical gaps.\n\nThis survey provides a structured analysis of ${topic.toLowerCase()}, examining the state of the art through multiple complementary lenses. ${roadmap}. We conclude with a discussion of open challenges and promising future directions.\n\nOur goal is to offer researchers and practitioners a thorough yet accessible overview that highlights both achievements and limitations, enabling informed decisions about research priorities and system design.`;
+  const roadmap = sectionTitles.map((t, i) => `Section ${i + 2} covers ${t.toLowerCase()}`).join('. ');
+
+  const contributions = [
+    `We provide a comprehensive taxonomy of ${topic.toLowerCase()}, organizing the field into coherent methodological families and application domains.`,
+    `We systematically compare representative systems, benchmarks, and evaluation paradigms across the surveyed literature.`,
+    `We identify key open challenges and propose concrete future research directions grounded in the current evidence.`
+  ].map((c) => `- ${c}`).join('\n');
+
+  return `## Introduction
+
+The rapid advancement of ${topic.toLowerCase()} has created both unprecedented opportunities and significant challenges across multiple domains. Recent breakthroughs in this area have attracted growing attention from both academia and industry, making a comprehensive survey both timely and necessary.
+
+Despite the proliferation of individual studies, there remains a lack of structured synthesis that maps the current landscape, compares competing approaches, and identifies critical gaps. Existing surveys, where available, often focus on narrow sub-problems without addressing the full scope of ${topic.toLowerCase()}. This survey aims to fill that gap by providing a thorough, multi-faceted analysis.
+
+The main contributions of this survey are as follows:
+
+${contributions}
+
+The remainder of this survey is organized as follows. ${roadmap}. We conclude with a discussion of open challenges and promising future directions.
+
+Our goal is to offer researchers and practitioners a thorough yet accessible overview that highlights both achievements and limitations, enabling informed decisions about research priorities and system design.`;
 }
 
 export async function assembleSurvey(

@@ -19,13 +19,13 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
     context.log('thinking', `Starting academic survey on: ${topic}`);
     await context.updateProgress?.(10, 'Initializing search', { topic, depth });
 
-    // Depth-aware retrieval parameters
+    // Depth-aware retrieval parameters — scaled for ≥40 ref target
     const retrievalParams = depth === 'deep'
-      ? { sectionLimit: 8, perQueryLimit: 6, snowballMaxSeeds: 8, snowballPerPaper: 5 }
+      ? { sectionLimit: 14, perQueryLimit: 8, snowballMaxSeeds: 12, snowballPerPaper: 6 }
       : depth === 'standard'
-        ? { sectionLimit: 6, perQueryLimit: 5, snowballMaxSeeds: 6, snowballPerPaper: 4 }
-        : { sectionLimit: 4, perQueryLimit: 4, snowballMaxSeeds: 5, snowballPerPaper: 3 };
-    const seedLimit = depth === 'deep' ? 8 : depth === 'standard' ? 6 : 5;
+        ? { sectionLimit: 12, perQueryLimit: 8, snowballMaxSeeds: 10, snowballPerPaper: 5 }
+        : { sectionLimit: 6, perQueryLimit: 5, snowballMaxSeeds: 6, snowballPerPaper: 3 };
+    const seedLimit = depth === 'deep' ? 12 : depth === 'standard' ? 10 : 5;
 
     const useCache = params.useCache === true || process.env.SCHOLAR_CACHE === 'true';
     const scholar = new ScholarTool(useCache ? { enabled: true } : undefined);
@@ -95,7 +95,7 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
     try {
       const gapResult = await fillRetrievalGaps(
         context, scholar, outline, draftedSections, currentPapers, currentPapersBySection,
-        { perQueryLimit: retrievalParams.perQueryLimit, maxGapQueries: 2 }
+        { perQueryLimit: retrievalParams.perQueryLimit, maxGapQueries: 3 }
       );
       if (gapResult.gapsFilled > 0) {
         context.log('thinking', `Filled ${gapResult.gapsFilled} evidence gaps with supplementary retrieval`);

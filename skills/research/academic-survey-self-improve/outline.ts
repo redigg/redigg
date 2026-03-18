@@ -1,24 +1,31 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { SkillContext } from '../../../src/skills/types.js';
-import type { ExpandedQuery, OutlineSection, SurveyOutline, TopicProfile } from './types.js';
+import type { ExpandedQuery, OutlineSection, SubSection, SurveyOutline, TopicProfile } from './types.js';
 import { parseJsonObject, slugify } from './utils.js';
 
 const DEPTH_SECTION_COUNT: Record<string, number> = {
   brief: 3,
-  standard: 5,
-  deep: 6
+  standard: 7,
+  deep: 10
 };
 
 const DEPTH_WORD_COUNT: Record<string, number> = {
-  brief: 220,
-  standard: 500,
-  deep: 900
+  brief: 300,
+  standard: 800,
+  deep: 1200
 };
 
 const DEPTH_METHODS_WORD_COUNT: Record<string, number> = {
-  brief: 260,
-  standard: 600,
-  deep: 1000
+  brief: 350,
+  standard: 1000,
+  deep: 1500
+};
+
+/** Target sub-sections per section by depth */
+const DEPTH_SUB_SECTION_COUNT: Record<string, number> = {
+  brief: 0,
+  standard: 3,
+  deep: 4
 };
 
 const DEFAULT_INTENT_FACETS = ['survey', 'benchmark', 'system', 'workflow', 'evaluation'];
@@ -37,9 +44,23 @@ export async function createSurveyOutline(
     .map((paper, index) => `${index + 1}. ${paper.title} (${paper.year}) - ${paper.summary}`)
     .join('\n');
 
+  const subSectionCount = DEPTH_SUB_SECTION_COUNT[depth] || DEPTH_SUB_SECTION_COUNT.standard;
+  const subSectionSchema = subSectionCount > 0 ? `,
+      "subSections": [
+        {
+          "id": "string (slug)",
+          "title": "string (specific sub-topic, e.g. '2.1 Data Sources', '2.2 Network Architecture')",
+          "description": "string (what this sub-section covers)",
+          "targetWordCount": ${Math.round((DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard) / subSectionCount)}
+        }
+      ]` : '';
+  const subSectionConstraint = subSectionCount > 0
+    ? `\n- Each section MUST have ${subSectionCount - 1} to ${subSectionCount + 1} sub-sections. Sub-sections should be specific sub-topics (e.g. for a "Methods" section: "Pre-Training Approaches", "Fine-Tuning Strategies", "Prompt-Based Methods"). Do NOT use generic sub-section titles like "Overview" or "Summary".`
+    : '';
+
   const prompt = `
 [SURVEY_OUTLINE_REQUEST]
-You are designing a survey outline for the topic: "${topic}".
+You are designing a comprehensive academic survey outline for the topic: "${topic}".
 Depth: ${depth}
 Seed papers:
 ${papersText}
@@ -62,19 +83,19 @@ Return ONLY valid JSON with the following schema:
       "description": "string",
       "focusFacets": ["string"],
       "searchQueries": ["string", "string"],
-      "targetWordCount": ${DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard}
+      "targetWordCount": ${DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard}${subSectionSchema}
     }
   ]
 }
 
 Constraints:
 - Exactly ${DEPTH_SECTION_COUNT[depth] || DEPTH_SECTION_COUNT.standard} sections.
-- Section titles MUST include one of these canonical keywords: "Background", "Methods", "Evaluation", "Applications", "Challenges". You may extend the title (e.g. "Background and Scope", "Evaluation and Benchmarks") but the canonical keyword must appear in the title.
-- Cover problem setting, methods, evaluation, applications, and open challenges.
+- Section titles MUST include one of these canonical keywords: "Background", "Methods", "Evaluation", "Applications", "Challenges". You may extend the title (e.g. "Background and Scope", "Evaluation and Benchmarks") but the canonical keyword must appear in the title. You can have MULTIPLE sections with the same canonical keyword if the topic warrants it (e.g. "Methods: Architecture Design" and "Methods: Training Strategies").
+- Cover problem setting, methods (can be split into multiple sections for depth), evaluation, applications, and open challenges.
 - searchQueries must be concrete literature-search queries.
 - topicProfile should capture aliases and adjacent academic phrases for retrieval.
 - focusFacets should describe the paper types most useful for that section (e.g. survey, benchmark, system).
-- taxonomy MUST be classification dimensions or sub-categories specific to this topic (e.g. "Autonomous Discovery Systems", "Human-AI Co-pilot Frameworks", "Evaluation Benchmarks"). Do NOT use generic field names like "Artificial Intelligence" or "Scientific Research".
+- taxonomy MUST be classification dimensions or sub-categories specific to this topic (e.g. "Autonomous Discovery Systems", "Human-AI Co-pilot Frameworks", "Evaluation Benchmarks"). Do NOT use generic field names like "Artificial Intelligence" or "Scientific Research".${subSectionConstraint}
 `;
 
   const response = await context.llm.chat([
@@ -88,46 +109,84 @@ Constraints:
 
 function createFallbackOutline(topic: string, depth: string, seedPapers: Paper[]): SurveyOutline {
   const sectionCount = DEPTH_SECTION_COUNT[depth] || DEPTH_SECTION_COUNT.standard;
+  const wordCount = DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard;
+  const methodsWordCount = DEPTH_METHODS_WORD_COUNT[depth] || DEPTH_METHODS_WORD_COUNT.standard;
+  const subCount = DEPTH_SUB_SECTION_COUNT[depth] || 0;
+
+  const makeSubSections = (sectionId: string, titles: string[]): SubSection[] => {
+    if (subCount === 0) return [];
+    const perSub = Math.round(wordCount / titles.length);
+    return titles.map((title, i) => ({
+      id: `${sectionId}-sub-${i + 1}`,
+      title,
+      description: title,
+      targetWordCount: perSub
+    }));
+  };
+
   const baseSections: OutlineSection[] = [
     {
       id: 'background-and-scope',
       title: 'Background and Scope',
       description: `Define the scope, terminology, and problem setting for ${topic}.`,
       searchQueries: [topic, `${topic} overview`, `${topic} survey`],
-      targetWordCount: DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard,
-      focusFacets: ['survey', 'review', 'overview']
+      targetWordCount: wordCount,
+      focusFacets: ['survey', 'review', 'overview'],
+      subSections: makeSubSections('background', ['Problem Definition and Scope', 'Historical Context', 'Key Terminology'])
     },
     {
-      id: 'core-methods',
-      title: 'Core Methods',
-      description: `Summarize the main methodological families used in ${topic}.`,
+      id: 'core-methods-1',
+      title: 'Methods: Foundational Approaches',
+      description: `Summarize the foundational methodological families used in ${topic}.`,
       searchQueries: [`${topic} methods`, `${topic} framework`, `${topic} model`],
-      targetWordCount: DEPTH_METHODS_WORD_COUNT[depth] || DEPTH_METHODS_WORD_COUNT.standard,
-      focusFacets: ['methods', 'framework', 'architecture']
+      targetWordCount: methodsWordCount,
+      focusFacets: ['methods', 'framework', 'architecture'],
+      subSections: makeSubSections('methods-1', ['Classical Approaches', 'Core Architectures', 'Training Paradigms'])
+    },
+    {
+      id: 'core-methods-2',
+      title: 'Methods: Advanced Techniques',
+      description: `Discuss advanced and recent methodological developments in ${topic}.`,
+      searchQueries: [`${topic} advanced methods`, `${topic} recent techniques`, `${topic} state-of-the-art`],
+      targetWordCount: methodsWordCount,
+      focusFacets: ['methods', 'technique', 'model'],
+      subSections: makeSubSections('methods-2', ['Recent Innovations', 'Hybrid Approaches', 'Scalability Techniques'])
     },
     {
       id: 'evaluation-and-benchmarks',
       title: 'Evaluation and Benchmarks',
       description: `Compare datasets, metrics, and empirical findings for ${topic}.`,
       searchQueries: [`${topic} benchmark`, `${topic} evaluation`, `${topic} dataset`],
-      targetWordCount: DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard,
-      focusFacets: ['benchmark', 'evaluation', 'dataset']
+      targetWordCount: wordCount,
+      focusFacets: ['benchmark', 'evaluation', 'dataset'],
+      subSections: makeSubSections('eval', ['Benchmark Datasets', 'Evaluation Metrics', 'Comparative Analysis'])
     },
     {
       id: 'applications-and-systems',
       title: 'Applications and Systems',
       description: `Summarize representative systems and application settings for ${topic}.`,
       searchQueries: [`${topic} applications`, `${topic} system`, `${topic} deployment`],
-      targetWordCount: DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard,
-      focusFacets: ['system', 'workflow', 'application']
+      targetWordCount: wordCount,
+      focusFacets: ['system', 'workflow', 'application'],
+      subSections: makeSubSections('apps', ['Domain-Specific Applications', 'End-to-End Systems', 'Deployment Considerations'])
     },
     {
       id: 'open-challenges',
       title: 'Open Challenges and Future Directions',
       description: `Identify limitations, open challenges, and future directions for ${topic}.`,
       searchQueries: [`${topic} limitations`, `${topic} challenges`, `${topic} future directions`],
-      targetWordCount: DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard,
-      focusFacets: ['limitations', 'challenges', 'future directions']
+      targetWordCount: wordCount,
+      focusFacets: ['limitations', 'challenges', 'future directions'],
+      subSections: makeSubSections('challenges', ['Current Limitations', 'Open Research Questions', 'Future Directions'])
+    },
+    {
+      id: 'discussion',
+      title: 'Discussion: Challenges and Implications',
+      description: `Synthesize cross-cutting themes, discuss implications and research gaps for ${topic}.`,
+      searchQueries: [`${topic} discussion`, `${topic} implications`, `${topic} research gaps`],
+      targetWordCount: wordCount,
+      focusFacets: ['discussion', 'analysis', 'implications'],
+      subSections: makeSubSections('discussion', ['Cross-Cutting Themes', 'Practical Implications', 'Research Gaps'])
     }
   ];
 
@@ -175,7 +234,10 @@ function normalizeOutline(
     ),
     focusFacets: Array.isArray((section as any)?.focusFacets) && (section as any).focusFacets.length > 0
       ? (section as any).focusFacets.map((facet: unknown) => String(facet).trim()).filter(Boolean)
-      : fallback.sections[index]?.focusFacets || deriveSectionFacets(section?.title || fallback.sections[index]?.title || '')
+      : fallback.sections[index]?.focusFacets || deriveSectionFacets(section?.title || fallback.sections[index]?.title || ''),
+    subSections: Array.isArray((section as any)?.subSections)
+      ? (section as any).subSections
+      : fallback.sections[index]?.subSections
   }, fallback.sections[index], topic, topicProfile));
 
   // Ensure canonical keywords are present; pad with fallback sections if needed
@@ -301,11 +363,40 @@ function normalizeSection(
   };
   const queryPlan = buildQueryPlan(topic, topicProfile, normalizedSection);
 
+  // Normalize sub-sections if present
+  const subSections = normalizeSubSections(
+    section.subSections,
+    fallbackSection?.subSections,
+    section.id,
+    section.targetWordCount
+  );
+
   return {
     ...normalizedSection,
     searchQueries: queryPlan.map((item) => item.query),
-    queryPlan
+    queryPlan,
+    subSections: subSections.length > 0 ? subSections : undefined
   };
+}
+
+function normalizeSubSections(
+  parsed: SubSection[] | undefined,
+  fallback: SubSection[] | undefined,
+  sectionId: string,
+  sectionWordCount: number
+): SubSection[] {
+  const raw = Array.isArray(parsed) && parsed.length > 0 ? parsed : fallback;
+  if (!raw || raw.length === 0) return [];
+
+  const perSub = Math.round(sectionWordCount / raw.length);
+  return raw.map((sub, i) => ({
+    id: sub.id?.trim() || `${sectionId}-sub-${i + 1}`,
+    title: sub.title?.trim() || `Sub-section ${i + 1}`,
+    description: sub.description?.trim() || sub.title?.trim() || '',
+    targetWordCount: Number.isFinite(sub.targetWordCount) && sub.targetWordCount > 0
+      ? sub.targetWordCount
+      : perSub
+  }));
 }
 
 function clampTargetWordCount(

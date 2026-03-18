@@ -334,22 +334,22 @@ function injectCrossReferences(sections: SectionDraft[]): SectionDraft[] {
       if (!firstKeyword) continue;
 
       // Find the first sentence after the heading that mentions the keyword
+      // Use a regex replacement on the body text to preserve paragraph structure
       const headingEnd = content.indexOf('\n\n');
       if (headingEnd === -1) continue;
       const body = content.slice(headingEnd + 2);
-      const sentences = body.split(/(?<=[.!?])\s+/);
-      let inserted = false;
-      const updatedSentences = sentences.map((sentence) => {
-        if (!inserted && sentence.toLowerCase().includes(firstKeyword)) {
-          inserted = true;
-          // Append the cross-reference before the sentence's final punctuation
-          return sentence.replace(/([.!?])(\s*)$/, ` ${crossRefPhrase}$1$2`);
-        }
-        return sentence;
-      });
 
-      if (inserted) {
-        content = content.slice(0, headingEnd + 2) + updatedSentences.join(' ');
+      // Find the first sentence ending (. ! ?) that contains the keyword
+      // and insert the cross-reference before the punctuation
+      const keywordRegex = new RegExp(
+        `([^.!?]*${firstKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.!?]*)([.!?])`,
+        'i'
+      );
+      const bodyMatch = body.match(keywordRegex);
+      if (bodyMatch) {
+        // Replace only the first occurrence, preserving all whitespace/newlines
+        const updatedBody = body.replace(keywordRegex, `$1 ${crossRefPhrase}$2`);
+        content = content.slice(0, headingEnd + 2) + updatedBody;
       }
     }
 

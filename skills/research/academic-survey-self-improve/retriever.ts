@@ -7,8 +7,13 @@ import { assessPaperAnchors, countWords, dedupePapers, filterPapersByAnchors, no
 
 /**
  * Use LLM to score and rerank papers for a section.
- * Scores top candidates by actual relevance to the section's focus.
- * Falls back to the original order if the LLM call fails.
+ * Blends the original lexical rank with the LLM relevance score so that
+ * semantic reranking can BOOST papers but never fully demote strong keyword
+ * matches. This prevents citationRecall regressions from aggressive reordering.
+ *
+ * Blending formula: finalScore = 0.4 * normalizedLexicalRank + 0.6 * llmScore
+ * The LLM score has higher weight to allow meaningful reranking, but the
+ * lexical rank floor prevents good keyword matches from falling off entirely.
  */
 export async function semanticRerankPapers(
   context: SkillContext,
@@ -16,7 +21,7 @@ export async function semanticRerankPapers(
   section: OutlineSection,
   topK: number
 ): Promise<Paper[]> {
-  if (papers.length === 0) return papers;
+  if (papers.length <= 1) return papers.slice(0, topK);
 
   // Only rerank up to 12 candidates; rest are returned in original order after
   const candidates = papers.slice(0, 12);
@@ -59,11 +64,18 @@ Return ONLY the JSON array, no explanation.`;
       return papers.slice(0, topK);
     }
 
-    // Sort candidates by score descending
-    const scored = candidates.map((paper, i) => ({ paper, score: scores[i] || 0 }));
-    scored.sort((a, b) => b.score - a.score);
+    // Blend: lexical rank score (position-based, higher for earlier) + LLM score
+    // normalizedLexicalRank: 10 for #1, linearly decays to 0 for last
+    const maxIdx = candidates.length - 1 || 1;
+    const blended = candidates.map((paper, i) => {
+      const lexicalRank = 10 * (1 - i / maxIdx); // 10 → 0
+      const llmScore = Math.max(0, Math.min(10, scores[i] || 0));
+      const finalScore = 0.4 * lexicalRank + 0.6 * llmScore;
+      return { paper, finalScore };
+    });
+    blended.sort((a, b) => b.finalScore - a.finalScore);
 
-    const reranked = [...scored.map((s) => s.paper), ...rest];
+    const reranked = [...blended.map((s) => s.paper), ...rest];
     return reranked.slice(0, topK);
   } catch {
     return papers.slice(0, topK);

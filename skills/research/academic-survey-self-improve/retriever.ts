@@ -3,93 +3,12 @@ import type { SkillContext } from '../../../src/skills/types.js';
 import type { OutlineSection, RetrievalResult, SectionDraft, SurveyOutline } from './types.js';
 import { assessPaperAnchors, countWords, dedupePapers, filterPapersByAnchors, normalizeText, parseJsonObject, scorePaperForSection } from './utils.js';
 
-// ─── R2: Semantic reranking ──────────────────────────────────────────
-
-/**
- * Use LLM to score and rerank papers for a section.
- * Blends the original lexical rank with the LLM relevance score so that
- * semantic reranking can BOOST papers but never fully demote strong keyword
- * matches. This prevents citationRecall regressions from aggressive reordering.
- *
- * Blending formula: finalScore = 0.4 * normalizedLexicalRank + 0.6 * llmScore
- * The LLM score has higher weight to allow meaningful reranking, but the
- * lexical rank floor prevents good keyword matches from falling off entirely.
- */
-export async function semanticRerankPapers(
-  context: SkillContext,
-  papers: Paper[],
-  section: OutlineSection,
-  topK: number
-): Promise<Paper[]> {
-  if (papers.length <= 1) return papers.slice(0, topK);
-
-  // Only rerank up to 12 candidates; rest are returned in original order after
-  const candidates = papers.slice(0, 12);
-  const rest = papers.slice(12);
-
-  const candidateList = candidates.map((p, i) => {
-    const summary = p.summary ? p.summary.slice(0, 200) : 'No summary';
-    return `${i + 1}. "${p.title}" (${p.year || 'n/d'}) - ${summary}`;
-  }).join('\n');
-
-  const prompt = `Score each paper's relevance to the survey section described below.
-
-Section: "${section.title}"
-Description: ${section.description || section.title}
-Focus facets: ${(section.focusFacets || []).join(', ') || 'general'}
-
-Papers to score:
-${candidateList}
-
-Return ONLY a JSON array of scores (0-10) in the same order as the papers above.
-10 = directly and specifically relevant to this section's focus
-5 = partially relevant, touches related topics
-0 = off-topic or only tangentially related
-
-Example: [8, 3, 10, 2, 7, 1, 6, 9, 4, 5, 0, 8]
-Return ONLY the JSON array, no explanation.`;
-
-  try {
-    const response = await context.llm.chat([
-      { role: 'system', content: 'You score academic paper relevance. Return only a JSON array of numbers.' },
-      { role: 'user', content: prompt }
-    ]);
-    const content = normalizeText(response.content);
-    // Extract JSON array from response
-    const match = content.match(/\[[\d,\s.]+\]/);
-    if (!match) return papers.slice(0, topK);
-
-    const scores = parseJsonObject<number[]>(match[0]);
-    if (!Array.isArray(scores) || scores.length !== candidates.length) {
-      return papers.slice(0, topK);
-    }
-
-    // Blend: lexical rank score (position-based, higher for earlier) + LLM score
-    // normalizedLexicalRank: 10 for #1, linearly decays to 0 for last
-    const maxIdx = candidates.length - 1 || 1;
-    const blended = candidates.map((paper, i) => {
-      const lexicalRank = 10 * (1 - i / maxIdx); // 10 → 0
-      const llmScore = Math.max(0, Math.min(10, scores[i] || 0));
-      const finalScore = 0.4 * lexicalRank + 0.6 * llmScore;
-      return { paper, finalScore };
-    });
-    blended.sort((a, b) => b.finalScore - a.finalScore);
-
-    const reranked = [...blended.map((s) => s.paper), ...rest];
-    return reranked.slice(0, topK);
-  } catch {
-    return papers.slice(0, topK);
-  }
-}
-
 interface RetrieveOptions {
   sectionLimit?: number;
   perQueryLimit?: number;
   enableSnowball?: boolean;
   snowballMaxSeeds?: number;
   snowballPerPaper?: number;
-  /** If provided, enables R2 semantic reranking of paper candidates */
-  context?: SkillContext;
 }
 
 /** Minimum anchor-tier quality for a batch to count as useful */
@@ -151,13 +70,8 @@ export async function retrieveSurveyPapers(
       section,
       Math.max(sectionLimit, 3)
     );
-    // R2: Semantic reranking — if LLM context is available, rerank the anchor-filtered candidates
-    // by actual relevance to the section. This improves citationRecall beyond keyword matching.
-    const lexicalRanked = rankPapersForSection(anchorFiltered, section, outline.topicProfile);
-    const ranked = options.context && lexicalRanked.length > 1
-      ? await semanticRerankPapers(options.context, lexicalRanked, section, sectionLimit)
-      : lexicalRanked.slice(0, sectionLimit);
-
+    const ranked = rankPapersForSection(anchorFiltered, section, outline.topicProfile)
+      .slice(0, sectionLimit);
     const seedFallback = filterPapersByAnchors(
       rankPapersForSection(seedPapers, section, outline.topicProfile),
       outline.topicProfile,

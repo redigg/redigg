@@ -2,20 +2,6 @@ import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { FinalSurvey, SectionDraft, SurveyFigure, SurveyOutline } from './types.js';
 
 /**
- * Strip all Mermaid code blocks and their captions from markdown text.
- * This prevents mermaid syntax from leaking into LaTeX output.
- */
-function stripMermaidBlocks(text: string): string {
-  // Strip ```mermaid ... ``` blocks followed by optional *Figure N: caption* lines
-  let result = text.replace(/```mermaid[\s\S]*?```\s*\n*(?:\*Figure\s+\d+:[^*]*\*)?/g, '');
-  // Strip any remaining bare ```mermaid blocks
-  result = result.replace(/```mermaid[\s\S]*?```/g, '');
-  // Clean up extra blank lines left behind
-  result = result.replace(/\n{3,}/g, '\n\n');
-  return result;
-}
-
-/**
  * Escape special LaTeX characters in plain text.
  */
 function escapeLatex(text: string): string {
@@ -323,9 +309,7 @@ ${abstractText}
 `;
 
   // Introduction — extract from assembled markdown if available
-  // Strip mermaid blocks before converting (taxonomy figure may appear here)
-  const introFromMarkdownRaw = extractIntroductionFromMarkdown(finalSurvey.markdown);
-  const introFromMarkdown = introFromMarkdownRaw ? stripMermaidBlocks(introFromMarkdownRaw) : null;
+  const introFromMarkdown = extractIntroductionFromMarkdown(finalSurvey.markdown);
   const introSection = introFromMarkdown
     ? `\\section{Introduction}\n${convertSectionBody(introFromMarkdown, 'Introduction')}`
     : '';
@@ -341,7 +325,7 @@ ${abstractText}
   const bodySections = finalSurvey.sections.map((section) => {
     const sectionTitle = escapeLatex(section.title);
     // Strip mermaid code blocks from body before converting (they're in LaTeX as TikZ)
-    const cleanedContent = stripMermaidBlocks(section.content);
+    const cleanedContent = section.content.replace(/```mermaid[\s\S]*?```\n*\*Figure \d+:[^*]*\*/g, '');
     const body = convertSectionBody(cleanedContent, section.title);
     const sectionFigure = figures?.find((f) => f.sectionId === section.sectionId);
     const figureBlock = sectionFigure ? `\n\n${formatTikzFigure(sectionFigure, figCounter++)}` : '';

@@ -290,6 +290,74 @@ Requirements:
 }
 
 /**
+ * W4: Inject cross-references between sections.
+ * Adds "as discussed in Section N (Title)" phrases where a section
+ * mentions concepts strongly associated with another section's focus.
+ * Only injects at the FIRST occurrence of a qualifying keyword match per section pair.
+ */
+function injectCrossReferences(sections: SectionDraft[]): SectionDraft[] {
+  if (sections.length < 2) return sections;
+
+  // Build section number map: Introduction = 2, first body section = 3, etc.
+  const sectionNumbers: Map<string, { num: number; title: string }> = new Map();
+  sections.forEach((s, i) => {
+    sectionNumbers.set(s.sectionId, { num: i + 2, title: s.title });
+  });
+
+  return sections.map((section, idx) => {
+    let content = section.content;
+
+    // For each OTHER section, check if this section's body mentions keywords from that section
+    for (const [otherId, { num, title }] of sectionNumbers.entries()) {
+      if (otherId === section.sectionId) continue;
+
+      // Extract 2-3 key words from the other section's title (skip stopwords)
+      const stopWords = new Set(['and', 'of', 'in', 'for', 'the', 'a', 'an', 'on', 'to', 'with']);
+      const titleKeywords = title
+        .toLowerCase()
+        .split(/\W+/)
+        .filter((w) => w.length > 3 && !stopWords.has(w));
+
+      if (titleKeywords.length === 0) continue;
+
+      // Check if this section contains at least 2 of those keywords
+      const bodyLower = content.toLowerCase();
+      const matchCount = titleKeywords.filter((kw) => bodyLower.includes(kw)).length;
+      if (matchCount < Math.min(2, titleKeywords.length)) continue;
+
+      // Only add the cross-reference ONCE per section pair
+      const crossRefPhrase = `(see Section ${num})`;
+      if (content.includes(crossRefPhrase)) continue;
+
+      // Insert the cross-reference after the first sentence that contains a keyword match
+      const firstKeyword = titleKeywords.find((kw) => bodyLower.includes(kw));
+      if (!firstKeyword) continue;
+
+      // Find the first sentence after the heading that mentions the keyword
+      const headingEnd = content.indexOf('\n\n');
+      if (headingEnd === -1) continue;
+      const body = content.slice(headingEnd + 2);
+      const sentences = body.split(/(?<=[.!?])\s+/);
+      let inserted = false;
+      const updatedSentences = sentences.map((sentence) => {
+        if (!inserted && sentence.toLowerCase().includes(firstKeyword)) {
+          inserted = true;
+          // Append the cross-reference before the sentence's final punctuation
+          return sentence.replace(/([.!?])(\s*)$/, ` ${crossRefPhrase}$1$2`);
+        }
+        return sentence;
+      });
+
+      if (inserted) {
+        content = content.slice(0, headingEnd + 2) + updatedSentences.join(' ');
+      }
+    }
+
+    return { ...section, content };
+  });
+}
+
+/**
  * Embed Mermaid figure blocks at the end of matching sections.
  */
 function embedMermaidFigures(sections: SectionDraft[], figures: SurveyFigure[]): SectionDraft[] {
@@ -359,8 +427,11 @@ export async function assembleSurvey(
   // W2: Add transition sentences between consecutive sections
   const transitionedSections = await addSectionTransitions(context || null, cleanedSections);
 
+  // W4: Inject cross-references (e.g., "as discussed in Section 3") between sections
+  const crossRefSections = injectCrossReferences(transitionedSections);
+
   // Embed Mermaid figures into markdown sections
-  const figuredSections = embedMermaidFigures(transitionedSections, figures || []);
+  const figuredSections = embedMermaidFigures(crossRefSections, figures || []);
 
   // Embed taxonomy as a compact paragraph in the abstract footer rather than a standalone section
   const taxonomyLine = outline.taxonomy.length > 0

@@ -21,10 +21,10 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
 
     // Depth-aware retrieval parameters
     const retrievalParams = depth === 'deep'
-      ? { sectionLimit: 8, perQueryLimit: 6, snowballMaxSeeds: 8, snowballPerPaper: 5 }
+      ? { sectionLimit: 8, perQueryLimit: 6, snowballMaxSeeds: 8, snowballPerPaper: 5, context }
       : depth === 'standard'
-        ? { sectionLimit: 6, perQueryLimit: 5, snowballMaxSeeds: 6, snowballPerPaper: 4 }
-        : { sectionLimit: 4, perQueryLimit: 4, snowballMaxSeeds: 5, snowballPerPaper: 3 };
+        ? { sectionLimit: 6, perQueryLimit: 5, snowballMaxSeeds: 6, snowballPerPaper: 4, context }
+        : { sectionLimit: 4, perQueryLimit: 4, snowballMaxSeeds: 5, snowballPerPaper: 3, context };
     const seedLimit = depth === 'deep' ? 8 : depth === 'standard' ? 6 : 5;
 
     const scholar = new ScholarTool();

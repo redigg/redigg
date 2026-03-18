@@ -3,12 +3,81 @@ import type { SkillContext } from '../../../src/skills/types.js';
 import type { OutlineSection, RetrievalResult, SectionDraft, SurveyOutline } from './types.js';
 import { assessPaperAnchors, countWords, dedupePapers, filterPapersByAnchors, normalizeText, parseJsonObject, scorePaperForSection } from './utils.js';
 
+// ─── R2: Semantic reranking ──────────────────────────────────────────
+
+/**
+ * Use LLM to score and rerank papers for a section.
+ * Scores top candidates by actual relevance to the section's focus.
+ * Falls back to the original order if the LLM call fails.
+ */
+export async function semanticRerankPapers(
+  context: SkillContext,
+  papers: Paper[],
+  section: OutlineSection,
+  topK: number
+): Promise<Paper[]> {
+  if (papers.length === 0) return papers;
+
+  // Only rerank up to 12 candidates; rest are returned in original order after
+  const candidates = papers.slice(0, 12);
+  const rest = papers.slice(12);
+
+  const candidateList = candidates.map((p, i) => {
+    const summary = p.summary ? p.summary.slice(0, 200) : 'No summary';
+    return `${i + 1}. "${p.title}" (${p.year || 'n/d'}) - ${summary}`;
+  }).join('\n');
+
+  const prompt = `Score each paper's relevance to the survey section described below.
+
+Section: "${section.title}"
+Description: ${section.description || section.title}
+Focus facets: ${(section.focusFacets || []).join(', ') || 'general'}
+
+Papers to score:
+${candidateList}
+
+Return ONLY a JSON array of scores (0-10) in the same order as the papers above.
+10 = directly and specifically relevant to this section's focus
+5 = partially relevant, touches related topics
+0 = off-topic or only tangentially related
+
+Example: [8, 3, 10, 2, 7, 1, 6, 9, 4, 5, 0, 8]
+Return ONLY the JSON array, no explanation.`;
+
+  try {
+    const response = await context.llm.chat([
+      { role: 'system', content: 'You score academic paper relevance. Return only a JSON array of numbers.' },
+      { role: 'user', content: prompt }
+    ]);
+    const content = normalizeText(response.content);
+    // Extract JSON array from response
+    const match = content.match(/\[[\d,\s.]+\]/);
+    if (!match) return papers.slice(0, topK);
+
+    const scores = parseJsonObject<number[]>(match[0]);
+    if (!Array.isArray(scores) || scores.length !== candidates.length) {
+      return papers.slice(0, topK);
+    }
+
+    // Sort candidates by score descending
+    const scored = candidates.map((paper, i) => ({ paper, score: scores[i] || 0 }));
+    scored.sort((a, b) => b.score - a.score);
+
+    const reranked = [...scored.map((s) => s.paper), ...rest];
+    return reranked.slice(0, topK);
+  } catch {
+    return papers.slice(0, topK);
+  }
+}
+
 interface RetrieveOptions {
   sectionLimit?: number;
   perQueryLimit?: number;
   enableSnowball?: boolean;
   snowballMaxSeeds?: number;
   snowballPerPaper?: number;
+  /** If provided, enables R2 semantic reranking of paper candidates */
+  context?: SkillContext;
 }
 
 /** Minimum anchor-tier quality for a batch to count as useful */
@@ -70,8 +139,13 @@ export async function retrieveSurveyPapers(
       section,
       Math.max(sectionLimit, 3)
     );
-    const ranked = rankPapersForSection(anchorFiltered, section, outline.topicProfile)
-      .slice(0, sectionLimit);
+    // R2: Semantic reranking — if LLM context is available, rerank the anchor-filtered candidates
+    // by actual relevance to the section. This improves citationRecall beyond keyword matching.
+    const lexicalRanked = rankPapersForSection(anchorFiltered, section, outline.topicProfile);
+    const ranked = options.context && lexicalRanked.length > 1
+      ? await semanticRerankPapers(options.context, lexicalRanked, section, sectionLimit)
+      : lexicalRanked.slice(0, sectionLimit);
+
     const seedFallback = filterPapersByAnchors(
       rankPapersForSection(seedPapers, section, outline.topicProfile),
       outline.topicProfile,

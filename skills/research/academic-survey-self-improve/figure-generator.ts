@@ -3,6 +3,49 @@ import type { SectionDraft, SurveyFigure, SurveyOutline } from './types.js';
 import { normalizeText, parseJsonObject } from './utils.js';
 
 /**
+ * Validate and fix Mermaid code:
+ * - Find all nodes that are referenced in edges but never defined with a label
+ * - Remove edges that reference undefined nodes
+ */
+function sanitizeMermaid(mermaid: string): string {
+  const lines = mermaid.split('\n');
+  const defined = new Set<string>();
+
+  // First pass: collect all defined node IDs (nodes with labels like A[...], B{...}, C(...))
+  for (const line of lines) {
+    const matches = line.matchAll(/\b([A-Za-z][A-Za-z0-9_]*)\s*[\[{(]/g);
+    for (const match of matches) {
+      defined.add(match[1]);
+    }
+  }
+
+  // If no nodes defined at all, return as-is
+  if (defined.size === 0) return mermaid;
+
+  // Second pass: filter out edge lines referencing undefined node IDs
+  const filtered = lines.filter((line) => {
+    const trimmed = line.trim();
+    // Only check edge lines
+    if (!trimmed.includes('-->') && !trimmed.includes('---') && !trimmed.includes('-.->')) {
+      return true;
+    }
+    // Extract node IDs referenced in this edge line
+    const nodeRefs = Array.from(trimmed.matchAll(/\b([A-Za-z][A-Za-z0-9_]*)\b/g))
+      .map((m) => m[1])
+      .filter((id) => /^[A-Za-z][A-Za-z0-9_]*$/.test(id));
+    // If any referenced ID is not defined, drop this edge
+    for (const id of nodeRefs) {
+      if (!defined.has(id) && id !== 'TD' && id !== 'LR' && id !== 'BT' && id !== 'RL') {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  return filtered.join('\n');
+}
+
+/**
  * Generate figures for survey sections based on their content and template kind.
  * Produces both TikZ (for LaTeX) and Mermaid (for markdown) representations.
  */
@@ -71,7 +114,7 @@ Mermaid requirements:
         caption: parsed.caption || `Taxonomy of ${outline.title}`,
         label: 'fig:taxonomy',
         tikzCode: parsed.tikz,
-        mermaidCode: parsed.mermaid
+        mermaidCode: sanitizeMermaid(parsed.mermaid)
       };
     }
   } catch {
@@ -146,7 +189,7 @@ Mermaid rules:
         caption: parsed.caption || `Overview of ${section.title}`,
         label: `fig:${section.sectionId}`,
         tikzCode: parsed.tikz,
-        mermaidCode: parsed.mermaid
+        mermaidCode: sanitizeMermaid(parsed.mermaid)
       };
     }
   } catch {

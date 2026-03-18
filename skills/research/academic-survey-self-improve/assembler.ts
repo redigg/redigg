@@ -17,11 +17,14 @@ function cleanSectionContent(content: string, sectionTitle: string): string {
   // Remove markdown code fences wrapping the content
   cleaned = cleaned.replace(/```(?:markdown)?\s*\n([\s\S]*?)```/g, '$1');
 
-  // Remove common LLM preamble lines
-  cleaned = cleaned.replace(/^(?:Here(?:'s| is) the (?:revised|improved|updated|rewritten) (?:section|version|content)[^\n]*\n+)/im, '');
+  // Remove common LLM preamble lines (flexible match for "Here's the revised/improved/expanded..." variants)
+  cleaned = cleaned.replace(/^(?:Here(?:'s| is) (?:the |a |my )?(?:revised|improved|updated|rewritten|expanded|new)[^\n]*(?:section|version|content|draft|text)[^\n]*\n+)/im, '');
 
   // Remove template artifact leaks (e.g. "Closing move:" prefix from section templates)
   cleaned = cleaned.replace(/\b(Closing move|Opening move|Required move|Rhetorical goal)\s*:\s*/gi, '');
+
+  // Remove horizontal rules (--- or ***) which are LLM formatting artifacts
+  cleaned = cleaned.replace(/^\s*[-*]{3,}\s*$/gm, '');
 
   // Remove ALL ## level headings from the body — the assembler will prepend the
   // canonical heading.  This catches mismatched titles produced by LLM rewrites
@@ -146,6 +149,100 @@ function generateFallbackConclusion(outline: SurveyOutline, sectionTitles: strin
   return `## Conclusion\n\nThis survey has examined ${outline.title.replace(/^A Survey of /i, '').toLowerCase()} through the lenses of ${sectionList.toLowerCase()}. The field continues to advance rapidly, with emerging systems demonstrating increasing autonomy in scientific workflows. Key open challenges include improving reliability, ensuring ethical deployment, and developing comprehensive evaluation frameworks. Future work should prioritize bridging the gap between narrow task automation and truly open-ended scientific discovery.`;
 }
 
+/**
+ * W1: Rewrite abstract based on actual section content rather than the outline draft.
+ */
+async function rewriteAbstract(
+  context: SkillContext | null,
+  outline: SurveyOutline,
+  sections: SectionDraft[]
+): Promise<string> {
+  if (!context) return outline.abstractDraft;
+
+  const sectionSummaries = sections.map((s) => {
+    const body = s.content.replace(/^##[^\n]*\n+/, '').split('\n\n')[0] || '';
+    return `- ${s.title}: ${body.slice(0, 200)}...`;
+  }).join('\n');
+
+  const prompt = `Rewrite the abstract for a survey titled "${outline.title}".
+
+Original draft abstract:
+${outline.abstractDraft}
+
+Actual section content summaries:
+${sectionSummaries}
+
+Requirements:
+- 150-250 words
+- Summarize the survey's scope, methodology, key findings, and contributions
+- Be specific about which systems, benchmarks, or methods are covered
+- End with a sentence about open challenges or future implications
+- Do NOT include citations [N]
+- Do NOT include headings or keywords
+- Return ONLY the abstract text`;
+
+  try {
+    const response = await context.llm.chat([
+      { role: 'system', content: 'You write concise, specific survey abstracts.' },
+      { role: 'user', content: prompt }
+    ]);
+    const content = normalizeText(response.content);
+    if (content && content.length > 100) return content;
+  } catch {
+    // Fall through to original
+  }
+  return outline.abstractDraft;
+}
+
+/**
+ * W3: Generate an Introduction section that provides context and roadmap.
+ */
+async function generateIntroduction(
+  context: SkillContext | null,
+  outline: SurveyOutline,
+  sections: SectionDraft[]
+): Promise<string> {
+  if (!context) {
+    return generateFallbackIntroduction(outline, sections.map((s) => s.title));
+  }
+
+  const sectionTitles = sections.map((s) => s.title).join(', ');
+
+  const prompt = `Write an Introduction section (## Introduction) for a survey titled "${outline.title}".
+
+The survey has these sections: ${sectionTitles}
+
+Requirements:
+- Start with "## Introduction"
+- 200-300 words
+- Paragraph 1: Motivate the topic — why is it important now?
+- Paragraph 2: State the survey's scope and what it covers
+- Paragraph 3: Provide a roadmap ("Section 2 covers..., Section 3 examines..., etc.")
+- Do NOT include citations [N]
+- Do NOT overlap with the abstract — the introduction should complement it
+- Return ONLY the markdown section`;
+
+  try {
+    const response = await context.llm.chat([
+      { role: 'system', content: 'You write concise survey introductions.' },
+      { role: 'user', content: prompt }
+    ]);
+    const content = normalizeText(response.content);
+    if (content && content.length > 100) {
+      return content.startsWith('## ') ? content : `## Introduction\n\n${content}`;
+    }
+  } catch {
+    // Fall through to template
+  }
+  return generateFallbackIntroduction(outline, sections.map((s) => s.title));
+}
+
+function generateFallbackIntroduction(outline: SurveyOutline, sectionTitles: string[]): string {
+  const topic = outline.title.replace(/^A Survey of /i, '').replace(/^Survey on /i, '');
+  const roadmap = sectionTitles.map((t, i) => `Section ${i + 2} covers ${t.toLowerCase()}`).join(', ');
+  return `## Introduction\n\nThe rapid advancement of ${topic.toLowerCase()} has created both unprecedented opportunities and significant challenges across multiple domains. As the field matures, there is an increasing need for a comprehensive synthesis that maps the current landscape and identifies critical gaps.\n\nThis survey provides a structured analysis of ${topic.toLowerCase()}, examining the state of the art through multiple complementary lenses. ${roadmap}. We conclude with a discussion of open challenges and promising future directions.\n\nOur goal is to offer researchers and practitioners a thorough yet accessible overview that highlights both achievements and limitations, enabling informed decisions about research priorities and system design.`;
+}
+
 export async function assembleSurvey(
   outline: SurveyOutline,
   sections: SectionDraft[],
@@ -177,6 +274,12 @@ export async function assembleSurvey(
 
   const conclusion = await generateConclusion(context || null, outline, cleanedSections);
 
+  // W1: Rewrite abstract based on actual section content (not the outline draft)
+  const abstractText = await rewriteAbstract(context || null, outline, cleanedSections);
+
+  // W3: Generate introduction section
+  const introduction = await generateIntroduction(context || null, outline, cleanedSections);
+
   // Embed taxonomy as a compact paragraph in the abstract footer rather than a standalone section
   const taxonomyLine = outline.taxonomy.length > 0
     ? `\n\n**Keywords**: ${outline.taxonomy.join(', ')}`
@@ -185,7 +288,8 @@ export async function assembleSurvey(
   const markdownParts = [
     `# ${outline.title}`,
     '## Abstract',
-    outline.abstractDraft + taxonomyLine,
+    abstractText + taxonomyLine,
+    introduction,
     ...cleanedSections.map((section) => section.content),
     conclusion,
     '## References',

@@ -302,6 +302,12 @@ ${abstractText}
 \\bigskip
 `;
 
+  // Introduction — extract from assembled markdown if available
+  const introFromMarkdown = extractIntroductionFromMarkdown(finalSurvey.markdown);
+  const introSection = introFromMarkdown
+    ? `\\section{Introduction}\n${convertSectionBody(introFromMarkdown, 'Introduction')}`
+    : '';
+
   // Body sections
   const bodySections = finalSurvey.sections.map((section) => {
     const sectionTitle = escapeLatex(section.title);
@@ -327,7 +333,7 @@ ${references}
 }`;
 
   return `${preamble}
-${bodySections}
+${introSection ? introSection + '\n\n' : ''}${bodySections}
 
 ${conclusionSection}
 
@@ -335,6 +341,12 @@ ${referencesSection}
 
 \\end{document}
 `;
+}
+
+function extractIntroductionFromMarkdown(markdown: string): string | null {
+  const match = markdown.match(/## Introduction\s*\n+([\s\S]*?)(?=\n## )/);
+  if (!match || !match[1] || match[1].trim().length < 30) return null;
+  return match[1].trim();
 }
 
 function extractConclusionFromMarkdown(markdown: string): string | null {

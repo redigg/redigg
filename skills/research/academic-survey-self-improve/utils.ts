@@ -677,8 +677,13 @@ export function checkCitationConsistency(
  * Preserves valid citations untouched.
  */
 export function stripGhostCitations(markdown: string, referenceCount: number): string {
-  return markdown.replace(/\[(\d+)\]/g, (match, num) => {
-    const n = Number(num);
-    return n >= 1 && n <= referenceCount ? match : '';
-  }).replace(/ {2,}/g, ' ');
+  // Handle multi-citation brackets like [14,15] or [3, 5, 14]
+  let result = markdown.replace(/\[(\d+(?:,\s*\d+)*)\]/g, (match, inner: string) => {
+    const nums = inner.split(',').map((s) => Number(s.trim()));
+    const valid = nums.filter((n) => n >= 1 && n <= referenceCount);
+    if (valid.length === 0) return '';
+    if (valid.length === nums.length) return match; // all valid, keep as-is
+    return `[${valid.join(',')}]`;
+  });
+  return result.replace(/ {2,}/g, ' ');
 }

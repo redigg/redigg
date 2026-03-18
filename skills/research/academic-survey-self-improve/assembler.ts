@@ -237,6 +237,56 @@ Requirements:
   return generateFallbackIntroduction(outline, sections.map((s) => s.title));
 }
 
+/**
+ * W2: Add transition sentences at the start of each section (except the first)
+ * to create flow between consecutive sections.
+ */
+async function addSectionTransitions(
+  context: SkillContext | null,
+  sections: SectionDraft[]
+): Promise<SectionDraft[]> {
+  if (!context || sections.length < 2) return sections;
+
+  const result = [sections[0]];
+
+  for (let i = 1; i < sections.length; i++) {
+    const prev = sections[i - 1];
+    const curr = sections[i];
+
+    try {
+      const prompt = `Write ONE transition sentence (15-30 words) that connects the end of a section titled "${prev.title}" to the beginning of a section titled "${curr.title}" in an academic survey.
+
+The transition should:
+- Reference what was covered in the previous section
+- Motivate why the next section follows naturally
+- Be in academic tone
+- NOT include citations
+
+Return ONLY the single sentence, no quotes.`;
+
+      const response = await context.llm.chat([
+        { role: 'system', content: 'You write smooth academic transitions.' },
+        { role: 'user', content: prompt }
+      ]);
+      const transition = normalizeText(response.content);
+      if (transition && transition.length > 20 && transition.length < 200) {
+        // Insert transition after the ## heading
+        const content = curr.content.replace(
+          /^(## [^\n]+\n+)/,
+          `$1${transition}\n\n`
+        );
+        result.push({ ...curr, content });
+        continue;
+      }
+    } catch {
+      // Fall through
+    }
+    result.push(curr);
+  }
+
+  return result;
+}
+
 function generateFallbackIntroduction(outline: SurveyOutline, sectionTitles: string[]): string {
   const topic = outline.title.replace(/^A Survey of /i, '').replace(/^Survey on /i, '');
   const roadmap = sectionTitles.map((t, i) => `Section ${i + 2} covers ${t.toLowerCase()}`).join(', ');
@@ -280,6 +330,9 @@ export async function assembleSurvey(
   // W3: Generate introduction section
   const introduction = await generateIntroduction(context || null, outline, cleanedSections);
 
+  // W2: Add transition sentences between consecutive sections
+  const transitionedSections = await addSectionTransitions(context || null, cleanedSections);
+
   // Embed taxonomy as a compact paragraph in the abstract footer rather than a standalone section
   const taxonomyLine = outline.taxonomy.length > 0
     ? `\n\n**Keywords**: ${outline.taxonomy.join(', ')}`
@@ -290,7 +343,7 @@ export async function assembleSurvey(
     '## Abstract',
     abstractText + taxonomyLine,
     introduction,
-    ...cleanedSections.map((section) => section.content),
+    ...transitionedSections.map((section) => section.content),
     conclusion,
     '## References',
     references

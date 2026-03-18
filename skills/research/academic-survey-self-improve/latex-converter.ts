@@ -300,6 +300,9 @@ ${abstractText}
 
 \\noindent\\textbf{Keywords:} ${outline.taxonomy.map((item) => escapeLatex(item)).join(', ')}
 \\bigskip
+
+\\tableofcontents
+\\newpage
 `;
 
   // Introduction — extract from assembled markdown if available

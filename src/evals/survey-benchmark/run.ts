@@ -21,6 +21,7 @@ import {
 import { computeSurgeMetrics } from './metrics.js';
 import { writeSurgeFormat, writeSurveyBenchFormat } from './surge-adapter.js';
 import type {
+  BenchmarkFailureCategory,
   SurveyBenchmarkCase,
   SurveyBenchmarkRunSummary,
   SurveyBenchmarkTopicResult
@@ -156,10 +157,27 @@ function createSkillContext(llm: LLMClient, memory: MemoryManager, workspace: st
   };
 }
 
+function extractRetrievalCounts(result: SkillResult): { retrievedPaperCount: number; referencedPaperCount: number } {
+  const fallbackCount = Array.isArray(result.papers) ? result.papers.length : 0;
+  const retrievalMetadata = (result as any)?.retrieval_metadata;
+  const retrievedPaperCount = Number.isFinite(retrievalMetadata?.totalRetrieved)
+    ? Number(retrievalMetadata.totalRetrieved)
+    : fallbackCount;
+  const referencedPaperCount = Number.isFinite(retrievalMetadata?.referencedCount)
+    ? Number(retrievalMetadata.referencedCount)
+    : fallbackCount;
+
+  return {
+    retrievedPaperCount,
+    referencedPaperCount
+  };
+}
+
 function buildTopicSummary(result: SkillResult, pdfPath?: string) {
   const sections = Array.isArray(result.sections) ? result.sections.map((section: any) => section.title) : [];
-  const paperCount = Array.isArray(result.papers) ? result.papers.length : 0;
-  const referenceCount = Array.isArray(result.papers) ? result.papers.length : 0;
+  const { retrievedPaperCount, referencedPaperCount } = extractRetrievalCounts(result);
+  const paperCount = referencedPaperCount;
+  const referenceCount = referencedPaperCount;
   const claimAlignmentCount = Array.isArray(result.sections)
     ? result.sections.reduce((count: number, section: any) => count + (Array.isArray(section.claimAlignments) ? section.claimAlignments.length : 0), 0)
     : 0;
@@ -174,9 +192,71 @@ function buildTopicSummary(result: SkillResult, pdfPath?: string) {
     sections,
     paperCount,
     referenceCount,
+    retrievedPaperCount,
+    referencedPaperCount,
     claimAlignmentCount,
     uniqueCitationCount,
     pdfGenerated: typeof pdfPath === 'string' && fs.existsSync(pdfPath)
+  };
+}
+
+export function classifyBenchmarkError(error: unknown): BenchmarkFailureCategory {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  const infrastructureSignals = [
+    'connection error',
+    'connect error',
+    'fetch failed',
+    'socket',
+    'timeout',
+    'timed out',
+    'rate limit',
+    '429',
+    'econnreset',
+    'econnrefused',
+    'enotfound',
+    'etimedout',
+    'api connection',
+    'network'
+  ];
+
+  return infrastructureSignals.some((signal) => normalized.includes(signal))
+    ? 'infrastructure'
+    : 'execution';
+}
+
+function formatAggregateScore(score: number | null, failureCategory?: BenchmarkFailureCategory): string {
+  if (typeof score === 'number') {
+    return String(score);
+  }
+
+  return failureCategory === 'infrastructure' ? 'N/A (infra)' : 'N/A';
+}
+
+export function summarizeBenchmarkResults(results: SurveyBenchmarkTopicResult[]): Pick<
+  SurveyBenchmarkRunSummary,
+  'scoredCaseCount' | 'excludedCaseCount' | 'infrastructureFailureCount' | 'executionFailureCount' | 'passedCount' | 'averageScore'
+> {
+  const scoredResults = results.filter(
+    (result) => result.countedInAggregate && typeof result.aggregateScore === 'number'
+  );
+  const excludedCaseCount = results.filter((result) => !result.countedInAggregate).length;
+  const infrastructureFailureCount = results.filter((result) => result.failureCategory === 'infrastructure').length;
+  const executionFailureCount = results.filter((result) => result.failureCategory === 'execution').length;
+  const passedCount = scoredResults.filter((result) => (result.aggregateScore || 0) >= 70).length;
+  const averageScore = scoredResults.length > 0
+    ? Math.round(
+        scoredResults.reduce((sum, result) => sum + (result.aggregateScore || 0), 0) / scoredResults.length
+      )
+    : null;
+
+  return {
+    scoredCaseCount: scoredResults.length,
+    excludedCaseCount,
+    infrastructureFailureCount,
+    executionFailureCount,
+    passedCount,
+    averageScore
   };
 }
 
@@ -187,17 +267,21 @@ function buildSummaryMarkdown(summary: SurveyBenchmarkRunSummary): string {
   lines.push(`- Run ID: \`${summary.runId}\``);
   lines.push(`- Generated At: ${summary.generatedAt}`);
   lines.push(`- Cases: ${summary.caseCount}`);
+  lines.push(`- Scored Cases: ${summary.scoredCaseCount}`);
   lines.push(`- Passed (>=70): ${summary.passedCount}`);
-  lines.push(`- Average Score: ${summary.averageScore}`);
+  lines.push(`- Excluded Cases: ${summary.excludedCaseCount}`);
+  lines.push(`- Infrastructure Failures: ${summary.infrastructureFailureCount}`);
+  lines.push(`- Execution Failures: ${summary.executionFailureCount}`);
+  lines.push(`- Average Score (scored cases only): ${summary.averageScore ?? 'N/A'}`);
   lines.push('');
-  lines.push('| Case | Score | Papers | References | Claim Alignments | Quality Gate | Strict QA | PDF | SurGE Composite |');
-  lines.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |');
+  lines.push('| Case | Score | Retrieved | Referenced | References | Claim Alignments | Quality Gate | Strict QA | PDF | SurGE Composite |');
+  lines.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |');
 
   for (const result of summary.results) {
     const surgeComposite = result.surgeMetrics ? (result.surgeMetrics.composite * 100).toFixed(1) : 'N/A';
     const strictQa = result.llmQa ? `${result.llmQa.score}${result.llmQa.passed ? '' : ' (fail)'}` : 'N/A';
     lines.push(
-      `| ${result.benchmarkCase.id} | ${result.aggregateScore} | ${result.summary.paperCount} | ${result.summary.referenceCount} | ${result.summary.claimAlignmentCount} | ${result.scorecard.qualityGate.score} | ${strictQa} | ${result.summary.pdfGenerated ? 'yes' : 'no'} | ${surgeComposite} |`
+      `| ${result.benchmarkCase.id} | ${formatAggregateScore(result.aggregateScore, result.failureCategory)} | ${result.summary.retrievedPaperCount} | ${result.summary.referencedPaperCount} | ${result.summary.referenceCount} | ${result.summary.claimAlignmentCount} | ${result.scorecard.qualityGate.score} | ${strictQa} | ${result.summary.pdfGenerated ? 'yes' : 'no'} | ${surgeComposite} |`
     );
   }
 
@@ -208,7 +292,10 @@ function buildSummaryMarkdown(summary: SurveyBenchmarkRunSummary): string {
   for (const result of summary.results) {
     lines.push(`### ${result.benchmarkCase.id}`);
     lines.push(`- Topic: ${result.benchmarkCase.topic}`);
-    lines.push(`- Score: ${result.aggregateScore}`);
+    lines.push(`- Score: ${formatAggregateScore(result.aggregateScore, result.failureCategory)}`);
+    lines.push(`- Counted In Aggregate: ${result.countedInAggregate ? 'yes' : 'no'}`);
+    lines.push(`- Retrieved Papers: ${result.summary.retrievedPaperCount}`);
+    lines.push(`- Referenced Papers: ${result.summary.referencedPaperCount}`);
     lines.push(`- Structure: ${result.scorecard.structure.score}`);
     lines.push(`- Coverage: ${result.scorecard.coverage.score}`);
     lines.push(`- Citations: ${result.scorecard.citations.score}`);
@@ -226,6 +313,9 @@ function buildSummaryMarkdown(summary: SurveyBenchmarkRunSummary): string {
     }
     if (result.error) {
       lines.push(`- Error: ${result.error}`);
+    }
+    if (result.failureCategory) {
+      lines.push(`- Failure Category: ${result.failureCategory}`);
     }
     lines.push('');
   }
@@ -313,13 +403,16 @@ async function runSingleBenchmarkCase(args: {
       }
     }
 
+    const retrievalCounts = extractRetrievalCounts(result);
     const llmQa = await qualityManager.evaluateTask(
       `Evaluate the quality of a survey on ${benchmarkCase.topic}`,
       String(result.formatted_output || result.summary || ''),
       {
         benchmarkCase: benchmarkCase.id,
         paperCount: Array.isArray(result.papers) ? result.papers.length : 0,
-        referenceCount: Array.isArray(result.papers) ? result.papers.length : 0
+        referenceCount: Array.isArray(result.papers) ? result.papers.length : 0,
+        retrievedPaperCount: retrievalCounts.retrievedPaperCount,
+        referencedPaperCount: retrievalCounts.referencedPaperCount
       }
     );
     const usableExternalQa = llmQa.reasoning === 'Evaluation failed due to error.'
@@ -343,6 +436,7 @@ async function runSingleBenchmarkCase(args: {
       completedAt: new Date().toISOString(),
       durationMs: Date.now() - startedMs,
       aggregateScore,
+      countedInAggregate: true,
       scorecard,
       surgeMetrics,
       outputPaths: {
@@ -362,13 +456,16 @@ async function runSingleBenchmarkCase(args: {
     fs.writeFileSync(jsonPath, JSON.stringify({ result, topicResult }, null, 2), 'utf8');
     return topicResult;
   } catch (error) {
+    const failureCategory = classifyBenchmarkError(error);
+    const countedInAggregate = failureCategory !== 'infrastructure';
     const topicResult: SurveyBenchmarkTopicResult = {
       benchmarkCase,
       success: false,
       startedAt,
       completedAt: new Date().toISOString(),
       durationMs: Date.now() - startedMs,
-      aggregateScore: 0,
+      aggregateScore: countedInAggregate ? 0 : null,
+      countedInAggregate,
       scorecard: {
         structure: { score: 0, maxScore: 100, passed: false, details: ['未生成结构结果'] },
         coverage: { score: 0, maxScore: 100, passed: false, details: ['未生成覆盖结果'] },
@@ -385,10 +482,13 @@ async function runSingleBenchmarkCase(args: {
         sections: [],
         paperCount: 0,
         referenceCount: 0,
+        retrievedPaperCount: 0,
+        referencedPaperCount: 0,
         claimAlignmentCount: 0,
         uniqueCitationCount: 0,
         pdfGenerated: false
       },
+      failureCategory,
       error: error instanceof Error ? error.message : String(error)
     };
 
@@ -439,17 +539,18 @@ export async function runSurveyBenchmark(options: CliOptions = { skipPdf: false 
     );
   }
 
-  const passedCount = results.filter((result) => result.aggregateScore >= 70).length;
-  const averageScore = Math.round(
-    results.reduce((sum, result) => sum + result.aggregateScore, 0) / Math.max(results.length, 1)
-  );
+  const summaryStats = summarizeBenchmarkResults(results);
   const summary: SurveyBenchmarkRunSummary = {
     runId,
     generatedAt: new Date().toISOString(),
     outputDir,
     caseCount: results.length,
-    passedCount,
-    averageScore,
+    scoredCaseCount: summaryStats.scoredCaseCount,
+    excludedCaseCount: summaryStats.excludedCaseCount,
+    infrastructureFailureCount: summaryStats.infrastructureFailureCount,
+    executionFailureCount: summaryStats.executionFailureCount,
+    passedCount: summaryStats.passedCount,
+    averageScore: summaryStats.averageScore,
     results
   };
 
@@ -457,8 +558,8 @@ export async function runSurveyBenchmark(options: CliOptions = { skipPdf: false 
   fs.writeFileSync(path.join(outputDir, 'summary.md'), buildSummaryMarkdown(summary), 'utf8');
 
   logger.success('Survey benchmark baseline complete', {
-    averageScore,
-    passedCount,
+    averageScore: summary.averageScore,
+    passedCount: summary.passedCount,
     outputDir
   });
 
@@ -471,8 +572,11 @@ async function main(): Promise<void> {
 
   console.log('\nSurvey benchmark baseline complete.');
   console.log(`Run ID: ${summary.runId}`);
-  console.log(`Average Score: ${summary.averageScore}`);
-  console.log(`Passed: ${summary.passedCount}/${summary.caseCount}`);
+  console.log(`Average Score: ${summary.averageScore ?? 'N/A'}`);
+  console.log(`Passed: ${summary.passedCount}/${summary.scoredCaseCount} scored cases`);
+  if (summary.excludedCaseCount > 0) {
+    console.log(`Excluded Cases: ${summary.excludedCaseCount} (${summary.infrastructureFailureCount} infrastructure failures)`);
+  }
   console.log(`Artifacts: ${summary.outputDir}`);
 }
 

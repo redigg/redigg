@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { aggregateSurveyBenchmarkScore, scoreSurveyBenchmarkCase } from '../../src/evals/survey-benchmark/scorer.js';
 import { computeSurgeMetrics } from '../../src/evals/survey-benchmark/metrics.js';
 import { SURVEY_BENCHMARK_CASES } from '../../src/evals/survey-benchmark/dataset.js';
+import { classifyBenchmarkError, summarizeBenchmarkResults } from '../../src/evals/survey-benchmark/run.js';
 
 describe('survey benchmark scorer', () => {
   it('should score a grounded survey result with reasonable aggregate score', () => {
@@ -199,5 +200,37 @@ Grounded challenges synthesis [5][6][7][8].
     expect(scorecard.qualityGate.passed).toBe(false);
     expect(scorecard.qualityGate.details.join(' ')).toContain('strict LLM QA 未通过');
     expect(aggregate).toBeLessThan(70);
+  });
+
+  it('should exclude infrastructure failures from aggregate summary stats', () => {
+    const summary = summarizeBenchmarkResults([
+      {
+        aggregateScore: 92,
+        countedInAggregate: true
+      },
+      {
+        aggregateScore: null,
+        countedInAggregate: false,
+        failureCategory: 'infrastructure'
+      },
+      {
+        aggregateScore: 40,
+        countedInAggregate: true,
+        failureCategory: 'execution'
+      }
+    ] as any);
+
+    expect(summary.scoredCaseCount).toBe(2);
+    expect(summary.excludedCaseCount).toBe(1);
+    expect(summary.infrastructureFailureCount).toBe(1);
+    expect(summary.executionFailureCount).toBe(1);
+    expect(summary.passedCount).toBe(1);
+    expect(summary.averageScore).toBe(66);
+  });
+
+  it('should classify connection-style errors as infrastructure failures', () => {
+    expect(classifyBenchmarkError(new Error('Connection error while contacting provider'))).toBe('infrastructure');
+    expect(classifyBenchmarkError(new Error('UND_ERR_SOCKET disconnected'))).toBe('infrastructure');
+    expect(classifyBenchmarkError(new Error('Unhandled TypeError in section writer'))).toBe('execution');
   });
 });

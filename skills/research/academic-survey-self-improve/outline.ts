@@ -168,9 +168,11 @@ function normalizeOutline(
     searchQueries: Array.isArray(section?.searchQueries) && section.searchQueries.length > 0
       ? section.searchQueries.map((query) => String(query).trim()).filter(Boolean)
       : fallback.sections[index]?.searchQueries || [topic],
-    targetWordCount: Number(section?.targetWordCount) > 0
-      ? Number(section?.targetWordCount)
-      : fallback.sections[index]?.targetWordCount || 220,
+    targetWordCount: clampTargetWordCount(
+      Number(section?.targetWordCount),
+      depth,
+      section?.title || fallback.sections[index]?.title || ''
+    ),
     focusFacets: Array.isArray((section as any)?.focusFacets) && (section as any).focusFacets.length > 0
       ? (section as any).focusFacets.map((facet: unknown) => String(facet).trim()).filter(Boolean)
       : fallback.sections[index]?.focusFacets || deriveSectionFacets(section?.title || fallback.sections[index]?.title || '')
@@ -304,6 +306,22 @@ function normalizeSection(
     searchQueries: queryPlan.map((item) => item.query),
     queryPlan
   };
+}
+
+function clampTargetWordCount(
+  requested: number,
+  depth: string,
+  title: string
+): number {
+  const baseFloor = DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard;
+  const methodsFloor = DEPTH_METHODS_WORD_COUNT[depth] || DEPTH_METHODS_WORD_COUNT.standard;
+  const floor = title.toLowerCase().includes('method') ? methodsFloor : baseFloor;
+
+  if (!Number.isFinite(requested) || requested <= 0) {
+    return floor;
+  }
+
+  return Math.max(Math.round(requested), floor);
 }
 
 function buildFallbackTopicProfile(topic: string, sections: OutlineSection[]): TopicProfile {
@@ -540,6 +558,7 @@ Based on these retrieval results, decide whether to refine the outline:
 4. Keep the total number of sections at ${sectionCount}.
 5. Do NOT rename sections that are working well.
 6. All section titles MUST contain one of: "Background", "Methods", "Evaluation", "Applications", "Challenges".
+7. Preserve depth targets: non-method sections should stay at or above ${DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard} words; method sections should stay at or above ${DEPTH_METHODS_WORD_COUNT[depth] || DEPTH_METHODS_WORD_COUNT.standard} words.
 
 If no changes are needed, return {"refined": false}.
 Otherwise, return:
@@ -552,7 +571,7 @@ Otherwise, return:
       "description": "string",
       "focusFacets": ["string"],
       "searchQueries": ["string"],
-      "targetWordCount": 200
+      "targetWordCount": ${DEPTH_WORD_COUNT[depth] || DEPTH_WORD_COUNT.standard}
     }
   ],
   "changes": ["string describing each change made"]
@@ -586,9 +605,11 @@ Return ONLY valid JSON.
       searchQueries: Array.isArray(section.searchQueries) && section.searchQueries.length > 0
         ? section.searchQueries.map((q) => String(q).trim()).filter(Boolean)
         : existing?.searchQueries || [topic],
-      targetWordCount: Number(section.targetWordCount) > 0
-        ? Number(section.targetWordCount)
-        : existing?.targetWordCount || 200,
+      targetWordCount: clampTargetWordCount(
+        Number(section.targetWordCount),
+        depth,
+        section.title || existing?.title || ''
+      ),
       focusFacets: Array.isArray(section.focusFacets) && section.focusFacets.length > 0
         ? section.focusFacets.map((f) => String(f).trim()).filter(Boolean)
         : existing?.focusFacets || deriveSectionFacets(section.title || '')

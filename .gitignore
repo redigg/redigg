@@ -12,3 +12,5 @@ yarn-error.log*
 pnpm-debug.log*
 reference/
 /workspace/
+CLAUDE.md
+对话总结与记忆.md

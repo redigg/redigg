@@ -1,3 +1,5 @@
+export type BenchmarkFailureCategory = 'infrastructure' | 'execution';
+
 export interface SurveyBenchmarkCase {
   id: string;
   topic: string;
@@ -42,7 +44,8 @@ export interface SurveyBenchmarkTopicResult {
   startedAt: string;
   completedAt: string;
   durationMs: number;
-  aggregateScore: number;
+  aggregateScore: number | null;
+  countedInAggregate: boolean;
   scorecard: SurveyBenchmarkTopicScorecard;
   surgeMetrics?: SurgeStyleMetricsSummary;
   outputPaths: {
@@ -54,6 +57,8 @@ export interface SurveyBenchmarkTopicResult {
     sections: string[];
     paperCount: number;
     referenceCount: number;
+    retrievedPaperCount: number;
+    referencedPaperCount: number;
     claimAlignmentCount: number;
     uniqueCitationCount: number;
     pdfGenerated: boolean;
@@ -64,6 +69,7 @@ export interface SurveyBenchmarkTopicResult {
     passed: boolean;
     suggestions: string[];
   };
+  failureCategory?: BenchmarkFailureCategory;
   error?: string;
 }
 
@@ -72,7 +78,11 @@ export interface SurveyBenchmarkRunSummary {
   generatedAt: string;
   outputDir: string;
   caseCount: number;
+  scoredCaseCount: number;
+  excludedCaseCount: number;
+  infrastructureFailureCount: number;
+  executionFailureCount: number;
   passedCount: number;
-  averageScore: number;
+  averageScore: number | null;
   results: SurveyBenchmarkTopicResult[];
 }

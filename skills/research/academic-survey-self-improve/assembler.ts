@@ -17,8 +17,24 @@ function cleanSectionContent(content: string, sectionTitle: string): string {
   // Remove markdown code fences wrapping the content
   cleaned = cleaned.replace(/```(?:markdown)?\s*\n([\s\S]*?)```/g, '$1');
 
-  // Remove common LLM preamble lines (flexible match for "Here's the revised/improved/expanded..." variants)
-  cleaned = cleaned.replace(/^(?:Here(?:'s| is) (?:the |a |my )?(?:revised|improved|updated|rewritten|expanded|new)[^\n]*(?:section|version|content|draft|text)[^\n]*\n+)/im, '');
+  // Remove common LLM preamble lines (global — catches multiple occurrences)
+  cleaned = cleaned.replace(/^(?:Here(?:'s| is) (?:the |a |my )?(?:revised|improved|updated|rewritten|expanded|new)[^\n]*(?:section|version|content|draft|text)[^\n]*\n+)/gim, '');
+
+  // Remove LLM postamble / self-evaluation blocks at the end of sections
+  // Matches patterns like "This revision expands to...", "This expanded analysis...",
+  // "The revised section expands...", "Word count: N", etc.
+  cleaned = cleaned.replace(/\n+(?:This (?:revision|revised|expanded|updated|rewritten)[^\n]*(?:expands?|incorporates?|improves?|includes?|adds?)[^\n]*(?:\n(?:\d+\.\s+[^\n]+))*)\s*$/gi, '');
+  cleaned = cleaned.replace(/\n+(?:The revised (?:section|version)[^\n]*)\s*$/gi, '');
+
+  // Remove inline "(Word count: N)" or "(Word count: N,NNN)"
+  cleaned = cleaned.replace(/\s*\(Word count:\s*[\d,]+\)\s*/gi, ' ');
+
+  // Remove standalone "Word count: N" lines
+  cleaned = cleaned.replace(/^\s*Word count:\s*[\d,]+\s*$/gim, '');
+
+  // Remove numbered meta-commentary lists (e.g. "1. New subsections organizing...", "2. Deeper synthesis...")
+  // Only when preceded by a meta line like "This revision..." or at the very end
+  cleaned = cleaned.replace(/\n+(?:\d+\.\s+(?:New|Deeper|Enhanced|Improved|Added|Consolidated|Unified|Better|Clearer|Expanded|Strengthened)[^\n]+(?:\n\d+\.\s+(?:New|Deeper|Enhanced|Improved|Added|Consolidated|Unified|Better|Clearer|Expanded|Strengthened)[^\n]+)*)\s*$/gi, '');
 
   // Remove template artifact leaks (e.g. "Closing move:" prefix from section templates)
   cleaned = cleaned.replace(/\b(Closing move|Opening move|Required move|Rhetorical goal)\s*:\s*/gi, '');

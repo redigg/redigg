@@ -94,17 +94,23 @@ Return ONLY valid JSON:
 Requirements for the markdown:
 - Start with a level-2 heading using the exact section title.
 - Follow the rhetorical goal, required moves, and closing move from the section template above.
-- CRITICAL LENGTH REQUIREMENT: Write at least ${section.targetWordCount} words. Aim for ${Math.round(section.targetWordCount * 1.1)} words. Sections shorter than ${Math.round(section.targetWordCount * 0.8)} words will be rejected and rewritten. Count your words carefully before returning.
-- Write ${section.targetWordCount >= 400 ? '4-6' : '3-4'} substantive paragraphs minimum. Each paragraph should be 60-100 words.
+- CRITICAL LENGTH REQUIREMENT: Write at least ${section.targetWordCount} words. Aim for ${Math.round(section.targetWordCount * 1.15)} words. Sections shorter than ${Math.round(section.targetWordCount * 0.75)} words will be REJECTED and rewritten. This is the MOST IMPORTANT requirement — short sections waste the entire generation. Plan your writing: with ${section.targetWordCount >= 800 ? '6-8' : section.targetWordCount >= 400 ? '5-7' : '3-4'} substantive paragraphs, each paragraph needs ${Math.round(section.targetWordCount / (section.targetWordCount >= 800 ? 7 : section.targetWordCount >= 400 ? 6 : 3.5))} words on average.
+- Each paragraph should be 80-150 words. Do NOT write short 30-50 word paragraphs.
 - Synthesize, do not list papers one by one.
 - Every substantive claim must be supported by the evidence cards above.
 - Use citation markers like [1], [2] when making claims.
 - Mention at least two distinct evidence cards when more than one is available.
 - Do not introduce systems, benchmarks, datasets, or claims that are absent from the evidence cards.
-- NEVER fabricate specific numbers, percentages, or statistics (e.g. "80% of tasks", "3x more errors") unless they appear verbatim in an evidence card. If no number is available, describe the finding qualitatively.
+- ABSOLUTE RULE — NEVER fabricate specific numbers, percentages, or statistics. This means:
+  * Do NOT invent accuracy percentages (e.g. "achieving 89% accuracy") unless the EXACT number appears in an evidence card above.
+  * Do NOT invent improvement factors (e.g. "3x faster", "4.3× improvement") unless stated verbatim in an evidence card.
+  * Do NOT invent counts or ratios (e.g. "72% of tasks", "31% recall") unless in an evidence card.
+  * If you need to describe performance, use qualitative language: "significantly outperforms", "shows substantial improvement", "achieves competitive results".
+  * You MAY use numbers that appear in evidence card fields (keyContribution, groundedClaim, limitationHint).
 - Avoid all listed anti-patterns.
 - Prioritize evidence cards that are most specific to this section's theme. If a paper appears generic, give more space to papers with stronger section-specific relevance.
 - VOCABULARY DIVERSITY: Vary your vocabulary across sentences. Avoid repeating the same phrases (e.g. "demonstrates", "highlights", "underscores") more than twice. Use diverse academic verbs and sentence structures.
+- Do NOT include any meta-commentary about your writing process (e.g. "This section covers...", "Word count:"). Output ONLY the academic survey text.
 Requirements for claimMappings:
 - Include 2-4 core sentence-level claims from the markdown body.
 - Each claim must appear verbatim or near-verbatim in the markdown.
@@ -118,6 +124,10 @@ Requirements for claimMappings:
 
     const parsed = parseJsonObject<SectionDraftResponse>(response.content);
     let content = normalizeText(parsed?.markdown || response.content);
+
+    // Strip LLM meta-commentary before any further processing
+    content = stripLlmArtifacts(content);
+
     if (!content.startsWith('## ')) {
       content = `## ${section.title}\n\n${content}`;
     }
@@ -142,6 +152,29 @@ Requirements for claimMappings:
   }
 
   return drafts;
+}
+
+/**
+ * Strip common LLM meta-commentary artifacts from draft section content.
+ */
+function stripLlmArtifacts(text: string): string {
+  let cleaned = text;
+
+  // Remove preamble lines like "Here's the revised/expanded..."
+  cleaned = cleaned.replace(/^(?:Here(?:'s| is) (?:the |a |my )?(?:revised|improved|updated|rewritten|expanded|new)[^\n]*(?:section|version|content|draft|text)[^\n]*\n+)/gim, '');
+
+  // Remove postamble self-evaluation blocks
+  cleaned = cleaned.replace(/\n+(?:This (?:revision|revised|expanded|updated|rewritten)[^\n]*(?:expands?|incorporates?|improves?|includes?|adds?)[^\n]*(?:\n(?:\d+\.\s+[^\n]+))*)\s*$/gi, '');
+  cleaned = cleaned.replace(/\n+(?:The revised (?:section|version)[^\n]*)\s*$/gi, '');
+
+  // Remove "(Word count: N)" and standalone word count lines
+  cleaned = cleaned.replace(/\s*\(Word count:\s*[\d,]+\)\s*/gi, ' ');
+  cleaned = cleaned.replace(/^\s*Word count:\s*[\d,]+\s*$/gim, '');
+
+  // Remove numbered meta-commentary lists at the end
+  cleaned = cleaned.replace(/\n+(?:\d+\.\s+(?:New|Deeper|Enhanced|Improved|Added|Consolidated|Unified|Better|Clearer|Expanded|Strengthened)[^\n]+(?:\n\d+\.\s+(?:New|Deeper|Enhanced|Improved|Added|Consolidated|Unified|Better|Clearer|Expanded|Strengthened)[^\n]+)*)\s*$/gi, '');
+
+  return cleaned.trim();
 }
 
 function createFallbackSection(

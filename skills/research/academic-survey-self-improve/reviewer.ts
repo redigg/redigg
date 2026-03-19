@@ -200,7 +200,7 @@ async function rewriteSection(
 Topic: ${topic}
 Section template: ${template.label} (${template.kind})
 Rhetorical goal: ${template.rhetoricalGoal}
-CRITICAL LENGTH REQUIREMENT: Write at least ${target} words, aim for ${Math.round(target * 1.1)} words. The current draft was rejected for being too short. Expand each paragraph with deeper analysis and add new paragraphs.
+CRITICAL LENGTH REQUIREMENT: The current draft is ONLY ${countWords(section.content)} words but the target is ${target} words. You MUST write at least ${target} words, aim for ${Math.round(target * 1.15)} words. This means you need to ADD approximately ${Math.max(0, target - countWords(section.content))} words. Expand each paragraph to 80-150 words and add new paragraphs with deeper analysis, comparisons between methods, and discussion of tradeoffs.
 Required moves:
 ${template.requiredMoves.map((m) => `- ${m}`).join('\n')}
 Closing move: ${template.closingMove}
@@ -217,16 +217,51 @@ ${claimSummary || 'No claim alignments available.'}
 
 ${section.content}
 
-Return ONLY the revised Markdown section.
+Return ONLY the revised Markdown section text. Do NOT include:
+- Any preamble like "Here's the revised section..."
+- Any postamble like "This revision expands to X words with..."
+- Any word count annotations like "(Word count: N)"
+- Any numbered lists describing what you changed (e.g. "1. New subsections... 2. Deeper synthesis...")
+- Any meta-commentary about the revision process
+Output ONLY the academic survey text starting with ## heading.
 `;
 
   const response = await context.llm.chat([
-    { role: 'system', content: 'You revise academic survey sections without changing their scope.' },
+    { role: 'system', content: 'You revise academic survey sections without changing their scope. Output ONLY the revised section text — no preamble, no postamble, no meta-commentary.' },
     { role: 'user', content: prompt }
   ]);
 
-  const content = normalizeText(response.content);
-  return content || null;
+  let content = normalizeText(response.content);
+  if (!content) return null;
+
+  // Strip LLM meta-commentary that may leak despite instructions
+  content = stripLlmMetaCommentary(content);
+
+  return content;
+}
+
+/**
+ * Strip common LLM meta-commentary patterns from section content.
+ * Applied both in reviewer (after rewrite) and assembler (as safety net).
+ */
+function stripLlmMetaCommentary(text: string): string {
+  let cleaned = text;
+
+  // Remove preamble lines
+  cleaned = cleaned.replace(/^(?:Here(?:'s| is) (?:the |a |my )?(?:revised|improved|updated|rewritten|expanded|new)[^\n]*(?:section|version|content|draft|text)[^\n]*\n+)/gim, '');
+
+  // Remove postamble self-evaluation blocks
+  cleaned = cleaned.replace(/\n+(?:This (?:revision|revised|expanded|updated|rewritten)[^\n]*(?:expands?|incorporates?|improves?|includes?|adds?)[^\n]*(?:\n(?:\d+\.\s+[^\n]+))*)\s*$/gi, '');
+  cleaned = cleaned.replace(/\n+(?:The revised (?:section|version)[^\n]*)\s*$/gi, '');
+
+  // Remove "(Word count: N)" and standalone word count lines
+  cleaned = cleaned.replace(/\s*\(Word count:\s*[\d,]+\)\s*/gi, ' ');
+  cleaned = cleaned.replace(/^\s*Word count:\s*[\d,]+\s*$/gim, '');
+
+  // Remove numbered meta-commentary lists at the end
+  cleaned = cleaned.replace(/\n+(?:\d+\.\s+(?:New|Deeper|Enhanced|Improved|Added|Consolidated|Unified|Better|Clearer|Expanded|Strengthened)[^\n]+(?:\n\d+\.\s+(?:New|Deeper|Enhanced|Improved|Added|Consolidated|Unified|Better|Clearer|Expanded|Strengthened)[^\n]+)*)\s*$/gi, '');
+
+  return cleaned.trim();
 }
 
 function runHardChecks(section: SectionDraft): HardCheckResult {

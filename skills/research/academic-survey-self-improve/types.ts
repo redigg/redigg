@@ -69,7 +69,7 @@ export interface EvidenceCard {
   groundedClaim: string;
   limitationHint: string;
   evidenceLevel: EvidenceLevel;
-  quotableFindings: string[];
+  quotableFindings?: string[];
 }
 
 export interface ClaimAlignment {

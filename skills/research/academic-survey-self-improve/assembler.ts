@@ -1,7 +1,18 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { SkillContext } from '../../../src/skills/types.js';
 import type { FinalSurvey, SectionDraft, SurveyFigure, SurveyOutline, SurveyQualityReport } from './types.js';
-import { checkCitationConsistency, countWords, normalizeText, stripGhostCitations } from './utils.js';
+import {
+  checkCitationConsistency,
+  countWords,
+  getQuotableFindings,
+  normalizeAuthorList,
+  normalizeBibliographyVenue,
+  normalizeMarkdownHeadings,
+  normalizeText,
+  sanitizeMarkdownTables,
+  stripCitationPlaceholders,
+  stripGhostCitations
+} from './utils.js';
 import { convertToLatex } from './latex-converter.js';
 
 /**
@@ -62,6 +73,8 @@ function cleanSectionContent(content: string, sectionTitle: string): string {
   // canonical heading.  This catches mismatched titles produced by LLM rewrites
   // (e.g. "## Background and Scope" when the outline title is "Background and Evolution").
   cleaned = cleaned.replace(/^##\s+[^\n]+\n*/gm, '');
+  cleaned = normalizeMarkdownHeadings(cleaned);
+  cleaned = stripCitationPlaceholders(cleaned);
 
   // Re-prepend the single canonical heading
   cleaned = `## ${sectionTitle}\n\n${cleaned.trimStart()}`;
@@ -76,19 +89,7 @@ function cleanSectionContent(content: string, sectionTitle: string): string {
 function formatReference(paper: Paper, index: number): string {
   // Format authors: "FirstAuthor, SecondAuthor, and ThirdAuthor"
   const authors = formatAuthors(paper.authors || []);
-
-  // Fix venue: replace "OpenAlex" or empty venue with source-derived venue
-  let venue = paper.journal || '';
-  if (!venue || venue.toLowerCase() === 'openalex' || venue.toLowerCase() === 'unknown venue') {
-    // Try to derive venue from URL or source
-    if (paper.url?.includes('arxiv.org')) {
-      venue = 'arXiv preprint';
-    } else if (paper.source === 'arxiv') {
-      venue = 'arXiv preprint';
-    } else {
-      venue = 'Preprint';
-    }
-  }
+  const venue = normalizeBibliographyVenue(paper);
 
   // Build DOI suffix if available
   const doiSuffix = paper.doi ? ` DOI: ${paper.doi}` : '';
@@ -101,16 +102,7 @@ function formatReference(paper: Paper, index: number): string {
  * Format author list for bibliography. Handles encoding issues and truncation.
  */
 function formatAuthors(authors: string[]): string {
-  if (authors.length === 0) return 'Unknown Authors';
-
-  // Fix common encoding issues (mojibake from UTF-8 → Latin-1 round-trips)
-  const cleaned = authors.map((a) =>
-    a.replace(/Ã¤/g, 'ä').replace(/Ã¶/g, 'ö').replace(/Ã¼/g, 'ü')
-      .replace(/Ã©/g, 'é').replace(/Ã¨/g, 'è').replace(/Ã§/g, 'ç')
-      .replace(/Ã±/g, 'ñ').replace(/Ã³/g, 'ó').replace(/Ã¡/g, 'á')
-      .replace(/Ã­/g, 'í').replace(/Ãº/g, 'ú')
-      .trim()
-  ).filter(Boolean);
+  const cleaned = normalizeAuthorList(authors);
 
   if (cleaned.length === 0) return 'Unknown Authors';
   if (cleaned.length === 1) return cleaned[0];
@@ -255,6 +247,75 @@ Future research should prioritize bridging the gap between narrow task automatio
 As ${topic.toLowerCase()} matures, the convergence of improved methods, richer benchmarks, and deeper theoretical understanding will be essential for translating current progress into sustained, practical impact.`;
 }
 
+function generateFallbackAbstract(outline: SurveyOutline, sections: SectionDraft[], totalPaperCount?: number): string {
+  const topic = outline.title.replace(/^A Survey of /i, '').replace(/^Survey on /i, '');
+  const sectionTitles = sections.map((section) => section.title.toLowerCase());
+  const keyThemes = sectionTitles.slice(0, 4).join(', ');
+  const evidenceCount = totalPaperCount || sections.flatMap((section) => section.evidenceCards || []).length;
+
+  return `This survey reviews ${topic.toLowerCase()} by synthesizing literature across ${keyThemes}. We organize the field around its core methodological, evaluative, and application-oriented dimensions, summarize the main design patterns that recur across the literature, and highlight the principal limits that continue to constrain reliability, evidence quality, and real-world deployment. The survey is grounded in ${evidenceCount} retrieved references and emphasizes comparative synthesis rather than isolated paper descriptions. We conclude by outlining the main open challenges and the research directions most likely to improve rigor, coverage, and practical scientific usefulness.`;
+}
+
+function buildAbstractGroundingCorpus(sections: SectionDraft[]): string {
+  return sections.flatMap((section) => [
+    section.title,
+    section.content,
+    ...section.evidenceCards.flatMap((card) => [
+      card.title,
+      card.keyContribution,
+      card.groundedClaim,
+      card.limitationHint,
+      ...getQuotableFindings(card)
+    ])
+  ]).join(' ');
+}
+
+function collectGroundedNumberTokens(text: string): Set<string> {
+  const groundedNumbers = new Set<string>();
+  for (const match of text.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
+    groundedNumbers.add(match[1]);
+  }
+  for (const match of text.matchAll(/(\d+(?:\.\d+)?)\s*[×x]/gi)) {
+    groundedNumbers.add(match[1]);
+  }
+  for (const match of text.matchAll(/\b(\d{1,4}(?:\.\d+)?)\b/g)) {
+    groundedNumbers.add(match[1]);
+  }
+  return groundedNumbers;
+}
+
+function hasUnsupportedAbstractNumbers(abstractText: string, groundedText: string): boolean {
+  const groundedNumbers = collectGroundedNumberTokens(groundedText);
+  const abstractWithoutCitations = abstractText.replace(/\[\d+\]/g, '');
+  const numericTokens = Array.from(abstractWithoutCitations.matchAll(/\b(\d{1,4}(?:\.\d+)?)\b/g)).map((match) => match[1]);
+  return numericTokens.some((token) => !groundedNumbers.has(token));
+}
+
+function hasUnsupportedAbstractNames(abstractText: string, groundedText: string): boolean {
+  const normalizedGrounded = groundedText.toLowerCase();
+  const suspiciousTokens = Array.from(abstractText.matchAll(/\b(?:[A-Z]{2,}[A-Za-z0-9-]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9-]*)\b/g))
+    .map((match) => match[0])
+    .filter((token) => !['AI', 'LLM'].includes(token));
+  return suspiciousTokens.some((token) => !normalizedGrounded.includes(token.toLowerCase()));
+}
+
+function validateAbstractGrounding(abstractText: string, sections: SectionDraft[]): boolean {
+  if (!abstractText || abstractText.length < 100) {
+    return false;
+  }
+  if (/\[(?:\d+|N|TBD|\?+|citation needed)\]/i.test(abstractText)) {
+    return false;
+  }
+  const groundedText = buildAbstractGroundingCorpus(sections);
+  if (hasUnsupportedAbstractNumbers(abstractText, groundedText)) {
+    return false;
+  }
+  if (hasUnsupportedAbstractNames(abstractText, groundedText)) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * W1: Rewrite abstract based on actual section content rather than the outline draft.
  */
@@ -263,7 +324,9 @@ async function rewriteAbstract(
   outline: SurveyOutline,
   sections: SectionDraft[]
 ): Promise<string> {
-  if (!context) return outline.abstractDraft;
+  if (!context) {
+    return generateFallbackAbstract(outline, sections);
+  }
 
   const sectionSummaries = sections.map((s) => {
     const body = s.content.replace(/^##[^\n]*\n+/, '').split('\n\n')[0] || '';
@@ -281,10 +344,11 @@ ${sectionSummaries}
 Requirements:
 - 150-250 words
 - Summarize the survey's scope, methodology, key findings, and contributions
-- Be specific about which systems, benchmarks, or methods are covered
+- You MAY mention specific systems, benchmarks, or methods only if they already appear verbatim in the section summaries below
 - End with a sentence about open challenges or future implications
 - Do NOT include citations [N]
 - Do NOT include headings or keywords
+- Do NOT invent benchmark names, system names, datasets, or concrete quantitative results that are absent from the section summaries
 - Return ONLY the abstract text`;
 
   try {
@@ -292,12 +356,15 @@ Requirements:
       { role: 'system', content: 'You write concise, specific survey abstracts.' },
       { role: 'user', content: prompt }
     ]);
-    const content = normalizeText(response.content);
-    if (content && content.length > 100) return content;
+    let content = normalizeText(response.content);
+    content = stripCitationPlaceholders(content);
+    if (validateAbstractGrounding(content, sections)) {
+      return content;
+    }
   } catch {
-    // Fall through to original
+    // Fall through to deterministic fallback
   }
-  return outline.abstractDraft;
+  return generateFallbackAbstract(outline, sections);
 }
 
 /**
@@ -556,7 +623,14 @@ export async function assembleSurvey(
   // Now strip any remaining ghost citations (citations > final ref count)
   cleanedSections = cleanedSections.map((section) => ({
     ...section,
-    content: stripGhostCitations(section.content, referenceCount)
+    content: sanitizeMarkdownTables(
+      stripCitationPlaceholders(
+        normalizeMarkdownHeadings(
+          stripGhostCitations(section.content, referenceCount)
+        )
+      ),
+      section.evidenceCards
+    )
   }));
 
   const references = finalPapers
@@ -607,6 +681,20 @@ export async function assembleSurvey(
   // Final ghost-citation strip on the fully assembled markdown
   // (catches citations introduced by LLM conclusion or rewrite that escaped per-section strip)
   let markdown = stripGhostCitations(markdownParts.join('\n\n'), referenceCount);
+  markdown = normalizeMarkdownHeadings(markdown);
+  markdown = stripCitationPlaceholders(markdown);
+
+  const finalSections = figuredSections.map((section) => ({
+    ...section,
+    content: sanitizeMarkdownTables(
+      stripCitationPlaceholders(
+        normalizeMarkdownHeadings(
+          stripGhostCitations(section.content, referenceCount)
+        )
+      ),
+      section.evidenceCards
+    )
+  }));
 
   // Vocabulary diversity check: detect overused academic verbs
   const vocabIssues = checkVocabularyDiversity(markdown);
@@ -623,7 +711,7 @@ export async function assembleSurvey(
     const surveyForLatex: FinalSurvey = {
       title: outline.title,
       markdown,
-      sections: cleanedSections,
+      sections: finalSections,
       referencedPapers: finalPapers,
       wordCount: countWords(markdown),
       citationCount: referenceCount,
@@ -642,7 +730,7 @@ export async function assembleSurvey(
     title: outline.title,
     markdown,
     latex,
-    sections: cleanedSections,
+    sections: finalSections,
     figures: figures && figures.length > 0 ? figures : undefined,
     referencedPapers: finalPapers,
     wordCount: countWords(markdown),

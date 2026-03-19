@@ -58,7 +58,9 @@ describe('reviewSurveySections', () => {
             evidenceFocus: ['survey', 'workflow'],
             keyContribution: 'A survey of agentic systems and evaluation practices.',
             groundedClaim: 'The paper surveys agentic systems and workflows.',
-            limitationHint: 'Open questions remain around benchmark coverage.'
+            limitationHint: 'Open questions remain around benchmark coverage.',
+            evidenceLevel: 'review',
+            quotableFindings: []
           }
         ]
       }
@@ -126,7 +128,9 @@ describe('reviewSurveySections', () => {
             evidenceFocus: ['system', 'workflow'],
             keyContribution: 'A multi-agent platform for scientific discovery.',
             groundedClaim: 'Denario provides system evidence for end-to-end scientific discovery workflows.',
-            limitationHint: 'Deployment robustness remains open.'
+            limitationHint: 'Deployment robustness remains open.',
+            evidenceLevel: 'system',
+            quotableFindings: []
           },
           {
             citation: 2,
@@ -137,7 +141,9 @@ describe('reviewSurveySections', () => {
             evidenceFocus: ['system', 'workflow'],
             keyContribution: 'An autonomous discovery system with iterative experimentation.',
             groundedClaim: 'The AI Scientist demonstrates autonomous discovery loops.',
-            limitationHint: 'Reliability and evaluation remain open.'
+            limitationHint: 'Reliability and evaluation remain open.',
+            evidenceLevel: 'system',
+            quotableFindings: []
           }
         ]
       }

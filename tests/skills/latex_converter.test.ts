@@ -53,13 +53,35 @@ function makePapers(): Paper[] {
 function makeFinalSurvey(): FinalSurvey {
   return {
     title: 'A Survey of AI Agents for Scientific Research',
-    markdown: '# A Survey of AI Agents for Scientific Research\n\n## Background\n\nSome text [1].\n\n## Methods\n\nMore text [2].',
+    markdown: `# A Survey of AI Agents for Scientific Research
+
+## Abstract
+
+This survey examines AI agents designed for scientific research tasks.
+
+**Keywords**: Task-based agents, Tool-using agents, Multi-agent systems
+
+## Introduction
+
+AI agents increasingly support scientific workflows by combining planning, retrieval, and tool use [1].
+
+## Background and Evolution
+
+AI agents have evolved significantly [1]. Recent work by Bran et al. demonstrates chemistry-specific tool use [1].
+
+## Methods and Architectures
+
+Multi-agent frameworks like SciAgent [2] enable collaborative research workflows. The use of **specialized tools** is a key pattern.
+
+## Conclusion
+
+These systems continue to expand the scope of scientific automation.`,
     sections: [
       {
         sectionId: 'background',
         title: 'Background and Evolution',
         templateKind: 'background',
-        content: '## Background and Evolution\n\nAI agents have evolved significantly [1]. Recent work by Bran et al. demonstrates chemistry-specific tool use [1].',
+        content: '## Background and Evolution\n\nDraft-only background text that should not drive the LaTeX body [1].',
         paperCount: 1,
         citations: [1],
         evidenceCards: [],
@@ -69,13 +91,14 @@ function makeFinalSurvey(): FinalSurvey {
         sectionId: 'methods',
         title: 'Methods and Architectures',
         templateKind: 'methods',
-        content: '## Methods and Architectures\n\nMulti-agent frameworks like SciAgent [2] enable collaborative research workflows. The use of **specialized tools** is a key pattern.',
+        content: '## Methods and Architectures\n\nDraft-only methods text with **draft-only tools** that should be ignored [2].',
         paperCount: 1,
         citations: [2],
         evidenceCards: [],
         claimAlignments: []
       }
     ],
+    referencedPapers: makePapers(),
     wordCount: 200,
     citationCount: 2,
     citationConsistency: {
@@ -146,6 +169,15 @@ describe('LaTeX Converter', () => {
     const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
 
     expect(latex).toContain('\\textbf{specialized tools}');
+  });
+
+  it('prefers assembled markdown over draft section content for body sections', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex).toContain('chemistry-specific tool use');
+    expect(latex).toContain('\\textbf{specialized tools}');
+    expect(latex).not.toContain('draft-only background text');
+    expect(latex).not.toContain('draft-only tools');
   });
 
   it('includes bibliography with papers', () => {

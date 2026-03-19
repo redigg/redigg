@@ -1,7 +1,7 @@
 import type { SkillContext } from '../../../src/skills/types.js';
 import type { SectionDraft, SurveyQualityReport } from './types.js';
 import { getSectionWritingTemplate } from './section-templates.js';
-import { alignClaimsToEvidence, countWords, normalizeText, parseJsonObject } from './utils.js';
+import { alignClaimsToEvidence, countWords, getQuotableFindings, normalizeText, parseJsonObject } from './utils.js';
 
 interface ReviewResponse {
   score: number;
@@ -22,6 +22,13 @@ interface HardCheckResult {
   severity: HardCheckSeverity;
   fabricatedNumbers: string[];
   citationDistribution: { overCited: number[]; unCited: number[] };
+}
+
+interface CrossSectionFeedback {
+  scorePenalty: number;
+  issues: string[];
+  suggestions: string[];
+  forceRewrite: boolean;
 }
 
 export async function reviewSurveySections(
@@ -61,6 +68,34 @@ export async function reviewSurveySections(
       suggestions: finalReview.suggestions,
       rewriteApplied
     });
+  }
+
+  const crossSectionFeedback = runCrossSectionChecks(reviewedSections);
+  for (let i = 0; i < reviewedSections.length; i++) {
+    const feedback = crossSectionFeedback.get(reviewedSections[i].sectionId);
+    if (!feedback) continue;
+
+    sectionReviews[i] = {
+      ...sectionReviews[i],
+      score: Math.max(0, sectionReviews[i].score - feedback.scorePenalty),
+      issues: uniqueTop([...sectionReviews[i].issues, ...feedback.issues]),
+      suggestions: uniqueTop([...sectionReviews[i].suggestions, ...feedback.suggestions])
+    };
+
+    if (feedback.forceRewrite) {
+      const rewritten = await rewriteSection(context, topic, reviewedSections[i], sectionReviews[i].suggestions);
+      if (rewritten) {
+        reviewedSections[i] = {
+          ...reviewedSections[i],
+          content: rewritten,
+          claimAlignments: alignClaimsToEvidence(rewritten, reviewedSections[i].evidenceCards, reviewedSections[i].claimAlignments)
+        };
+        sectionReviews[i] = {
+          ...sectionReviews[i],
+          rewriteApplied: true
+        };
+      }
+    }
   }
 
   // Use max(mean, median) to prevent a single low-scoring section from dragging overall quality gate
@@ -233,11 +268,13 @@ ${claimSummary || 'No claim alignments available.'}
 ${section.content}
 
 Return ONLY the revised Markdown section text. Do NOT include:
+- Manual heading numbering such as "### 1.1 ..." or "### Section 3 ..."
 - Any preamble like "Here's the revised section..."
 - Any postamble like "This revision expands to X words with..."
 - Any word count annotations like "(Word count: N)"
 - Any numbered lists describing what you changed (e.g. "1. New subsections... 2. Deeper synthesis...")
 - Any meta-commentary about the revision process
+- Unsupported quantitative cells in tables; use "N/A" or qualitative text when the evidence cards do not provide an exact number
 Output ONLY the academic survey text starting with ## heading.
 `;
 
@@ -373,6 +410,32 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     strengths.push(`Word count ${wordCount} meets target ${target}`);
   }
 
+  const leadParagraph = extractLeadParagraph(section.content);
+  if (leadParagraph) {
+    if (!/\[\d+\]/.test(leadParagraph) && section.evidenceCards.length > 0) {
+      issues.push('The section lead paragraph introduces claims before citing any supporting evidence.');
+      suggestions.push('Ground the first paragraph immediately with section-relevant citations instead of opening with unsupported framing claims.');
+      scorePenalty += 8;
+      majorCount++;
+    }
+
+    const leadFabricatedNumbers = detectFabricatedNumbers(section, leadParagraph);
+    if (leadFabricatedNumbers.length > 0) {
+      issues.push(`Unsupported quantitative claims appear in the section lead paragraph: ${leadFabricatedNumbers.slice(0, 3).join(', ')}`);
+      suggestions.push('Remove unsupported numbers from the opening paragraph or replace them with qualitative synthesis grounded in the evidence cards.');
+      scorePenalty += Math.min(12, leadFabricatedNumbers.length * 4);
+      criticalCount++;
+    }
+  }
+
+  const citationPlaceholders = detectCitationPlaceholders(section.content);
+  if (citationPlaceholders.length > 0) {
+    issues.push(`Citation placeholders remain in the section: ${citationPlaceholders.slice(0, 4).join(', ')}`);
+    suggestions.push('Remove placeholder citations such as [N] and replace them with concrete evidence-card references.');
+    scorePenalty += Math.min(10, citationPlaceholders.length * 3);
+    majorCount++;
+  }
+
   // --- Fabricated number detection ---
   const fabricatedNumbers = detectFabricatedNumbers(section);
   if (fabricatedNumbers.length > 0) {
@@ -386,6 +449,18 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     }
   } else {
     strengths.push('No fabricated numbers detected');
+  }
+
+  const unsupportedTableCells = detectUnsupportedTableCells(section);
+  if (unsupportedTableCells.length > 0) {
+    issues.push(`Unsupported quantitative table cells detected: ${unsupportedTableCells.slice(0, 3).join('; ')}`);
+    suggestions.push('Replace unsupported quantitative table entries with "N/A" or qualitative descriptions unless the exact value appears in the cited evidence card.');
+    scorePenalty += Math.min(12, unsupportedTableCells.length * 3);
+    if (unsupportedTableCells.length >= 2) {
+      criticalCount++;
+    } else {
+      majorCount++;
+    }
   }
 
   // --- Citation distribution check ---
@@ -421,6 +496,18 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     suggestions.push('Use hedged framing for perspective/review sources: "argues that", "suggests that", "according to". Reserve empirical verbs for papers with evidence level "empirical".');
     scorePenalty += Math.min(10, misusedPerspectives.length * 3);
     majorCount++;
+  }
+
+  const overclaimingFindings = detectOverclaiming(section);
+  if (overclaimingFindings.length > 0) {
+    issues.push(`Potential overclaiming detected: ${overclaimingFindings.slice(0, 3).join(' | ')}`);
+    suggestions.push('Avoid jumping from system existence to system effectiveness. Reserve strong performance claims for sentences grounded in empirical evidence or verbatim quotable findings.');
+    scorePenalty += Math.min(12, overclaimingFindings.length * 3);
+    if (overclaimingFindings.length >= 2) {
+      majorCount++;
+    }
+  } else {
+    strengths.push('No strong overclaiming patterns detected');
   }
 
   // --- template-kind-specific checks ---
@@ -504,10 +591,17 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
  * Detect potentially fabricated numbers in section content by cross-referencing
  * with evidence card text. Numbers that appear in evidence cards are considered grounded.
  */
-function detectFabricatedNumbers(section: SectionDraft): string[] {
+function detectFabricatedNumbers(section: SectionDraft, candidateText: string = section.content): string[] {
   // Collect all numbers from evidence cards as the "grounded" set
   const evidenceText = section.evidenceCards
-    .map((card) => [card.keyContribution, card.groundedClaim, card.limitationHint].join(' '))
+    .map((card) => [
+      card.title,
+      String(card.year || ''),
+      card.keyContribution,
+      card.groundedClaim,
+      card.limitationHint,
+      ...getQuotableFindings(card)
+    ].join(' '))
     .join(' ');
   const groundedNumbers = new Set<string>();
   for (const match of evidenceText.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
@@ -522,7 +616,7 @@ function detectFabricatedNumbers(section: SectionDraft): string[] {
   }
 
   // Extract numbers from section content (skip citation markers [N])
-  const contentWithoutCitations = section.content.replace(/\[\d+\]/g, '');
+  const contentWithoutCitations = candidateText.replace(/\[\d+\]/g, '');
   const fabricated: string[] = [];
 
   // Check percentages
@@ -567,6 +661,110 @@ function detectFabricatedNumbers(section: SectionDraft): string[] {
   return Array.from(new Set(fabricated));
 }
 
+function extractLeadParagraph(content: string): string {
+  const body = content.replace(/^## [^\n]+\n+/, '');
+  const beforeSubsections = body.split(/\n###\s+/)[0] || body;
+  return beforeSubsections.split('\n\n')[0]?.trim() || '';
+}
+
+function detectCitationPlaceholders(text: string): string[] {
+  return Array.from(text.matchAll(/\[(N|TBD|\?+|citation needed|ref|refs?)\]/gi)).map((match) => match[0]);
+}
+
+function detectUnsupportedTableCells(section: SectionDraft): string[] {
+  const lines = section.content.split('\n');
+  const findings: string[] = [];
+  let i = 0;
+
+  const isTableRow = (line: string) => /^\|.+\|/.test(line.trim());
+  const isTableSeparator = (line: string) => /^\|[\s:?-]+(\|[\s:?-]+)+\|?\s*$/.test(line.trim());
+  const parseCells = (row: string) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+
+  while (i < lines.length) {
+    if (!isTableRow(lines[i])) {
+      i++;
+      continue;
+    }
+
+    const table: string[] = [];
+    while (i < lines.length && (isTableRow(lines[i]) || (table.length > 0 && isTableSeparator(lines[i])))) {
+      table.push(lines[i]);
+      i++;
+    }
+
+    for (let rowIndex = 2; rowIndex < table.length; rowIndex++) {
+      const row = table[rowIndex];
+      if (!isTableRow(row)) continue;
+
+      const rowCitations = Array.from(row.matchAll(/\[(\d+)\]/g)).map((match) => Number(match[1]));
+      const supportingCards = rowCitations.length > 0
+        ? section.evidenceCards.filter((card) => rowCitations.includes(card.citation))
+        : section.evidenceCards;
+      const scopedSection: SectionDraft = {
+        ...section,
+        evidenceCards: supportingCards
+      };
+
+      for (const cell of parseCells(row)) {
+        if (!/\d/.test(cell)) continue;
+        const fabricated = detectFabricatedNumbers(scopedSection, cell);
+        if (fabricated.length > 0) {
+          findings.push(cell.replace(/\s+/g, ' ').slice(0, 60));
+        }
+      }
+    }
+  }
+
+  return uniqueTop(findings, 4);
+}
+
+function detectOverclaiming(section: SectionDraft): string[] {
+  const findings: string[] = [];
+  const evidenceByCitation = new Map(section.evidenceCards.map((card) => [card.citation, card]));
+  const sentences = section.content
+    .replace(/^## [^\n]+\n+/, '')
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  const strongClaimPattern = /\b(outperform|state-of-the-art|sota|superior|consistently|reliably|robust|high-performing|effective|effectively|guarantee|guarantees|validate|validated|substantial improvement|significant improvement|achieves? strong performance)\b/i;
+  const existenceToEffectivenessPattern = /\b(system|framework|platform|workflow|agent)\b.*\b(effective|reliable|robust|accurate|successful|high-performing)\b/i;
+
+  for (const sentence of sentences) {
+    if (!strongClaimPattern.test(sentence) && !existenceToEffectivenessPattern.test(sentence)) {
+      continue;
+    }
+
+    const citedCards = Array.from(sentence.matchAll(/\[(\d+)\]/g))
+      .map((match) => Number(match[1]))
+      .map((citation) => evidenceByCitation.get(citation))
+      .filter((card): card is SectionDraft['evidenceCards'][number] => Boolean(card));
+
+    if (citedCards.length === 0) {
+      findings.push(sentence.slice(0, 120));
+      continue;
+    }
+
+    const hasEmpiricalSupport = citedCards.some((card) => {
+      const evidenceText = [
+        card.keyContribution,
+        card.groundedClaim,
+        card.limitationHint,
+        ...getQuotableFindings(card)
+      ].join(' ');
+      return card.evidenceLevel === 'empirical'
+        || /\b(result|benchmark|evaluation|accuracy|f1|precision|recall|improv|outperform|performance)\b/i.test(evidenceText);
+    });
+
+    const onlyWeakEvidence = citedCards.every((card) => card.evidenceLevel === 'review' || card.evidenceLevel === 'perspective' || card.evidenceLevel === 'unknown');
+    if (!hasEmpiricalSupport || onlyWeakEvidence) {
+      findings.push(sentence.slice(0, 120));
+    }
+  }
+
+  return uniqueTop(findings, 4);
+}
+
 /**
  * Check citation distribution: detect over-cited and un-cited evidence cards.
  */
@@ -608,6 +806,81 @@ function mergeReviewWithHardChecks(review: ReviewResponse, hardChecks: HardCheck
 
 function hasPaperType(signals: Set<string>, candidates: string[]): boolean {
   return candidates.some((candidate) => signals.has(candidate));
+}
+
+function runCrossSectionChecks(sections: SectionDraft[]): Map<string, CrossSectionFeedback> {
+  const feedback = new Map<string, CrossSectionFeedback>();
+  const addFeedback = (sectionId: string, issue: string, suggestion: string, scorePenalty: number, forceRewrite: boolean) => {
+    const existing = feedback.get(sectionId) || {
+      scorePenalty: 0,
+      issues: [],
+      suggestions: [],
+      forceRewrite: false
+    };
+    existing.scorePenalty += scorePenalty;
+    existing.issues.push(issue);
+    existing.suggestions.push(suggestion);
+    existing.forceRewrite = existing.forceRewrite || forceRewrite;
+    feedback.set(sectionId, existing);
+  };
+
+  const citationSets = sections.map((section) => new Set(
+    Array.from(section.content.matchAll(/\[(\d+)\]/g)).map((match) => Number(match[1]))
+  ));
+  const leadParagraphs = sections.map((section) => extractLeadParagraph(section.content).toLowerCase());
+  const paperUsage = new Map<string, string[]>();
+
+  for (const section of sections) {
+    for (const card of section.evidenceCards) {
+      const key = card.title.toLowerCase();
+      paperUsage.set(key, [...(paperUsage.get(key) || []), section.sectionId]);
+    }
+  }
+
+  for (let i = 0; i < sections.length; i++) {
+    for (let j = i + 1; j < sections.length; j++) {
+      const intersection = Array.from(citationSets[i]).filter((citation) => citationSets[j].has(citation));
+      const minSize = Math.max(1, Math.min(citationSets[i].size || 1, citationSets[j].size || 1));
+      const overlapRatio = intersection.length / minSize;
+      const leadSimilarity = computeTokenJaccard(leadParagraphs[i], leadParagraphs[j]);
+
+      if ((intersection.length >= 2 && overlapRatio >= 0.6) || (intersection.length >= 1 && leadSimilarity >= 0.45)) {
+        addFeedback(
+          sections[j].sectionId,
+          `Cross-section redundancy with "${sections[i].title}" detected: shared evidence overlap is high.`,
+          `Differentiate "${sections[j].title}" from "${sections[i].title}" by using a more section-specific angle, trimming repeated paper descriptions, and foregrounding evidence not already emphasized earlier.`,
+          8,
+          true
+        );
+      }
+    }
+  }
+
+  for (const [paperTitle, sectionIds] of paperUsage.entries()) {
+    if (sectionIds.length <= 2) continue;
+    for (const sectionId of sectionIds.slice(1)) {
+      addFeedback(
+        sectionId,
+        `Paper "${paperTitle}" is reused across multiple sections, increasing redundancy risk.`,
+        'When reusing the same paper across sections, keep the angle consistent and only retain details that are uniquely relevant to this section.',
+        3,
+        false
+      );
+    }
+  }
+
+  return feedback;
+}
+
+function computeTokenJaccard(left: string, right: string): number {
+  const leftTokens = new Set(left.split(/[^a-z0-9]+/).filter((token) => token.length >= 4));
+  const rightTokens = new Set(right.split(/[^a-z0-9]+/).filter((token) => token.length >= 4));
+  if (leftTokens.size === 0 || rightTokens.size === 0) {
+    return 0;
+  }
+  const intersection = Array.from(leftTokens).filter((token) => rightTokens.has(token));
+  const unionSize = new Set([...leftTokens, ...rightTokens]).size;
+  return unionSize > 0 ? intersection.length / unionSize : 0;
 }
 
 function uniqueTop(items: string[], limit: number = 6): string[] {

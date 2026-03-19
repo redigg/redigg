@@ -2,7 +2,17 @@ import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { SkillContext } from '../../../src/skills/types.js';
 import type { SectionDraft, SurveyOutline } from './types.js';
 import { resolveSectionWritingTemplate } from './section-templates.js';
-import { alignClaimsToEvidence, buildEvidenceCards, countWords, normalizeText, parseJsonObject } from './utils.js';
+import {
+  alignClaimsToEvidence,
+  buildEvidenceCards,
+  countWords,
+  getQuotableFindings,
+  normalizeMarkdownHeadings,
+  normalizeText,
+  parseJsonObject,
+  sanitizeMarkdownTables,
+  stripCitationPlaceholders
+} from './utils.js';
 
 interface SectionDraftResponse {
   markdown?: string;
@@ -49,10 +59,10 @@ Closing move: ${template.closingMove}${tableBlock}`;
     let subSectionPlan = '';
     if (subSections.length > 0) {
       subSectionPlan = `\nSub-section plan (use ### headings for each):
-${subSections.map((sub, i) => `${i + 1}. ### ${sub.title} (~${sub.targetWordCount} words) — ${sub.description}`).join('\n')}
-Each sub-section MUST appear as a ### heading in the output. Write at least ${Math.round(subSections[0].targetWordCount * 0.8)} words per sub-section.`;
+${subSections.map((sub) => `- ${sub.title} (~${sub.targetWordCount} words) — ${sub.description}`).join('\n')}
+Each sub-section MUST appear as a plain ### heading in the output. Write at least ${Math.round(subSections[0].targetWordCount * 0.8)} words per sub-section. Do NOT manually number headings. Use "### ${subSections[0].title}", never "### 1.1 ${subSections[0].title}" or "### Section 2".`;
     } else if (section.targetWordCount >= 400) {
-      subSectionPlan = `\nSub-heading requirement: Use 2-3 sub-headings (### level) to organize this section. Each sub-heading should cover a distinct theme, method family, or evaluation dimension. Do NOT use generic sub-headings like "Overview" or "Summary".`;
+      subSectionPlan = `\nSub-heading requirement: Use 2-3 sub-headings (### level) to organize this section. Each sub-heading should cover a distinct theme, method family, or evaluation dimension. Do NOT use generic sub-headings like "Overview" or "Summary". Do NOT manually number headings such as "### 1.1 ..." or "### 2.3 ...".`;
     }
 
     // Comparison table instruction for methods/benchmark/systems sections
@@ -72,8 +82,9 @@ Evidence cards:
 ${evidenceCards.map((card) => {
   const focus = card.evidenceFocus.length > 0 ? card.evidenceFocus.join(', ') : 'general relevance';
   const types = card.paperTypeSignals.length > 0 ? card.paperTypeSignals.join(', ') : 'uncategorized';
-  const quotables = card.quotableFindings.length > 0
-    ? `\n- Quotable findings (YOU MAY cite these verbatim): ${card.quotableFindings.join(' | ')}`
+  const quotableFindings = getQuotableFindings(card);
+  const quotables = quotableFindings.length > 0
+    ? `\n- Quotable findings (YOU MAY cite these verbatim): ${quotableFindings.join(' | ')}`
     : '';
   return `[${card.citation}] ${card.title} (${card.year})
 - Evidence level: ${card.evidenceLevel}
@@ -97,6 +108,7 @@ Return ONLY valid JSON:
 
 Requirements for the markdown:
 - Start with a level-2 heading using the exact section title.
+- Use plain Markdown headings only. NEVER prefix ## / ### / #### headings with manual numbering such as "1.", "1.1", "2.3", or "Section 4".
 - Follow the rhetorical goal, required moves, and closing move from the section template above.
 - CRITICAL LENGTH REQUIREMENT: Write at least ${section.targetWordCount} words. Aim for ${Math.round(section.targetWordCount * 1.15)} words. Sections shorter than ${Math.round(section.targetWordCount * 0.75)} words will be REJECTED and rewritten. This is the MOST IMPORTANT requirement — short sections waste the entire generation. Plan your writing: with ${section.targetWordCount >= 800 ? '6-8' : section.targetWordCount >= 400 ? '5-7' : '3-4'} substantive paragraphs, each paragraph needs ${Math.round(section.targetWordCount / (section.targetWordCount >= 800 ? 7 : section.targetWordCount >= 400 ? 6 : 3.5))} words on average.
 - Each paragraph should be 80-150 words. Do NOT write short 30-50 word paragraphs.
@@ -112,6 +124,8 @@ Requirements for the markdown:
   * Do NOT invent counts or ratios (e.g. "72% of tasks", "31% recall") unless in an evidence card.
   * If you need to describe performance, use qualitative language: "significantly outperforms", "shows substantial improvement", "achieves competitive results".
   * You MAY use numbers that appear in evidence card fields (keyContribution, groundedClaim, limitationHint).
+- TABLE GROUNDING RULE: If you include a Markdown table, every quantitative cell must be directly supported by the cited evidence card or its quotable findings. If the evidence card does not provide the exact number, write "N/A" or a qualitative phrase instead of inventing a value.
+- SECTION LEAD-IN RULE: The first paragraph after the ## heading must already be grounded in the evidence cards. Do NOT open with unsupported benchmark names, dataset names, or performance claims.
 - Avoid all listed anti-patterns.
 - Prioritize evidence cards that are most specific to this section's theme. If a paper appears generic, give more space to papers with stronger section-specific relevance.
 - CITATION LIMIT: Each sentence should cite at most 3 papers. If you need to cite more, split the claim across multiple sentences, each citing different subsets.
@@ -143,13 +157,15 @@ Requirements for claimMappings:
       content = createFallbackSection(section.title, section.description, evidenceCards);
     }
 
+    content = postProcessSectionContent(content, section.title, evidenceCards);
+
     // Inline word count floor: if draft is too short, request a single expansion pass
     const draftWordCount = countWords(content);
     const minFloor = Math.round(section.targetWordCount * 0.75);
     if (draftWordCount < minFloor && draftWordCount >= 80) {
       const expandedContent = await requestExpansion(context, content, section.title, section.targetWordCount, evidenceCards);
       if (expandedContent && countWords(expandedContent) > draftWordCount) {
-        content = expandedContent;
+        content = postProcessSectionContent(expandedContent, section.title, evidenceCards);
       }
     }
 
@@ -169,6 +185,20 @@ Requirements for claimMappings:
   }
 
   return drafts;
+}
+
+function postProcessSectionContent(
+  content: string,
+  sectionTitle: string,
+  evidenceCards: SectionDraft['evidenceCards']
+): string {
+  let normalized = normalizeMarkdownHeadings(content);
+  normalized = sanitizeMarkdownTables(normalized, evidenceCards);
+  normalized = stripCitationPlaceholders(normalized);
+  if (!normalized.startsWith('## ')) {
+    normalized = `## ${sectionTitle}\n\n${normalized}`;
+  }
+  return normalized.trim();
 }
 
 /**
@@ -218,6 +248,8 @@ Expand the section by:
 2. Drawing on more of the available evidence cards
 3. Adding comparisons between methods/approaches
 4. Discussing tradeoffs and limitations
+5. Preserving plain Markdown headings only (no manual numbering such as 1.1 or Section 3)
+6. Using exact quantitative values only when they appear in the evidence cards; otherwise use qualitative language or "N/A" in tables
 
 Evidence cards available:
 ${evidenceSummary}

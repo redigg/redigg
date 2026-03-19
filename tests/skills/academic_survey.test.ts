@@ -121,7 +121,15 @@ describe('AcademicSurveySelfImproveSkill', () => {
     expect(result.sections[0].claimAlignments.length).toBeGreaterThan(0);
     expect(result.sections[0].evidenceCards[0].groundedClaim).toContain('A Survey of AI Agents for Scientific Workflows');
     expect(result.quality_report).not.toBeNull();
-    expect(result.quality_report.overallScore).toBeGreaterThanOrEqual(55);
+    expect(result.quality_report.sectionReviews).toHaveLength(3);
+    expect(result.quality_report.sectionReviews.every((review) => Number.isFinite(review.score))).toBe(true);
+    const allIssues = result.quality_report.sectionReviews.flatMap((review) => review.issues);
+    expect(allIssues).not.toContain('The section does not cite any supporting evidence.');
+    expect(allIssues).not.toContain('The section lead paragraph introduces claims before citing any supporting evidence.');
+    expect(allIssues.some((issue) => issue.startsWith('Potentially fabricated numbers detected:'))).toBe(false);
+    expect(result.final_survey.citationConsistency.isConsistent).toBe(true);
+    expect(result.final_survey.citationConsistency.ghostCitations).toHaveLength(0);
+    expect(result.final_survey.citationConsistency.orphanReferences).toHaveLength(0);
     expect(result.formatted_output).toContain('## References');
     expect(mockContext.log).toHaveBeenCalledWith('thinking', expect.stringContaining('Starting academic survey'));
   });

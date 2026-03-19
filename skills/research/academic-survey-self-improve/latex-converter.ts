@@ -1,5 +1,6 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
-import type { FinalSurvey, SectionDraft, SurveyFigure, SurveyOutline } from './types.js';
+import type { FinalSurvey, SurveyFigure, SurveyOutline } from './types.js';
+import { normalizeAuthorList, normalizeBibliographyVenue, normalizeMarkdownHeadings, stripManualHeadingNumbering } from './utils.js';
 
 /**
  * Escape special LaTeX characters in plain text.
@@ -68,6 +69,32 @@ function convertParagraph(text: string): string {
   });
 
   return protected_;
+}
+
+interface MarkdownTopLevelSection {
+  title: string;
+  content: string;
+}
+
+function extractTopLevelSections(markdown: string): MarkdownTopLevelSection[] {
+  const normalized = normalizeMarkdownHeadings(markdown);
+  const matches = Array.from(normalized.matchAll(/^##\s+(.+)$/gm));
+  const sections: MarkdownTopLevelSection[] = [];
+
+  for (let i = 0; i < matches.length; i++) {
+    const title = stripManualHeadingNumbering(matches[i][1]).trim();
+    const start = matches[i].index! + matches[i][0].length;
+    const end = i + 1 < matches.length ? matches[i + 1].index! : normalized.length;
+    const content = normalized.slice(start, end).trim();
+    sections.push({ title, content });
+  }
+
+  return sections;
+}
+
+function findTopLevelSection(markdown: string, title: string): MarkdownTopLevelSection | null {
+  const target = title.trim().toLowerCase();
+  return extractTopLevelSections(markdown).find((section) => section.title.trim().toLowerCase() === target) || null;
 }
 
 /**
@@ -139,6 +166,7 @@ function convertMarkdownTable(tableLines: string[]): string {
 }
 
 function convertSectionBody(content: string, sectionTitle: string): string {
+  content = normalizeMarkdownHeadings(content);
   // Remove the ## heading line if present
   let body = content.replace(new RegExp(`^##\\s+${escapeRegexStr(sectionTitle)}\\s*\\n+`, 'm'), '');
   // Strip LLM meta-commentary that sometimes leaks into section content
@@ -217,7 +245,7 @@ function convertSectionBody(content: string, sectionTitle: string): string {
     const subSubHeadingMatch = line.match(/^####\s+(.*)$/);
     if (subSubHeadingMatch) {
       flushList();
-      output.push(`\\paragraph{${escapeLatex(subSubHeadingMatch[1])}}`);
+      output.push(`\\paragraph{${escapeLatex(stripManualHeadingNumbering(subSubHeadingMatch[1]))}}`);
       continue;
     }
 
@@ -225,7 +253,7 @@ function convertSectionBody(content: string, sectionTitle: string): string {
     const subHeadingMatch = line.match(/^###\s+(.*)$/);
     if (subHeadingMatch) {
       flushList();
-      output.push(`\\subsection{${escapeLatex(subHeadingMatch[1])}}`);
+      output.push(`\\subsection{${escapeLatex(stripManualHeadingNumbering(subHeadingMatch[1]))}}`);
       continue;
     }
 
@@ -288,10 +316,10 @@ function sanitizeForLatexFont(text: string): string {
 
 function formatReference(paper: Paper, index: number): string {
   const authors = Array.isArray(paper.authors) && paper.authors.length > 0
-    ? escapeLatex(sanitizeForLatexFont(paper.authors.join(', ')))
+    ? escapeLatex(sanitizeForLatexFont(normalizeAuthorList(paper.authors).join(', ')))
     : 'Unknown Authors';
   const title = escapeLatex(sanitizeForLatexFont(paper.title));
-  const venue = escapeLatex(sanitizeForLatexFont(paper.journal || 'Unknown venue'));
+  const venue = escapeLatex(sanitizeForLatexFont(normalizeBibliographyVenue(paper)));
   const year = paper.year || 'n.d.';
   const url = paper.url ? `\\url{${paper.url}}` : '';
 
@@ -308,7 +336,11 @@ export function convertToLatex(
   figures?: SurveyFigure[]
 ): string {
   const title = escapeLatex(outline.title);
-  const abstractText = convertParagraph(outline.abstractDraft);
+  const abstractSection = findTopLevelSection(finalSurvey.markdown, 'Abstract');
+  const abstractBody = (abstractSection?.content || outline.abstractDraft)
+    .replace(/\n+\*\*Keywords:\*\*[\s\S]*$/i, '')
+    .trim();
+  const abstractText = convertParagraph(abstractBody);
 
   // Short title for running header (truncate at 60 chars)
   const shortTitle = outline.title.length > 60
@@ -368,8 +400,10 @@ ${abstractText}
 \\newpage
 `;
 
+  const topLevelSections = extractTopLevelSections(finalSurvey.markdown);
+
   // Introduction — extract from assembled markdown if available
-  const introRaw = extractIntroductionFromMarkdown(finalSurvey.markdown);
+  const introRaw = topLevelSections.find((section) => section.title.toLowerCase() === 'introduction')?.content || null;
   const introFromMarkdown = introRaw ? stripMermaidBlocks(introRaw) : null;
   const introSection = introFromMarkdown
     ? `\\section{Introduction}\n${convertSectionBody(introFromMarkdown, 'Introduction')}`
@@ -381,20 +415,25 @@ ${abstractText}
     ? formatTikzFigure(taxonomyFigure)
     : '';
 
+  const excludedTitles = new Set(['abstract', 'introduction', 'conclusion', 'references']);
+  const bodyMarkdownSections = topLevelSections.filter((section) => !excludedTitles.has(section.title.toLowerCase()));
+  const sectionByTitle = new Map(finalSurvey.sections.map((section) => [section.title.toLowerCase(), section]));
+
   // Body sections with embedded TikZ figures
   let figCounter = taxonomyFigure ? 2 : 1;
-  const bodySections = finalSurvey.sections.map((section) => {
+  const bodySections = bodyMarkdownSections.map((section) => {
     const sectionTitle = escapeLatex(section.title);
     // Strip mermaid code blocks from body before converting (they're in LaTeX as TikZ)
     const cleanedContent = stripMermaidBlocks(section.content);
     const body = convertSectionBody(cleanedContent, section.title);
-    const sectionFigure = figures?.find((f) => f.sectionId === section.sectionId);
+    const matchingDraft = sectionByTitle.get(section.title.toLowerCase());
+    const sectionFigure = matchingDraft ? figures?.find((f) => f.sectionId === matchingDraft.sectionId) : undefined;
     const figureBlock = sectionFigure ? `\n\n${formatTikzFigure(sectionFigure, figCounter++)}` : '';
     return `\\section{${sectionTitle}}\n${body}${figureBlock}`;
   }).join('\n\n');
 
   // Conclusion — extract from assembled markdown if available
-  const conclusionFromMarkdown = extractConclusionFromMarkdown(finalSurvey.markdown);
+  const conclusionFromMarkdown = topLevelSections.find((section) => section.title.toLowerCase() === 'conclusion')?.content || null;
   const conclusionBody = conclusionFromMarkdown
     ? convertSectionBody(conclusionFromMarkdown, 'Conclusion')
     : convertParagraph(generateConclusionText(outline, finalSurvey.sections.map((s) => s.title)));
@@ -419,18 +458,6 @@ ${referencesSection}
 
 \\end{document}
 `;
-}
-
-function extractIntroductionFromMarkdown(markdown: string): string | null {
-  const match = markdown.match(/## Introduction\s*\n+([\s\S]*?)(?=\n## )/);
-  if (!match || !match[1] || match[1].trim().length < 30) return null;
-  return match[1].trim();
-}
-
-function extractConclusionFromMarkdown(markdown: string): string | null {
-  const match = markdown.match(/## Conclusion\s*\n+([\s\S]*?)(?=\n## |\n*$)/);
-  if (!match || !match[1] || match[1].trim().length < 30) return null;
-  return match[1].trim();
 }
 
 function generateConclusionText(outline: SurveyOutline, sectionTitles: string[]): string {

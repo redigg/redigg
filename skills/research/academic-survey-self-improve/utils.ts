@@ -116,6 +116,69 @@ export function normalizeText(content: string): string {
   return text.trim();
 }
 
+export function stripManualHeadingNumbering(text: string): string {
+  return text
+    .replace(/^(?:section\s+)?(?:\d+(?:\.\d+){0,3}|[ivxlcdm]+(?:\.\d+){0,3})(?:[)\].:-])?\s+/i, '')
+    .replace(/^(?:part|chapter)\s+\d+(?:[)\].:-])?\s+/i, '')
+    .trim();
+}
+
+export function normalizeMarkdownHeadings(markdown: string): string {
+  return markdown.replace(/^(#{2,4})\s+(.+)$/gm, (_match, hashes: string, rawTitle: string) => {
+    const cleanedTitle = stripManualHeadingNumbering(rawTitle).replace(/\s+/g, ' ').trim();
+    return `${hashes} ${cleanedTitle}`;
+  });
+}
+
+export function stripCitationPlaceholders(markdown: string): string {
+  return markdown
+    .replace(/\[(?:N|TBD|\?+|citation needed|ref|refs?)\]/gi, '')
+    .replace(/\s+\./g, '.')
+    .replace(/\s+,/g, ',')
+    .replace(/ {2,}/g, ' ');
+}
+
+export function normalizeBibliographyVenue(paper: Paper): string {
+  const rawVenue = (paper.journal || '').trim();
+  const lowerVenue = rawVenue.toLowerCase();
+  const hasArxivSignal = Boolean(
+    paper.source === 'arxiv'
+    || paper.url?.includes('arxiv.org')
+    || paper.pdfUrl?.includes('arxiv.org')
+    || /(?:^|\b)(arxiv|arxiv\.org|arxiv preprint|arxiv \(cornell university\)|cornell university)(?:\b|$)/i.test(rawVenue)
+  );
+
+  if (hasArxivSignal) {
+    return 'arXiv preprint';
+  }
+
+  if (!rawVenue || lowerVenue === 'openalex' || lowerVenue === 'unknown venue') {
+    return 'Preprint';
+  }
+
+  if (/\bpreprint\b/i.test(rawVenue)) {
+    return 'Preprint';
+  }
+
+  return rawVenue.replace(/\s+/g, ' ').trim();
+}
+
+export function normalizeAuthorName(author: string): string {
+  return author
+    .replace(/Ã¤/g, 'ä').replace(/Ã¶/g, 'ö').replace(/Ã¼/g, 'ü')
+    .replace(/Ã©/g, 'é').replace(/Ã¨/g, 'è').replace(/Ã§/g, 'ç')
+    .replace(/Ã±/g, 'ñ').replace(/Ã³/g, 'ó').replace(/Ã¡/g, 'á')
+    .replace(/Ã­/g, 'í').replace(/Ãº/g, 'ú')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function normalizeAuthorList(authors: string[]): string[] {
+  return authors
+    .map((author) => normalizeAuthorName(author))
+    .filter(Boolean);
+}
+
 export function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -168,6 +231,133 @@ export function buildPaperKey(paper: Paper): string {
 
 export function countWords(content: string): number {
   return content.trim().split(/\s+/).filter(Boolean).length;
+}
+
+export function getQuotableFindings(card: Pick<EvidenceCard, 'quotableFindings'>): string[] {
+  if (!Array.isArray(card.quotableFindings)) {
+    return [];
+  }
+  return card.quotableFindings
+    .map((finding) => String(finding).trim())
+    .filter(Boolean);
+}
+
+function collectGroundedNumberTokens(cards: EvidenceCard[]): Set<string> {
+  const groundedNumbers = new Set<string>();
+  const evidenceText = cards
+    .map((card) => [
+      card.title,
+      String(card.year || ''),
+      card.keyContribution,
+      card.groundedClaim,
+      card.limitationHint,
+      ...getQuotableFindings(card)
+    ].join(' '))
+    .join(' ');
+
+  for (const match of evidenceText.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
+    groundedNumbers.add(match[1]);
+  }
+  for (const match of evidenceText.matchAll(/(\d+(?:\.\d+)?)\s*[×x]/gi)) {
+    groundedNumbers.add(match[1]);
+  }
+  for (const match of evidenceText.matchAll(/\b(\d{1,4}(?:\.\d+)?)\b/g)) {
+    groundedNumbers.add(match[1]);
+  }
+
+  return groundedNumbers;
+}
+
+function parseMarkdownTableCells(row: string): string[] {
+  return row.trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+function formatMarkdownTableRow(cells: string[]): string {
+  return `| ${cells.join(' | ')} |`;
+}
+
+function isMarkdownTableRow(line: string): boolean {
+  return /^\|.+\|/.test(line.trim());
+}
+
+function isMarkdownTableSeparator(line: string): boolean {
+  return /^\|[\s:?-]+(\|[\s:?-]+)+\|?\s*$/.test(line.trim());
+}
+
+function rowCitationCards(row: string, evidenceCards: EvidenceCard[]): EvidenceCard[] {
+  const citations = Array.from(row.matchAll(/\[(\d+)\]/g))
+    .map((match) => Number(match[1]))
+    .filter((citation) => Number.isFinite(citation));
+  const cardsByCitation = new Map(evidenceCards.map((card) => [card.citation, card]));
+  const matched = citations
+    .map((citation) => cardsByCitation.get(citation))
+    .filter((card): card is EvidenceCard => Boolean(card));
+  return matched.length > 0 ? matched : evidenceCards;
+}
+
+function cellHasUnsupportedNumericClaim(cell: string, supportingCards: EvidenceCard[]): boolean {
+  const plainCell = stripCitationPlaceholders(cell).replace(/\[\d+\]/g, '').trim();
+  if (!plainCell) return false;
+  if (!/\d/.test(plainCell)) return false;
+
+  const groundedNumbers = collectGroundedNumberTokens(supportingCards);
+  const supportedYears = new Set(supportingCards.map((card) => String(card.year)).filter(Boolean));
+  const numericTokens = Array.from(plainCell.matchAll(/\b(\d{1,4}(?:\.\d+)?)\b/g)).map((match) => match[1]);
+  if (numericTokens.length === 0) return false;
+
+  return numericTokens.some((token) => {
+    if (supportedYears.has(token)) {
+      return false;
+    }
+    return !groundedNumbers.has(token);
+  });
+}
+
+export function sanitizeMarkdownTables(markdown: string, evidenceCards: EvidenceCard[]): string {
+  if (!markdown.includes('|') || evidenceCards.length === 0) {
+    return markdown;
+  }
+
+  const lines = markdown.split('\n');
+  const result: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    if (!isMarkdownTableRow(lines[i])) {
+      result.push(lines[i]);
+      i++;
+      continue;
+    }
+
+    const tableLines: string[] = [];
+    while (i < lines.length && (isMarkdownTableRow(lines[i]) || (tableLines.length > 0 && isMarkdownTableSeparator(lines[i])))) {
+      tableLines.push(lines[i]);
+      i++;
+    }
+
+    if (tableLines.length < 3) {
+      result.push(...tableLines);
+      continue;
+    }
+
+    const normalizedTable = tableLines.map((line, idx) => {
+      if (idx < 2) return line;
+      if (!isMarkdownTableRow(line)) return line;
+
+      const supportingCards = rowCitationCards(line, evidenceCards);
+      const cells = parseMarkdownTableCells(line);
+      const sanitizedCells = cells.map((cell) => cellHasUnsupportedNumericClaim(cell, supportingCards) ? 'N/A' : cell);
+      return formatMarkdownTableRow(sanitizedCells);
+    });
+
+    result.push(...normalizedTable);
+  }
+
+  return result.join('\n');
 }
 
 export function scorePaperForSection(

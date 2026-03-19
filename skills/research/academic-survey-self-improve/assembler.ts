@@ -137,12 +137,20 @@ ${sectionSummaries}
 
 Requirements:
 - Start with "## Conclusion"
-- 150-250 words
-- Summarize the key findings across sections (do NOT repeat section content verbatim)
-- Identify 2-3 concrete open challenges or future directions
-- End with a forward-looking statement about the field
+- 300-500 words (substantial, not a brief paragraph)
+- Structure the conclusion as follows:
+
+(a) **Key Findings Summary** (1-2 paragraphs): Synthesize the main insights from across all sections. What are the dominant patterns? What consensus has emerged? What fundamental tensions exist?
+
+(b) **Open Problems** (bulleted list of 3-5 items): Identify concrete, specific unresolved challenges. Each should be a one-sentence description of a problem that remains unsolved, grounded in the surveyed evidence.
+
+(c) **Future Directions** (2-3 items): Propose actionable research directions that would address the open problems. Be specific — not "more research is needed" but "integrating X with Y to address Z".
+
+(d) **Closing Statement** (1 sentence): A forward-looking statement about the field's trajectory.
+
 - Do NOT use generic platitudes — be specific to the surveyed evidence
-- Do NOT include citations [N] in the conclusion`;
+- Do NOT include citations [N] in the conclusion
+- Do NOT repeat section content verbatim`;
 
   try {
     const response = await context.llm.chat([
@@ -161,8 +169,23 @@ Requirements:
 }
 
 function generateFallbackConclusion(outline: SurveyOutline, sectionTitles: string[]): string {
+  const topic = outline.title.replace(/^A Survey of /i, '').replace(/^Survey on /i, '');
   const sectionList = sectionTitles.map((t) => t.replace(/^##\s*/, '')).join(', ');
-  return `## Conclusion\n\nThis survey has examined ${outline.title.replace(/^A Survey of /i, '').toLowerCase()} through the lenses of ${sectionList.toLowerCase()}. The field continues to advance rapidly, with emerging systems demonstrating increasing autonomy in scientific workflows. Key open challenges include improving reliability, ensuring ethical deployment, and developing comprehensive evaluation frameworks. Future work should prioritize bridging the gap between narrow task automation and truly open-ended scientific discovery.`;
+  return `## Conclusion
+
+This survey has examined ${topic.toLowerCase()} through the lenses of ${sectionList.toLowerCase()}. The field continues to advance rapidly, with emerging systems demonstrating increasing autonomy and capability.
+
+Several open problems remain unresolved:
+
+- Reliability and reproducibility of results across different experimental settings and domains
+- Scalability of current approaches to real-world, open-ended problem spaces
+- Development of comprehensive evaluation frameworks that capture both quantitative and qualitative aspects of performance
+- Ethical considerations and responsible deployment in sensitive application areas
+- Integration of multiple complementary approaches into unified, robust systems
+
+Future research should prioritize bridging the gap between narrow task automation and truly open-ended scientific discovery. Specifically, developing standardized evaluation protocols that enable fair comparison across methods, and designing systems that can gracefully handle the uncertainty inherent in complex scientific reasoning, represent promising directions.
+
+As ${topic.toLowerCase()} matures, the convergence of improved methods, richer benchmarks, and deeper theoretical understanding will be essential for translating current progress into sustained, practical impact.`;
 }
 
 /**
@@ -216,7 +239,8 @@ Requirements:
 async function generateIntroduction(
   context: SkillContext | null,
   outline: SurveyOutline,
-  sections: SectionDraft[]
+  sections: SectionDraft[],
+  totalPaperCount?: number
 ): Promise<string> {
   if (!context) {
     return generateFallbackIntroduction(outline, sections.map((s) => s.title));
@@ -229,9 +253,22 @@ async function generateIntroduction(
     return `- ${s.title}: ${body.slice(0, 150)}...`;
   }).join('\n');
 
+  // Compute survey-level meta information for richer introduction
+  const allEvidenceCards = sections.flatMap((s) => s.evidenceCards || []);
+  const years = allEvidenceCards.map((c) => c.year).filter((y): y is number => typeof y === 'number' && y > 0);
+  const yearRange = years.length > 0 ? `${Math.min(...years)}–${Math.max(...years)}` : 'recent years';
+  const methodCategories = new Set(allEvidenceCards.flatMap((c) => c.paperTypeSignals || []));
+  const categoryList = Array.from(methodCategories).slice(0, 6).join(', ') || 'various approaches';
+  const paperCountStr = totalPaperCount ? `${totalPaperCount} papers` : `${allEvidenceCards.length} evidence sources`;
+
   const prompt = `Write an Introduction section (## Introduction) for a survey titled "${outline.title}".
 
 The survey has these sections: ${sectionTitles}
+
+Survey-level meta information:
+- This survey covers ${paperCountStr} published between ${yearRange}
+- Method categories represented: ${categoryList}
+- Number of sections: ${sections.length}
 
 Section content summaries:
 ${sectionBriefs}
@@ -371,6 +408,24 @@ The remainder of this survey is organized as follows. ${roadmap}. We conclude wi
 Our goal is to offer researchers and practitioners a thorough yet accessible overview that highlights both achievements and limitations, enabling informed decisions about research priorities and system design.`;
 }
 
+const OVERUSE_THRESHOLD = 4;
+const TRACKED_ACADEMIC_VERBS = [
+  'demonstrates', 'highlights', 'underscores', 'illustrates', 'reveals',
+  'showcases', 'emphasizes', 'indicates', 'suggests', 'presents',
+  'leverages', 'utilizes', 'facilitates', 'enables', 'addresses'
+];
+
+function checkVocabularyDiversity(text: string): string[] {
+  const lower = text.toLowerCase();
+  return TRACKED_ACADEMIC_VERBS.filter((verb) => {
+    const matches = lower.match(new RegExp(`\\b${verb}\\b`, 'g'));
+    return matches && matches.length > OVERUSE_THRESHOLD;
+  }).map((verb) => {
+    const count = (lower.match(new RegExp(`\\b${verb}\\b`, 'g')) || []).length;
+    return `${verb} (${count}×)`;
+  });
+}
+
 export async function assembleSurvey(
   outline: SurveyOutline,
   sections: SectionDraft[],
@@ -406,8 +461,8 @@ export async function assembleSurvey(
   // W1: Rewrite abstract based on actual section content (not the outline draft)
   const abstractText = await rewriteAbstract(context || null, outline, cleanedSections);
 
-  // W3: Generate introduction section
-  const introduction = await generateIntroduction(context || null, outline, cleanedSections);
+  // W3: Generate introduction section with survey-level meta info
+  const introduction = await generateIntroduction(context || null, outline, cleanedSections, finalPapers.length);
 
   // W2: Add transition sentences between consecutive sections
   const transitionedSections = await addSectionTransitions(context || null, cleanedSections);
@@ -440,7 +495,13 @@ export async function assembleSurvey(
 
   // Final ghost-citation strip on the fully assembled markdown
   // (catches citations introduced by LLM conclusion or rewrite that escaped per-section strip)
-  const markdown = stripGhostCitations(markdownParts.join('\n\n'), referenceCount);
+  let markdown = stripGhostCitations(markdownParts.join('\n\n'), referenceCount);
+
+  // Vocabulary diversity check: detect overused academic verbs
+  const vocabIssues = checkVocabularyDiversity(markdown);
+  if (vocabIssues.length > 0 && context) {
+    context.log('thinking', `Vocabulary diversity warning: overused verbs — ${vocabIssues.join(', ')}`);
+  }
 
   // Run bidirectional consistency check on assembled output
   const consistency = checkCitationConsistency(markdown, referenceCount);

@@ -29,6 +29,10 @@ import type {
 
 dotenv.config({ override: true });
 
+function countWords(content: string): number {
+  return content.trim().split(/\s+/).filter(Boolean).length;
+}
+
 const logger = createLogger('SurveyBenchmark');
 const DEFAULT_CASE_RETRY_ATTEMPTS = 3;
 const DEFAULT_CASE_RETRY_DELAY_MS = 1_500;
@@ -194,6 +198,18 @@ function buildTopicSummary(result: SkillResult, pdfPath?: string) {
       .filter(Number.isFinite) || []
   ).size;
 
+  // Per-section word count tracking
+  const sectionWordCounts = Array.isArray(result.sections)
+    ? result.sections.map((section: any) => ({
+        title: section.title || 'Unknown',
+        actualWords: countWords(String(section.content || '')),
+        targetWords: Number(section.targetWordCount) || 0,
+        ratio: Number(section.targetWordCount) > 0
+          ? Math.round((countWords(String(section.content || '')) / Number(section.targetWordCount)) * 100)
+          : 0
+      }))
+    : [];
+
   return {
     sections,
     paperCount,
@@ -202,7 +218,8 @@ function buildTopicSummary(result: SkillResult, pdfPath?: string) {
     referencedPaperCount,
     claimAlignmentCount,
     uniqueCitationCount,
-    pdfGenerated: typeof pdfPath === 'string' && fs.existsSync(pdfPath)
+    pdfGenerated: typeof pdfPath === 'string' && fs.existsSync(pdfPath),
+    sectionWordCounts
   };
 }
 
@@ -331,6 +348,14 @@ function buildSummaryMarkdown(summary: SurveyBenchmarkRunSummary): string {
       lines.push(`- Citation Recall: ${(result.surgeMetrics.citationRecall * 100).toFixed(1)}%`);
       lines.push(`- Structural Similarity: ${(result.surgeMetrics.structuralSimilarity * 100).toFixed(1)}%`);
       lines.push(`- Vocabulary Diversity: ${(result.surgeMetrics.vocabularyDiversity * 100).toFixed(1)}%`);
+    }
+    // Section word counts
+    const sectionWordCounts = (result.summary as any).sectionWordCounts;
+    if (Array.isArray(sectionWordCounts) && sectionWordCounts.length > 0) {
+      lines.push('- Section Word Counts:');
+      for (const swc of sectionWordCounts) {
+        lines.push(`  - ${swc.title}: ${swc.actualWords}/${swc.targetWords} words (${swc.ratio}%)`);
+      }
     }
     if (result.error) {
       lines.push(`- Error: ${result.error}`);

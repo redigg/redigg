@@ -353,7 +353,9 @@ function scoreTopicPurity(benchmarkCase: SurveyBenchmarkCase, result: SkillResul
           (Array.isArray(card.paperTypeSignals) ? card.paperTypeSignals : []).map((signal: string) => normalizePaperTypeSignal(signal))
         );
         const isApplicationLike = normalizedSignals.has('application');
-        return domains.length > 0 && isApplicationLike;
+        // Also penalize foreign-domain method/system papers (not just application papers)
+        const isMethodOrSystem = normalizedSignals.has('methods') || normalizedSignals.has('system') || normalizedSignals.has('workflow');
+        return domains.length > 0 && (isApplicationLike || isMethodOrSystem);
       }).length;
 
       if (foreignCardCount > 0) {

@@ -584,8 +584,15 @@ function computeSectionPurityAdjustment(
     if (hasApplicationSignal && !hasChallengeSignal && !hasPreferredTypeMatch) adjustment -= 1.6;
   }
 
+  // Penalize foreign-domain application papers in non-application sections
   if (sectionIntent !== 'applications' && hasApplicationSignal && foreignDomains.length > 0 && !hasPreferredTypeMatch) {
     adjustment -= Math.min(4, foreignDomains.length * 1.8);
+  }
+
+  // Penalize foreign-domain method/system papers in any section
+  // (e.g., a robotics manipulation method paper in an "AI agent" survey)
+  if (foreignDomains.length > 0 && (hasMethodSignal || paperTypeSignals.includes('system')) && !hasApplicationSignal && !hasPreferredTypeMatch) {
+    adjustment -= Math.min(3.5, foreignDomains.length * 1.5);
   }
 
   if (assessment.aliasMatches.length > 0 && hasPreferredTypeMatch) {

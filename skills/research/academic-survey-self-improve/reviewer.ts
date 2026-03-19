@@ -11,12 +11,17 @@ interface ReviewResponse {
   needsRewrite?: boolean;
 }
 
+type HardCheckSeverity = 'critical' | 'major' | 'minor';
+
 interface HardCheckResult {
   scorePenalty: number;
   strengths: string[];
   issues: string[];
   suggestions: string[];
   forceRewrite: boolean;
+  severity: HardCheckSeverity;
+  fabricatedNumbers: string[];
+  citationDistribution: { overCited: number[]; unCited: number[] };
 }
 
 export async function reviewSurveySections(
@@ -34,7 +39,8 @@ export async function reviewSurveySections(
     let finalSection = section;
     let rewriteApplied = false;
 
-    if (finalReview.score < 75 || finalReview.needsRewrite) {
+    // Only rewrite on critical hard-check issues OR very low LLM review score
+    if (finalReview.score < 60 || finalReview.needsRewrite) {
       const rewritten = await rewriteSection(context, topic, section, finalReview.suggestions);
       if (rewritten) {
         finalSection = {
@@ -57,8 +63,17 @@ export async function reviewSurveySections(
     });
   }
 
+  // Use max(mean, median) to prevent a single low-scoring section from dragging overall quality gate
   const overallScore = sectionReviews.length > 0
-    ? Math.round(sectionReviews.reduce((sum, item) => sum + item.score, 0) / sectionReviews.length)
+    ? (() => {
+        const scores = sectionReviews.map((item) => item.score).sort((a, b) => a - b);
+        const mean = Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+        const mid = Math.floor(scores.length / 2);
+        const median = scores.length % 2 === 0
+          ? Math.round((scores[mid - 1] + scores[mid]) / 2)
+          : scores[mid];
+        return Math.max(mean, median);
+      })()
     : 0;
 
   const strengths = Array.from(new Set(sectionReviews.flatMap((item) => item.strengths))).slice(0, 5);
@@ -269,7 +284,8 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
   const suggestions: string[] = [];
   const strengths: string[] = [];
   let scorePenalty = 0;
-  let forceRewrite = false;
+  let criticalCount = 0;
+  let majorCount = 0;
 
   const kind = section.templateKind;
   const wordCount = countWords(section.content);
@@ -287,7 +303,7 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     issues.push('No evidence cards were attached to this section.');
     suggestions.push('Retrieve and attach grounded evidence cards before drafting this section.');
     scorePenalty += 25;
-    forceRewrite = true;
+    criticalCount++;
   } else {
     strengths.push(`Grounded in ${section.evidenceCards.length} evidence cards`);
   }
@@ -296,11 +312,12 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     issues.push('The section does not cite any supporting evidence.');
     suggestions.push('Add inline citations that point back to the available evidence cards.');
     scorePenalty += 18;
-    forceRewrite = true;
+    criticalCount++;
   } else if (section.evidenceCards.length > 1 && usedCitations.size < 2) {
     issues.push('The section relies on too few distinct evidence cards.');
     suggestions.push('Use at least two distinct citations when multiple evidence cards are available.');
     scorePenalty += 8;
+    majorCount++;
   } else {
     strengths.push('Uses multiple evidence-backed citations');
   }
@@ -309,15 +326,20 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
   if (unknownCitations.length > 0) {
     issues.push(`The section references citations not present in its evidence cards: ${unknownCitations.join(', ')}.`);
     suggestions.push('Align every inline citation with the evidence cards attached to this section.');
-    scorePenalty += 12;
-    forceRewrite = true;
+    // Graded: 1-2 unknown is minor, 3+ is major
+    if (unknownCitations.length >= 3) {
+      scorePenalty += 12;
+      majorCount++;
+    } else {
+      scorePenalty += 5;
+    }
   }
 
   if (claimAlignments.length === 0) {
     issues.push('The section does not expose claim-level citation alignment.');
     suggestions.push('Identify the core sentence-level claims in this section and map each of them to explicit evidence-card citations.');
-    scorePenalty += 10;
-    forceRewrite = true;
+    scorePenalty += 6;
+    // minor — claim alignment is nice-to-have, not worth forcing rewrite
   } else {
     strengths.push(`Tracks ${claimAlignments.length} claim-level citation alignments`);
   }
@@ -328,15 +350,15 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
   if (invalidClaimMappings.length > 0) {
     issues.push('Some claim-level citation mappings reference citations outside this section evidence set.');
     suggestions.push('Ensure every aligned claim only references citations from this section\u2019s evidence cards.');
-    scorePenalty += 10;
-    forceRewrite = true;
+    scorePenalty += 4;
+    // minor — doesn't warrant full rewrite
   }
 
   if (wordCount < 80) {
     issues.push('The section is too short to provide a useful synthesis.');
     suggestions.push('Expand the section with a clearer synthesis of the retrieved evidence.');
     scorePenalty += 10;
-    forceRewrite = true;
+    criticalCount++;
   }
 
   // Depth enforcement: check against targetWordCount
@@ -346,9 +368,37 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     issues.push(`Section is ${wordCount} words but target is ${target} (minimum ${minAcceptable}).`);
     suggestions.push(`Expand the section to at least ${minAcceptable} words by deepening synthesis of the evidence cards. Add sub-headings (###) to organize longer content.`);
     scorePenalty += Math.min(15, Math.round((1 - wordCount / target) * 20));
-    forceRewrite = true;
+    criticalCount++;
   } else if (wordCount >= minAcceptable) {
     strengths.push(`Word count ${wordCount} meets target ${target}`);
+  }
+
+  // --- Fabricated number detection ---
+  const fabricatedNumbers = detectFabricatedNumbers(section);
+  if (fabricatedNumbers.length > 0) {
+    issues.push(`Potentially fabricated numbers detected: ${fabricatedNumbers.slice(0, 5).join(', ')}`);
+    suggestions.push('Remove or replace fabricated numbers with qualitative descriptions. Only use numbers that appear verbatim in evidence cards.');
+    scorePenalty += Math.min(15, fabricatedNumbers.length * 4);
+    if (fabricatedNumbers.length >= 3) {
+      criticalCount++;
+    } else {
+      majorCount++;
+    }
+  } else {
+    strengths.push('No fabricated numbers detected');
+  }
+
+  // --- Citation distribution check ---
+  const citationDistribution = checkCitationDistribution(section, citationMatches, availableCitations);
+  if (citationDistribution.overCited.length > 0) {
+    issues.push(`Citation stacking detected: citations ${citationDistribution.overCited.join(', ')} appear excessively.`);
+    suggestions.push('Distribute citations more evenly. Each citation should support specific claims, not be piled onto every sentence.');
+    scorePenalty += Math.min(5, citationDistribution.overCited.length * 2);
+  }
+  if (citationDistribution.unCited.length > 0 && section.evidenceCards.length > 2) {
+    issues.push(`Evidence cards ${citationDistribution.unCited.join(', ')} are available but never cited.`);
+    suggestions.push('Incorporate unused evidence cards into the synthesis to improve coverage.');
+    scorePenalty += Math.min(5, citationDistribution.unCited.length);
   }
 
   // --- template-kind-specific checks ---
@@ -358,7 +408,7 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
       issues.push('Benchmark section lacks benchmark/evaluation evidence.');
       suggestions.push('Include benchmark, dataset, or evaluation papers before finalizing this section.');
       scorePenalty += 18;
-      forceRewrite = true;
+      criticalCount++;
     } else {
       strengths.push('Benchmark section includes benchmark/evaluation evidence');
     }
@@ -369,7 +419,7 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
       issues.push('Systems section lacks system/workflow evidence.');
       suggestions.push('Add system, workflow, or platform papers to ground this section.');
       scorePenalty += 18;
-      forceRewrite = true;
+      criticalCount++;
     } else {
       strengths.push('Systems section includes system/workflow evidence');
     }
@@ -380,6 +430,7 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
       issues.push('Background section lacks survey/review style evidence.');
       suggestions.push('Anchor the background section with at least one survey, review, or overview paper.');
       scorePenalty += 8;
+      majorCount++;
     } else {
       strengths.push('Background section includes survey-style evidence');
     }
@@ -394,6 +445,7 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
       issues.push('Challenges section lacks explicit limitation or future-work evidence.');
       suggestions.push('Surface limitation and future-direction evidence instead of only summarizing methods.');
       scorePenalty += 10;
+      majorCount++;
     } else {
       strengths.push('Challenges section includes limitation-oriented evidence');
     }
@@ -404,18 +456,95 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
       issues.push('Methods section lacks framework/architecture evidence.');
       suggestions.push('Include papers that describe specific method families, architectures, or frameworks.');
       scorePenalty += 10;
+      majorCount++;
     } else {
       strengths.push('Methods section includes framework/architecture evidence');
     }
   }
+
+  // Determine severity: only critical issues force rewrite
+  const severity: HardCheckSeverity = criticalCount > 0 ? 'critical' : majorCount > 0 ? 'major' : 'minor';
+  const forceRewrite = severity === 'critical';
 
   return {
     scorePenalty,
     strengths: uniqueTop(strengths),
     issues: uniqueTop(issues),
     suggestions: uniqueTop(suggestions),
-    forceRewrite
+    forceRewrite,
+    severity,
+    fabricatedNumbers,
+    citationDistribution
   };
+}
+
+/**
+ * Detect potentially fabricated numbers in section content by cross-referencing
+ * with evidence card text. Numbers that appear in evidence cards are considered grounded.
+ */
+function detectFabricatedNumbers(section: SectionDraft): string[] {
+  // Collect all numbers from evidence cards as the "grounded" set
+  const evidenceText = section.evidenceCards
+    .map((card) => [card.keyContribution, card.groundedClaim, card.limitationHint].join(' '))
+    .join(' ');
+  const groundedNumbers = new Set<string>();
+  for (const match of evidenceText.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
+    groundedNumbers.add(match[1]);
+  }
+  for (const match of evidenceText.matchAll(/(\d+(?:\.\d+)?)\s*[×x]/gi)) {
+    groundedNumbers.add(match[1]);
+  }
+  // Also ground simple integers that appear in evidence (e.g. "100 tasks", "23 benchmarks")
+  for (const match of evidenceText.matchAll(/\b(\d{2,})\b/g)) {
+    groundedNumbers.add(match[1]);
+  }
+
+  // Extract numbers from section content (skip citation markers [N])
+  const contentWithoutCitations = section.content.replace(/\[\d+\]/g, '');
+  const fabricated: string[] = [];
+
+  // Check percentages
+  for (const match of contentWithoutCitations.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
+    if (!groundedNumbers.has(match[1])) {
+      fabricated.push(`${match[1]}%`);
+    }
+  }
+
+  // Check multipliers (3x, 4.3×)
+  for (const match of contentWithoutCitations.matchAll(/(\d+(?:\.\d+)?)\s*[×x]\b/gi)) {
+    if (!groundedNumbers.has(match[1])) {
+      fabricated.push(`${match[1]}×`);
+    }
+  }
+
+  return Array.from(new Set(fabricated));
+}
+
+/**
+ * Check citation distribution: detect over-cited and un-cited evidence cards.
+ */
+function checkCitationDistribution(
+  section: SectionDraft,
+  citationMatches: number[],
+  availableCitations: Set<number>
+): { overCited: number[]; unCited: number[] } {
+  const citationFrequency = new Map<number, number>();
+  for (const citation of citationMatches) {
+    if (availableCitations.has(citation)) {
+      citationFrequency.set(citation, (citationFrequency.get(citation) || 0) + 1);
+    }
+  }
+
+  // Over-cited: appears more than 5 times in a single section
+  const overCited = Array.from(citationFrequency.entries())
+    .filter(([, count]) => count > 5)
+    .map(([citation]) => citation);
+
+  // Un-cited: available evidence cards never referenced
+  const unCited = Array.from(availableCitations)
+    .filter((citation) => !citationFrequency.has(citation));
+
+  return { overCited, unCited };
 }
 
 function mergeReviewWithHardChecks(review: ReviewResponse, hardChecks: HardCheckResult): ReviewResponse {

@@ -2,7 +2,7 @@ import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
 import type { SkillContext } from '../../../src/skills/types.js';
 import type { SectionDraft, SurveyOutline } from './types.js';
 import { resolveSectionWritingTemplate } from './section-templates.js';
-import { alignClaimsToEvidence, buildEvidenceCards, normalizeText, parseJsonObject } from './utils.js';
+import { alignClaimsToEvidence, buildEvidenceCards, countWords, normalizeText, parseJsonObject } from './utils.js';
 
 interface SectionDraftResponse {
   markdown?: string;
@@ -109,6 +109,8 @@ Requirements for the markdown:
   * You MAY use numbers that appear in evidence card fields (keyContribution, groundedClaim, limitationHint).
 - Avoid all listed anti-patterns.
 - Prioritize evidence cards that are most specific to this section's theme. If a paper appears generic, give more space to papers with stronger section-specific relevance.
+- CITATION LIMIT: Each sentence should cite at most 3 papers. If you need to cite more, split the claim across multiple sentences, each citing different subsets.
+- TRANSITIONS: Each ### sub-section's first sentence must connect to the previous sub-section's content. Use transitional phrases like "Building on...", "In contrast to...", "While the above approaches...", "Complementing these efforts...".
 - VOCABULARY DIVERSITY: Vary your vocabulary across sentences. Avoid repeating the same phrases (e.g. "demonstrates", "highlights", "underscores") more than twice. Use diverse academic verbs and sentence structures.
 - Do NOT include any meta-commentary about your writing process (e.g. "This section covers...", "Word count:"). Output ONLY the academic survey text.
 Requirements for claimMappings:
@@ -134,6 +136,16 @@ Requirements for claimMappings:
 
     if (!content || content === `## ${section.title}`) {
       content = createFallbackSection(section.title, section.description, evidenceCards);
+    }
+
+    // Inline word count floor: if draft is too short, request a single expansion pass
+    const draftWordCount = countWords(content);
+    const minFloor = Math.round(section.targetWordCount * 0.75);
+    if (draftWordCount < minFloor && draftWordCount >= 80) {
+      const expandedContent = await requestExpansion(context, content, section.title, section.targetWordCount, evidenceCards);
+      if (expandedContent && countWords(expandedContent) > draftWordCount) {
+        content = expandedContent;
+      }
     }
 
     const claimAlignments = alignClaimsToEvidence(content, evidenceCards, parsed?.claimMappings);
@@ -175,6 +187,55 @@ function stripLlmArtifacts(text: string): string {
   cleaned = cleaned.replace(/\n+(?:\d+\.\s+(?:New|Deeper|Enhanced|Improved|Added|Consolidated|Unified|Better|Clearer|Expanded|Strengthened)[^\n]+(?:\n\d+\.\s+(?:New|Deeper|Enhanced|Improved|Added|Consolidated|Unified|Better|Clearer|Expanded|Strengthened)[^\n]+)*)\s*$/gi, '');
 
   return cleaned.trim();
+}
+
+/**
+ * Request a single expansion pass when the initial draft is below the word count floor.
+ * This avoids routing through the full review cycle for a simple length issue.
+ */
+async function requestExpansion(
+  context: SkillContext,
+  currentContent: string,
+  sectionTitle: string,
+  targetWordCount: number,
+  evidenceCards: SectionDraft['evidenceCards']
+): Promise<string | null> {
+  const currentWords = countWords(currentContent);
+  const deficit = targetWordCount - currentWords;
+  const evidenceSummary = evidenceCards
+    .map((card) => `[${card.citation}] ${card.title}: ${card.groundedClaim}`)
+    .join('\n');
+
+  const prompt = `The following survey section is too short. It is currently ${currentWords} words but needs to be at least ${targetWordCount} words (deficit: ${deficit} words).
+
+Expand the section by:
+1. Adding deeper analysis paragraphs (80-150 words each)
+2. Drawing on more of the available evidence cards
+3. Adding comparisons between methods/approaches
+4. Discussing tradeoffs and limitations
+
+Evidence cards available:
+${evidenceSummary}
+
+Current section:
+${currentContent}
+
+Return ONLY the expanded section text. No preamble, no postamble, no meta-commentary.`;
+
+  try {
+    const response = await context.llm.chat([
+      { role: 'system', content: 'You expand academic survey sections to meet word count targets. Output ONLY the expanded section text.' },
+      { role: 'user', content: prompt }
+    ]);
+    let expanded = normalizeText(response.content);
+    expanded = stripLlmArtifacts(expanded);
+    if (!expanded.startsWith('## ')) {
+      expanded = `## ${sectionTitle}\n\n${expanded}`;
+    }
+    return expanded;
+  } catch {
+    return null;
+  }
 }
 
 function createFallbackSection(

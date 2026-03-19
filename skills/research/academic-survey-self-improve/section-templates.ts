@@ -60,7 +60,7 @@ const TEMPLATE_MAP: Record<SectionTemplateKind, SectionWritingTemplate> = {
       'Do not collapse the section into a loose list of systems without methodological comparison.'
     ],
     closingMove: 'End by identifying which methodological uncertainty carries over into evaluation or deployment.',
-    tableGuidance: 'Include a Markdown comparison table of representative methods (columns: Method/System, Category, Key Technique, Strengths, Limitations).'
+    tableGuidance: 'Include a Markdown comparison table of representative methods with at least 6 rows (columns: Method/System, Year, Category, Key Technique, Dataset/Benchmark, Strengths, Limitations). Each row should correspond to a distinct approach from the evidence cards.'
   },
   benchmark: {
     kind: 'benchmark',
@@ -86,7 +86,7 @@ const TEMPLATE_MAP: Record<SectionTemplateKind, SectionWritingTemplate> = {
       'Do not ignore what current evaluations fail to capture.'
     ],
     closingMove: 'End by stating which benchmark gap or evaluation blind spot limits confidence in the field today.',
-    tableGuidance: 'Include a Markdown comparison table summarizing key benchmarks/datasets (columns: Name, Task Types, Scale, Key Metric, Limitation).'
+    tableGuidance: 'Include a Markdown comparison table summarizing key benchmarks/datasets with at least 5 rows (columns: Name, Year, Task Types, Scale, Key Metric, Evaluation Focus, Limitation).'
   },
   systems: {
     kind: 'systems',
@@ -111,7 +111,7 @@ const TEMPLATE_MAP: Record<SectionTemplateKind, SectionWritingTemplate> = {
       'Do not describe applications without clarifying how the full system is organized.'
     ],
     closingMove: 'End by stating what system-level capability remains hard to achieve in practical deployment.',
-    tableGuidance: 'Include a Markdown comparison table of representative systems (columns: System, Architecture, Key Capability, Limitation).'
+    tableGuidance: 'Include a Markdown comparison table of representative systems with at least 5 rows (columns: System, Year, Architecture, Key Capability, Domain, Limitation).'
   },
   challenges: {
     kind: 'challenges',

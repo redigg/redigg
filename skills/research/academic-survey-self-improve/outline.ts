@@ -10,22 +10,29 @@ const DEPTH_SECTION_COUNT: Record<string, number> = {
 };
 
 const DEPTH_WORD_COUNT: Record<string, number> = {
-  brief: 300,
-  standard: 800,
-  deep: 1200
-};
-
-const DEPTH_METHODS_WORD_COUNT: Record<string, number> = {
-  brief: 350,
+  brief: 400,
   standard: 1000,
   deep: 1500
 };
 
+const DEPTH_METHODS_WORD_COUNT: Record<string, number> = {
+  brief: 500,
+  standard: 1200,
+  deep: 1800
+};
+
+/** B4: Minimum total word count targets (excluding abstract, intro, conclusion, methodology) */
+const DEPTH_TOTAL_WORD_FLOOR: Record<string, number> = {
+  brief: 2000,
+  standard: 6000,
+  deep: 12000
+};
+
 /** Target sub-sections per section by depth */
 const DEPTH_SUB_SECTION_COUNT: Record<string, number> = {
-  brief: 0,
+  brief: 2,
   standard: 3,
-  deep: 4
+  deep: 5
 };
 
 const DEFAULT_INTENT_FACETS = ['survey', 'benchmark', 'system', 'workflow', 'evaluation'];
@@ -243,6 +250,9 @@ function normalizeOutline(
   // Ensure canonical keywords are present; pad with fallback sections if needed
   const ensuredSections = ensureCanonicalSections(sections, fallback.sections, sectionCount, topic, topicProfile);
 
+  // B4: Enforce total word count floor — redistribute if sections sum is below minimum
+  enforceMinimumTotalWords(ensuredSections, depth);
+
   return {
     title: parsed.title?.trim() || fallback.title,
     abstractDraft: parsed.abstractDraft?.trim() || fallback.abstractDraft,
@@ -319,6 +329,27 @@ function ensureCanonicalSections(
   }
 
   return result;
+}
+
+/**
+ * B4: If the sum of per-section targetWordCount is below the depth floor,
+ * proportionally increase each section's target to reach the floor.
+ */
+function enforceMinimumTotalWords(sections: OutlineSection[], depth: string): void {
+  const floor = DEPTH_TOTAL_WORD_FLOOR[depth] || DEPTH_TOTAL_WORD_FLOOR.standard;
+  const currentTotal = sections.reduce((sum, s) => sum + s.targetWordCount, 0);
+  if (currentTotal >= floor) return;
+
+  const multiplier = floor / currentTotal;
+  for (const section of sections) {
+    section.targetWordCount = Math.round(section.targetWordCount * multiplier);
+    // Also update sub-sections proportionally
+    if (section.subSections) {
+      for (const sub of section.subSections) {
+        sub.targetWordCount = Math.round(sub.targetWordCount * multiplier);
+      }
+    }
+  }
 }
 
 function normalizeTopicProfile(

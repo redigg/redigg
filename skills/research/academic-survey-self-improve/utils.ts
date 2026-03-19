@@ -1,5 +1,5 @@
 import type { Paper } from '../../../src/skills/lib/ScholarTool.js';
-import type { ClaimAlignment, EvidenceCard, OutlineSection, TopicProfile } from './types.js';
+import type { ClaimAlignment, EvidenceCard, EvidenceLevel, OutlineSection, TopicProfile } from './types.js';
 
 type SectionIntent = 'background' | 'methods' | 'evaluation' | 'applications' | 'challenges' | 'generic';
 
@@ -64,12 +64,17 @@ const FACET_TO_PAPER_TYPES: Record<string, string[]> = {
 };
 
 const DOMAIN_SPECIFIC_TOKENS: Record<string, string[]> = {
-  legal: ['legal', 'law', 'court', 'judicial'],
-  medical: ['medical', 'clinical', 'healthcare', 'patient', 'hospital'],
-  finance: ['finance', 'financial', 'banking', 'trading', 'fintech'],
-  education: ['education', 'educational', 'student', 'classroom', 'pedagogy'],
-  chemistry: ['chemistry', 'chemical', 'molecule', 'molecular'],
-  biology: ['biology', 'biological', 'genomic', 'genomics', 'biomedical']
+  legal: ['legal', 'law', 'court', 'judicial', 'statute', 'litigation'],
+  medical: ['medical', 'clinical', 'healthcare', 'patient', 'hospital', 'diagnosis', 'therapeutic'],
+  finance: ['finance', 'financial', 'banking', 'trading', 'fintech', 'portfolio'],
+  education: ['education', 'educational', 'student', 'classroom', 'pedagogy', 'tutoring'],
+  chemistry: ['chemistry', 'chemical', 'molecule', 'molecular', 'synthesis', 'compound'],
+  biology: ['biology', 'biological', 'genomic', 'genomics', 'biomedical', 'protein'],
+  robotics: ['robot', 'robotic', 'manipulation', 'grasp', 'locomotion', 'navigation', 'slam'],
+  agriculture: ['agriculture', 'agricultural', 'crop', 'farming', 'irrigation'],
+  energy: ['energy', 'solar', 'wind', 'battery', 'grid', 'renewable'],
+  manufacturing: ['manufacturing', 'assembly', 'quality control', 'defect detection'],
+  climate: ['climate', 'weather', 'atmospheric', 'ocean', 'meteorological']
 };
 
 export interface AnchorAssessment {
@@ -364,6 +369,9 @@ export function buildEvidenceCards(
     ) || fallbackLimitationHint(section, paperTypeSignals);
     const groundedClaim = buildGroundedClaim(paper, keyContribution, evidenceFocus);
 
+    const evidenceLevel = classifyEvidenceLevel(paper, paperTypeSignals);
+    const quotableFindings = extractQuotableFindings(paper);
+
     return {
       citation: citations[index] ?? index + 1,
       title: paper.title,
@@ -373,9 +381,58 @@ export function buildEvidenceCards(
       evidenceFocus,
       keyContribution,
       groundedClaim,
-      limitationHint
+      limitationHint,
+      evidenceLevel,
+      quotableFindings
     };
   });
+}
+
+/**
+ * A5: Classify the evidence level of a paper based on its type signals and content.
+ * - empirical: contains experiments, results, benchmarks, ablations
+ * - system: describes a system, platform, or tool
+ * - review: survey, review, or overview paper
+ * - perspective: opinion, commentary, position paper
+ * - unknown: cannot determine
+ */
+function classifyEvidenceLevel(paper: Paper, paperTypeSignals: string[]): EvidenceLevel {
+  const text = normalizeMatchText([paper.title, paper.summary].filter(Boolean).join(' '));
+
+  if (paperTypeSignals.includes('survey') || /\b(survey|review|overview|systematic review|meta-analysis)\b/.test(text)) {
+    return 'review';
+  }
+  if (/\b(perspective|opinion|commentary|position paper|editorial|viewpoint)\b/.test(text)) {
+    return 'perspective';
+  }
+  if (/\b(experiment|ablation|result|evaluat|accuracy|f1|precision|recall|bleu|rouge|benchmark|dataset|leaderboard|outperform|baseline)\b/.test(text)) {
+    return 'empirical';
+  }
+  if (paperTypeSignals.includes('system') || paperTypeSignals.includes('workflow') ||
+      /\b(system|platform|framework|pipeline|tool|deployment|implementation)\b/.test(text)) {
+    return 'system';
+  }
+  return 'unknown';
+}
+
+/**
+ * A5: Extract quotable findings — factual statements that can be directly
+ * attributed to this paper based on its abstract. Only includes sentences
+ * containing quantitative results or concrete factual claims.
+ */
+function extractQuotableFindings(paper: Paper): string[] {
+  const sentences = splitIntoSentences(paper.summary);
+  const findings: string[] = [];
+
+  for (const sentence of sentences) {
+    // Keep sentences with numbers, percentages, comparisons, or concrete results
+    if (/\d+(\.\d+)?(%|×|x\b|\s*point)/i.test(sentence) ||
+        /\b(outperform|state-of-the-art|sota|surpass|exceed|achieve|improve|reduce)\b/i.test(sentence)) {
+      findings.push(sentence.trim());
+    }
+  }
+
+  return findings.slice(0, 3);
 }
 
 export function alignClaimsToEvidence(
@@ -584,15 +641,20 @@ function computeSectionPurityAdjustment(
     if (hasApplicationSignal && !hasChallengeSignal && !hasPreferredTypeMatch) adjustment -= 1.6;
   }
 
-  // Penalize foreign-domain application papers in non-application sections
+  // B6: Penalize foreign-domain application papers in non-application sections (stronger)
   if (sectionIntent !== 'applications' && hasApplicationSignal && foreignDomains.length > 0 && !hasPreferredTypeMatch) {
-    adjustment -= Math.min(4, foreignDomains.length * 1.8);
+    adjustment -= Math.min(6, foreignDomains.length * 2.5);
   }
 
-  // Penalize foreign-domain method/system papers in any section
+  // B6: Penalize foreign-domain method/system papers in any section (stronger)
   // (e.g., a robotics manipulation method paper in an "AI agent" survey)
   if (foreignDomains.length > 0 && (hasMethodSignal || paperTypeSignals.includes('system')) && !hasApplicationSignal && !hasPreferredTypeMatch) {
-    adjustment -= Math.min(3.5, foreignDomains.length * 1.5);
+    adjustment -= Math.min(5, foreignDomains.length * 2.2);
+  }
+
+  // B6: Penalize ANY foreign-domain paper even without explicit application/method signal
+  if (foreignDomains.length > 0 && !hasPreferredTypeMatch && assessment.tier !== 'strong') {
+    adjustment -= Math.min(3, foreignDomains.length * 1.2);
   }
 
   if (assessment.aliasMatches.length > 0 && hasPreferredTypeMatch) {

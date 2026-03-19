@@ -14,7 +14,7 @@ interface RetrieveOptions {
 /** Minimum anchor-tier quality for a batch to count as useful */
 const MIN_USEFUL_BATCH_RATIO = 0.25;
 /** Once we have this many strong/weak papers for a section, stop querying */
-const EARLY_STOP_THRESHOLD = 12;
+const EARLY_STOP_THRESHOLD = 18;
 
 export async function retrieveSurveyPapers(
   scholar: ScholarTool,

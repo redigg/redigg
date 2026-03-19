@@ -42,6 +42,22 @@ function cleanSectionContent(content: string, sectionTitle: string): string {
   // Remove horizontal rules (--- or ***) which are LLM formatting artifacts
   cleaned = cleaned.replace(/^\s*[-*]{3,}\s*$/gm, '');
 
+  // A4: Remove "I hope this..." / "I've expanded..." / "Let me know..." artifacts
+  cleaned = cleaned.replace(/^\s*(?:I(?:'ve| have) (?:expanded|revised|updated|rewritten|improved)[^\n]*)\s*$/gim, '');
+  cleaned = cleaned.replace(/^\s*(?:Let me know if[^\n]*)\s*$/gim, '');
+  cleaned = cleaned.replace(/^\s*(?:I hope this[^\n]*)\s*$/gim, '');
+  cleaned = cleaned.replace(/^\s*(?:Please (?:let me know|note)[^\n]*)\s*$/gim, '');
+
+  // A4: Remove "Note:" meta-commentary (but keep academic "Note that" in prose)
+  cleaned = cleaned.replace(/^\s*Note:\s*(?:This|The|I|My|Each|All)[^\n]*$/gim, '');
+
+  // A4: Remove JSON/schema artifacts that leaked into text
+  cleaned = cleaned.replace(/^\s*[{}\[\]]\s*$/gm, '');
+  cleaned = cleaned.replace(/^\s*"(?:markdown|claimMappings|claim|citations)":\s*/gm, '');
+
+  // A4: Remove lines that are just "---" dividers between logical sections
+  cleaned = cleaned.replace(/\n---\n/g, '\n\n');
+
   // Remove ALL ## level headings from the body — the assembler will prepend the
   // canonical heading.  This catches mismatched titles produced by LLM rewrites
   // (e.g. "## Background and Scope" when the outline title is "Background and Evolution").
@@ -51,6 +67,57 @@ function cleanSectionContent(content: string, sectionTitle: string): string {
   cleaned = `## ${sectionTitle}\n\n${cleaned.trimStart()}`;
 
   return cleaned.replace(/\n{4,}/g, '\n\n\n').trim();
+}
+
+/**
+ * A3: Format a single reference entry with proper academic bibliography format.
+ * Fixes: OpenAlex as venue name, author encoding, missing first authors.
+ */
+function formatReference(paper: Paper, index: number): string {
+  // Format authors: "FirstAuthor, SecondAuthor, and ThirdAuthor"
+  const authors = formatAuthors(paper.authors || []);
+
+  // Fix venue: replace "OpenAlex" or empty venue with source-derived venue
+  let venue = paper.journal || '';
+  if (!venue || venue.toLowerCase() === 'openalex' || venue.toLowerCase() === 'unknown venue') {
+    // Try to derive venue from URL or source
+    if (paper.url?.includes('arxiv.org')) {
+      venue = 'arXiv preprint';
+    } else if (paper.source === 'arxiv') {
+      venue = 'arXiv preprint';
+    } else {
+      venue = 'Preprint';
+    }
+  }
+
+  // Build DOI suffix if available
+  const doiSuffix = paper.doi ? ` DOI: ${paper.doi}` : '';
+  const urlSuffix = !paper.doi && paper.url ? ` ${paper.url}` : '';
+
+  return `${index}. ${authors}. ${paper.title}. *${venue}*, ${paper.year}.${doiSuffix}${urlSuffix}`.trim();
+}
+
+/**
+ * Format author list for bibliography. Handles encoding issues and truncation.
+ */
+function formatAuthors(authors: string[]): string {
+  if (authors.length === 0) return 'Unknown Authors';
+
+  // Fix common encoding issues (mojibake from UTF-8 → Latin-1 round-trips)
+  const cleaned = authors.map((a) =>
+    a.replace(/Ã¤/g, 'ä').replace(/Ã¶/g, 'ö').replace(/Ã¼/g, 'ü')
+      .replace(/Ã©/g, 'é').replace(/Ã¨/g, 'è').replace(/Ã§/g, 'ç')
+      .replace(/Ã±/g, 'ñ').replace(/Ã³/g, 'ó').replace(/Ã¡/g, 'á')
+      .replace(/Ã­/g, 'í').replace(/Ãº/g, 'ú')
+      .trim()
+  ).filter(Boolean);
+
+  if (cleaned.length === 0) return 'Unknown Authors';
+  if (cleaned.length === 1) return cleaned[0];
+  if (cleaned.length === 2) return `${cleaned[0]} and ${cleaned[1]}`;
+  if (cleaned.length <= 5) return `${cleaned.slice(0, -1).join(', ')}, and ${cleaned[cleaned.length - 1]}`;
+  // Truncate long author lists
+  return `${cleaned.slice(0, 3).join(', ')}, et al.`;
 }
 
 function escapeRegex(str: string): string {
@@ -275,7 +342,7 @@ ${sectionBriefs}
 
 Requirements:
 - Start with "## Introduction"
-- 500-800 words (this is a substantial section, NOT a brief paragraph)
+- 600-1000 words (this is a substantial section, NOT a brief paragraph)
 - Structure the introduction as follows:
 
 (a) **Background** (1-2 paragraphs): Motivate the topic — why is it important now? What recent developments make this survey timely? Describe the broader context and practical significance.
@@ -298,9 +365,18 @@ Requirements:
       { role: 'system', content: 'You write concise survey introductions.' },
       { role: 'user', content: prompt }
     ]);
-    const content = normalizeText(response.content);
+    let content = normalizeText(response.content);
     if (content && content.length > 100) {
-      return content.startsWith('## ') ? content : `## Introduction\n\n${content}`;
+      if (!content.startsWith('## ')) {
+        content = `## Introduction\n\n${content}`;
+      }
+      // B5: Validate introduction has required structural components
+      const hasContributions = /\b(contribut|we provide|we systematically|we identify|we present|we survey)\b/i.test(content);
+      const hasRoadmap = /\b(remainder|organized as follows|section \d|the rest of)\b/i.test(content);
+      const wordCount = content.split(/\s+/).length;
+      if (wordCount >= 200 && (hasContributions || hasRoadmap)) {
+        return content;
+      }
     }
   } catch {
     // Fall through to template
@@ -408,6 +484,37 @@ The remainder of this survey is organized as follows. ${roadmap}. We conclude wi
 Our goal is to offer researchers and practitioners a thorough yet accessible overview that highlights both achievements and limitations, enabling informed decisions about research priorities and system design.`;
 }
 
+/**
+ * A6: Generate a systematic survey methodology section describing search strategy,
+ * inclusion/exclusion criteria, and paper selection process.
+ */
+function generateMethodologySection(outline: SurveyOutline, papers: Paper[]): string {
+  const years = papers.map((p) => p.year).filter((y): y is number => y > 0);
+  const yearRange = years.length > 0 ? `${Math.min(...years)}–${Math.max(...years)}` : 'recent years';
+  const sources = new Set(papers.map((p) => p.source).filter(Boolean));
+  const sourceList = Array.from(sources).map((s) => {
+    switch (s) {
+      case 'arxiv': return 'arXiv';
+      case 'openalex': return 'OpenAlex';
+      case 'semanticscholar': return 'Semantic Scholar';
+      default: return s;
+    }
+  }).join(', ') || 'academic search engines';
+
+  const topicTerms = outline.topicProfile?.anchorTerms?.slice(0, 5).join(', ') || outline.title;
+  const sectionCount = outline.sections.length;
+
+  return `## Survey Methodology
+
+This survey follows a systematic search-and-synthesis methodology to ensure comprehensive coverage of the relevant literature.
+
+**Search Strategy.** We queried ${sourceList} using topic-specific search terms derived from the core concepts: ${topicTerms}. For each of the ${sectionCount} survey sections, we constructed section-aware queries combining the survey topic with section-specific facets (e.g., methods, benchmarks, applications). We applied citation-graph expansion (snowball sampling) to discover additional relevant works cited by or citing the initially retrieved papers.
+
+**Inclusion and Exclusion Criteria.** Papers were included if they (1) directly address the survey topic as indicated by title and abstract relevance, (2) were published in peer-reviewed venues or established preprint repositories, and (3) fall within the publication window of ${yearRange}. Papers were excluded if they (1) belong to unrelated application domains despite superficial keyword overlap, or (2) lack sufficient methodological or empirical content to support synthesis claims.
+
+**Paper Selection and Assignment.** Retrieved papers were deduplicated using DOI, arXiv ID, and normalized title matching. Each paper was scored for section relevance using anchor-term coverage, paper-type signals, and topic purity filters. Papers were assigned to sections based on their highest relevance scores, with cross-section diversity penalties to minimize redundant coverage. A total of ${papers.length} unique papers were included in the final survey.`;
+}
+
 const OVERUSE_THRESHOLD = 4;
 const TRACKED_ACADEMIC_VERBS = [
   'demonstrates', 'highlights', 'underscores', 'illustrates', 'reveals',
@@ -453,7 +560,7 @@ export async function assembleSurvey(
   }));
 
   const references = finalPapers
-    .map((paper, index) => `${index + 1}. ${paper.title}. ${paper.journal || 'Unknown venue'}, ${paper.year}. ${paper.url || ''}`.trim())
+    .map((paper, index) => formatReference(paper, index + 1))
     .join('\n');
 
   const conclusion = await generateConclusion(context || null, outline, cleanedSections);
@@ -463,6 +570,9 @@ export async function assembleSurvey(
 
   // W3: Generate introduction section with survey-level meta info
   const introduction = await generateIntroduction(context || null, outline, cleanedSections, finalPapers.length);
+
+  // A6: Generate survey methodology section
+  const methodology = generateMethodologySection(outline, finalPapers);
 
   // W2: Add transition sentences between consecutive sections
   const transitionedSections = await addSectionTransitions(context || null, cleanedSections);
@@ -487,6 +597,7 @@ export async function assembleSurvey(
     abstractText + taxonomyLine,
     introduction,
     taxonomyBlock,
+    methodology,
     ...figuredSections.map((section) => section.content),
     conclusion,
     '## References',

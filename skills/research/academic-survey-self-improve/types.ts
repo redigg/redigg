@@ -56,6 +56,8 @@ export interface RetrievalResult {
   };
 }
 
+export type EvidenceLevel = 'empirical' | 'system' | 'review' | 'perspective' | 'unknown';
+
 export interface EvidenceCard {
   citation: number;
   title: string;
@@ -66,6 +68,8 @@ export interface EvidenceCard {
   keyContribution: string;
   groundedClaim: string;
   limitationHint: string;
+  evidenceLevel: EvidenceLevel;
+  quotableFindings: string[];
 }
 
 export interface ClaimAlignment {

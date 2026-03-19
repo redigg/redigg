@@ -72,12 +72,16 @@ Evidence cards:
 ${evidenceCards.map((card) => {
   const focus = card.evidenceFocus.length > 0 ? card.evidenceFocus.join(', ') : 'general relevance';
   const types = card.paperTypeSignals.length > 0 ? card.paperTypeSignals.join(', ') : 'uncategorized';
+  const quotables = card.quotableFindings.length > 0
+    ? `\n- Quotable findings (YOU MAY cite these verbatim): ${card.quotableFindings.join(' | ')}`
+    : '';
   return `[${card.citation}] ${card.title} (${card.year})
+- Evidence level: ${card.evidenceLevel}
 - Focus: ${focus}
 - Type signals: ${types}
 - Key contribution: ${card.keyContribution}
 - Grounded claim: ${card.groundedClaim}
-- Limitation hint: ${card.limitationHint}`;
+- Limitation hint: ${card.limitationHint}${quotables}`;
 }).join('\n\n')}
 
 Return ONLY valid JSON:
@@ -101,6 +105,7 @@ Requirements for the markdown:
 - Use citation markers like [1], [2] when making claims.
 - Mention at least two distinct evidence cards when more than one is available.
 - Do not introduce systems, benchmarks, datasets, or claims that are absent from the evidence cards.
+- CLAIM-SOURCE GROUNDING RULE: Every claim you attribute to a cited paper MUST be derivable from that paper's evidence card above. Do NOT claim a paper "proposes X" or "demonstrates Y" unless X or Y appears in the paper's key contribution, grounded claim, or quotable findings. If an evidence card has evidence level "perspective" or "review", do NOT cite it as empirical evidence — instead, frame it as "according to [N], ..." or "[N] argues that...".
 - ABSOLUTE RULE — NEVER fabricate specific numbers, percentages, or statistics. This means:
   * Do NOT invent accuracy percentages (e.g. "achieving 89% accuracy") unless the EXACT number appears in an evidence card above.
   * Do NOT invent improvement factors (e.g. "3x faster", "4.3× improvement") unless stated verbatim in an evidence card.

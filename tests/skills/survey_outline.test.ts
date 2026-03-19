@@ -120,9 +120,13 @@ describe('createSurveyOutline', () => {
     const methodsSection = outline.sections.find((section) => section.title === 'Core Methods');
     const evaluationSection = outline.sections.find((section) => section.title === 'Evaluation and Benchmarks');
 
-    expect(backgroundSection?.targetWordCount).toBe(500);
-    expect(methodsSection?.targetWordCount).toBe(600);
-    expect(evaluationSection?.targetWordCount).toBe(500);
-    expect(outline.sections.every((section) => section.targetWordCount >= 500)).toBe(true);
+    // B4: Word counts are clamped to depth floors AND then scaled up to meet total word floor (6000 for standard)
+    expect(backgroundSection?.targetWordCount).toBeGreaterThanOrEqual(1000);
+    expect(methodsSection?.targetWordCount).toBeGreaterThanOrEqual(1200);
+    expect(evaluationSection?.targetWordCount).toBeGreaterThanOrEqual(1000);
+    expect(outline.sections.every((section) => section.targetWordCount >= 1000)).toBe(true);
+    // Total should meet the B4 floor
+    const totalWords = outline.sections.reduce((sum, s) => sum + s.targetWordCount, 0);
+    expect(totalWords).toBeGreaterThanOrEqual(6000);
   });
 });

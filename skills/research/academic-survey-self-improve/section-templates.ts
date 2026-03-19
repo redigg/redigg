@@ -60,7 +60,7 @@ const TEMPLATE_MAP: Record<SectionTemplateKind, SectionWritingTemplate> = {
       'Do not collapse the section into a loose list of systems without methodological comparison.'
     ],
     closingMove: 'End by identifying which methodological uncertainty carries over into evaluation or deployment.',
-    tableGuidance: 'Include a Markdown comparison table of representative methods with at least 6 rows (columns: Method/System, Year, Category, Key Technique, Dataset/Benchmark, Strengths, Limitations). Each row should correspond to a distinct approach from the evidence cards.'
+    tableGuidance: 'MANDATORY: Include a Markdown comparison table of representative methods. The table MUST have at least 6 rows, one per distinct evidence card. Columns: | Method/System | Year | Category | Key Technique | Evaluation | Strengths | Limitations |. Every row MUST cite its evidence card [N]. Do NOT leave cells empty — write "N/A" if unknown. Place the table after the comparative analysis paragraph, not at the very end.'
   },
   benchmark: {
     kind: 'benchmark',
@@ -86,7 +86,7 @@ const TEMPLATE_MAP: Record<SectionTemplateKind, SectionWritingTemplate> = {
       'Do not ignore what current evaluations fail to capture.'
     ],
     closingMove: 'End by stating which benchmark gap or evaluation blind spot limits confidence in the field today.',
-    tableGuidance: 'Include a Markdown comparison table summarizing key benchmarks/datasets with at least 5 rows (columns: Name, Year, Task Types, Scale, Key Metric, Evaluation Focus, Limitation).'
+    tableGuidance: 'MANDATORY: Include a Markdown comparison table summarizing key benchmarks/datasets. The table MUST have at least 5 rows, one per evidence card. Columns: | Benchmark/Dataset | Year | Task Types | Scale | Key Metric | Evaluation Focus | Limitation |. Every row MUST cite its evidence card [N]. Do NOT leave cells empty — write "N/A" if unknown.'
   },
   systems: {
     kind: 'systems',
@@ -111,7 +111,7 @@ const TEMPLATE_MAP: Record<SectionTemplateKind, SectionWritingTemplate> = {
       'Do not describe applications without clarifying how the full system is organized.'
     ],
     closingMove: 'End by stating what system-level capability remains hard to achieve in practical deployment.',
-    tableGuidance: 'Include a Markdown comparison table of representative systems with at least 5 rows (columns: System, Year, Architecture, Key Capability, Domain, Limitation).'
+    tableGuidance: 'MANDATORY: Include a Markdown comparison table of representative systems. The table MUST have at least 5 rows, one per evidence card. Columns: | System | Year | Architecture | Key Capability | Domain | Limitation |. Every row MUST cite its evidence card [N]. Do NOT leave cells empty — write "N/A" if unknown.'
   },
   challenges: {
     kind: 'challenges',

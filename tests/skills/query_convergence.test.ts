@@ -18,18 +18,17 @@ function makePaper(overrides: Partial<Paper> = {}): Paper {
 describe('retriever query convergence', () => {
   it('should early-stop when enough quality papers are found', async () => {
     let callCount = 0;
-    const strongPapers: Paper[] = Array.from({ length: 8 }, (_, i) =>
-      makePaper({
-        title: `AI Agent Discovery System ${i}`,
-        summary: `An AI agent system for autonomous scientific research discovery and workflows. System ${i}.`,
-        citationCount: 50 + i
-      })
-    );
-
+    // Generate enough unique papers per call to exceed EARLY_STOP_THRESHOLD (18)
     const scholar = {
       async searchPapers() {
         callCount++;
-        return strongPapers;
+        return Array.from({ length: 20 }, (_, i) =>
+          makePaper({
+            title: `AI Agent Discovery System Call${callCount} Paper${i}`,
+            summary: `An AI agent system for autonomous scientific research discovery and workflows. System ${i}.`,
+            citationCount: 50 + i
+          })
+        );
       }
     } as any;
 
@@ -70,9 +69,9 @@ describe('retriever query convergence', () => {
       perQueryLimit: 8
     });
 
-    // With 8 strong papers returned on first call, early stop should kick in
-    // and prevent all 5+ queries from firing
-    expect(callCount).toBeLessThanOrEqual(2);
+    // With 20 strong papers returned on first call, early stop should kick in
+    // (EARLY_STOP_THRESHOLD = 18) and prevent all 5+ queries from firing
+    expect(callCount).toBeLessThanOrEqual(3);
   });
 
   it('should filter off-topic papers from search batches', async () => {

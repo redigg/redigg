@@ -401,6 +401,28 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
     scorePenalty += Math.min(5, citationDistribution.unCited.length);
   }
 
+  // --- A1: Evidence level misuse check ---
+  const perspectiveCards = section.evidenceCards.filter((c) => c.evidenceLevel === 'perspective' || c.evidenceLevel === 'review');
+  const perspectiveCitations = new Set(perspectiveCards.map((c) => c.citation));
+  // Check if perspective/review papers are cited with empirical framing verbs
+  const empiricalFramingPattern = /(?:demonstrate|show|prove|achieve|outperform|result|experiment|find that)\w*\s+[^.]*\[(\d+(?:,\s*\d+)*)\]/gi;
+  const empiricalFramingMatches = Array.from(section.content.matchAll(empiricalFramingPattern));
+  const misusedPerspectives: number[] = [];
+  for (const match of empiricalFramingMatches) {
+    const citedNums = match[1].split(',').map((s) => Number(s.trim()));
+    for (const num of citedNums) {
+      if (perspectiveCitations.has(num)) {
+        misusedPerspectives.push(num);
+      }
+    }
+  }
+  if (misusedPerspectives.length > 0) {
+    issues.push(`Citations ${[...new Set(misusedPerspectives)].join(', ')} are perspective/review papers but cited with empirical framing (e.g. "demonstrates", "achieves").`);
+    suggestions.push('Use hedged framing for perspective/review sources: "argues that", "suggests that", "according to". Reserve empirical verbs for papers with evidence level "empirical".');
+    scorePenalty += Math.min(10, misusedPerspectives.length * 3);
+    majorCount++;
+  }
+
   // --- template-kind-specific checks ---
 
   if (kind === 'benchmark') {
@@ -514,6 +536,31 @@ function detectFabricatedNumbers(section: SectionDraft): string[] {
   for (const match of contentWithoutCitations.matchAll(/(\d+(?:\.\d+)?)\s*[×x]\b/gi)) {
     if (!groundedNumbers.has(match[1])) {
       fabricated.push(`${match[1]}×`);
+    }
+  }
+
+  // A2: Check "N-fold" patterns (e.g. "5-fold improvement")
+  for (const match of contentWithoutCitations.matchAll(/(\d+(?:\.\d+)?)-fold\b/gi)) {
+    if (!groundedNumbers.has(match[1])) {
+      fabricated.push(`${match[1]}-fold`);
+    }
+  }
+
+  // A2: Check decimal scores presented as results (e.g. "F1 of 0.87", "BLEU score of 34.5")
+  for (const match of contentWithoutCitations.matchAll(/(?:score|accuracy|F1|BLEU|ROUGE|precision|recall|AUC)\s+(?:of\s+)?(\d+(?:\.\d+)?)\b/gi)) {
+    if (!groundedNumbers.has(match[1])) {
+      fabricated.push(`score ${match[1]}`);
+    }
+  }
+
+  // A2: Check "achieving/reaching/obtaining N" patterns with specific numbers
+  for (const match of contentWithoutCitations.matchAll(/(?:achiev|reach|obtain|attain|record)(?:ing|ed|s)?\s+(?:a\s+)?(\d+(?:\.\d+)?)\b/gi)) {
+    const num = match[1];
+    // Skip years and small counts
+    if (Number(num) > 100 || Number(num) < 1 || num.includes('.')) {
+      if (!groundedNumbers.has(num)) {
+        fabricated.push(`achieving ${num}`);
+      }
     }
   }
 

@@ -19,13 +19,13 @@ export default class AcademicSurveySelfImproveSkill implements Skill {
     context.log('thinking', `Starting academic survey on: ${topic}`);
     await context.updateProgress?.(10, 'Initializing search', { topic, depth });
 
-    // Depth-aware retrieval parameters — scaled for ≥40 ref target
+    // B2: Depth-aware retrieval parameters — scaled for ≥50 ref target
     const retrievalParams = depth === 'deep'
-      ? { sectionLimit: 14, perQueryLimit: 8, snowballMaxSeeds: 12, snowballPerPaper: 6 }
+      ? { sectionLimit: 18, perQueryLimit: 10, snowballMaxSeeds: 15, snowballPerPaper: 8 }
       : depth === 'standard'
-        ? { sectionLimit: 12, perQueryLimit: 8, snowballMaxSeeds: 10, snowballPerPaper: 5 }
-        : { sectionLimit: 6, perQueryLimit: 5, snowballMaxSeeds: 6, snowballPerPaper: 3 };
-    const seedLimit = depth === 'deep' ? 12 : depth === 'standard' ? 10 : 5;
+        ? { sectionLimit: 14, perQueryLimit: 10, snowballMaxSeeds: 12, snowballPerPaper: 6 }
+        : { sectionLimit: 8, perQueryLimit: 6, snowballMaxSeeds: 8, snowballPerPaper: 4 };
+    const seedLimit = depth === 'deep' ? 15 : depth === 'standard' ? 12 : 6;
 
     const useCache = params.useCache === true || process.env.SCHOLAR_CACHE === 'true';
     const scholar = new ScholarTool(useCache ? { enabled: true } : undefined);

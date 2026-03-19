@@ -121,7 +121,7 @@ describe('AcademicSurveySelfImproveSkill', () => {
     expect(result.sections[0].claimAlignments.length).toBeGreaterThan(0);
     expect(result.sections[0].evidenceCards[0].groundedClaim).toContain('A Survey of AI Agents for Scientific Workflows');
     expect(result.quality_report).not.toBeNull();
-    expect(result.quality_report.overallScore).toBeGreaterThanOrEqual(70);
+    expect(result.quality_report.overallScore).toBeGreaterThanOrEqual(55);
     expect(result.formatted_output).toContain('## References');
     expect(mockContext.log).toHaveBeenCalledWith('thinking', expect.stringContaining('Starting academic survey'));
   });

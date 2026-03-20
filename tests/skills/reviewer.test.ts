@@ -28,7 +28,27 @@ describe('reviewSurveySections', () => {
       })
       // Rewrite response
       .mockResolvedValueOnce({
-        content: '## Evaluation and Benchmarks\n\nRewritten benchmark section grounded in evidence [1][2].'
+        content: '## Evaluation and Benchmarks\n\nRewritten benchmark section grounded in evidence [1].'
+      })
+      // Cross-review role 1 after rewrite
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          score: 91,
+          strengths: ['Grounded rewrite'],
+          issues: [],
+          suggestions: [],
+          needsRewrite: false
+        })
+      })
+      // Cross-review role 2 after rewrite
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          score: 89,
+          strengths: ['Improved benchmark framing'],
+          issues: [],
+          suggestions: [],
+          needsRewrite: false
+        })
       });
 
     const context: SkillContext = {
@@ -71,7 +91,6 @@ describe('reviewSurveySections', () => {
     expect(result.qualityReport.sectionReviews[0].rewriteApplied).toBe(true);
     expect(result.qualityReport.sectionReviews[0].issues).toEqual(
       expect.arrayContaining([
-        'The section does not cite any supporting evidence.',
         'Benchmark section lacks benchmark/evaluation evidence.'
       ])
     );
@@ -156,7 +175,102 @@ describe('reviewSurveySections', () => {
       expect.arrayContaining(['Systems section lacks system/workflow evidence.'])
     );
     expect(result.qualityReport.sectionReviews[0].strengths).toEqual(
-      expect.arrayContaining(['Systems section includes system/workflow evidence', 'Tracks 2 claim-level citation alignments'])
+      expect.arrayContaining(['Tracks 2 claim-level citation alignments', 'No fabricated numbers detected'])
     );
+  });
+
+  it('should flag unsupported numeric ranges and counted entities even when citations are present', async () => {
+    const unchangedDraft = '## Applications and Systems\n\nCurrent applications remain promising but unevenly validated [1]. Some reports claim 80-90% autonomy and describe workflows that run 3-4 times faster than manual baselines while covering 57 agents across 22 classes [1]. These examples are rhetorically plausible, but they are not supported by the attached evidence card and therefore should be treated as fabricated quantitative synthesis rather than grounded reporting [1].';
+    const chat = vi.fn()
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          score: 87,
+          strengths: ['Well structured'],
+          issues: [],
+          suggestions: [],
+          needsRewrite: false
+        })
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          score: 86,
+          strengths: ['Reasonable flow'],
+          issues: [],
+          suggestions: [],
+          needsRewrite: false
+        })
+      })
+      .mockResolvedValueOnce({
+        content: unchangedDraft
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          score: 84,
+          strengths: ['Still coherent'],
+          issues: [],
+          suggestions: [],
+          needsRewrite: false
+        })
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          score: 83,
+          strengths: ['Still readable'],
+          issues: [],
+          suggestions: [],
+          needsRewrite: false
+        })
+      });
+
+    const context: SkillContext = {
+      llm: { chat } as any,
+      memory: {} as any,
+      workspace: '/tmp',
+      userId: 'test-user',
+      log: vi.fn()
+    };
+
+    const sections: SectionDraft[] = [
+      {
+        sectionId: 'applications',
+        title: 'Applications and Systems',
+        templateKind: 'systems',
+        content: unchangedDraft,
+        paperCount: 1,
+        citations: [1],
+        targetWordCount: 80,
+        claimAlignments: [
+          {
+            claim: 'Current applications remain promising but unevenly validated.',
+            citations: [1],
+            evidenceTitles: ['Agentic Systems Survey']
+          }
+        ],
+        evidenceCards: [
+          {
+            citation: 1,
+            title: 'Agentic Systems Survey',
+            year: 2025,
+            source: 'openalex',
+            paperTypeSignals: ['system', 'workflow', 'survey'],
+            evidenceFocus: ['system', 'workflow'],
+            keyContribution: 'The paper surveys agentic system architectures and deployment patterns.',
+            groundedClaim: 'Existing agentic systems vary widely in orchestration design and validation depth.',
+            limitationHint: 'The survey does not report a unified autonomy rate or standardized speedup figure.',
+            evidenceLevel: 'review',
+            quotableFindings: []
+          }
+        ]
+      }
+    ];
+
+    const result = await reviewSurveySections(context, 'AI Agent for Scientific Research', sections);
+
+    expect(result.qualityReport.sectionReviews[0].rewriteApplied).toBe(true);
+    expect(result.qualityReport.sectionReviews[0].issues.join(' ')).toContain('Potentially fabricated numbers detected');
+    expect(result.qualityReport.sectionReviews[0].issues.join(' ')).toContain('80-90%');
+    expect(result.qualityReport.sectionReviews[0].issues.join(' ')).toContain('3-4 times');
+    expect(result.qualityReport.sectionReviews[0].issues.join(' ')).toContain('57 agents');
+    expect(result.qualityReport.sectionReviews[0].issues.join(' ')).toContain('22 classes');
   });
 });

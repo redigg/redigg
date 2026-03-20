@@ -1,7 +1,7 @@
 import type { SkillContext } from '../../../src/skills/types.js';
 import type { SectionDraft, SurveyQualityReport } from './types.js';
 import { getSectionWritingTemplate } from './section-templates.js';
-import { alignClaimsToEvidence, countWords, getQuotableFindings, normalizeText, parseJsonObject } from './utils.js';
+import { alignClaimsToEvidence, collectGroundedNumberTokens, countWords, getQuotableFindings, normalizeText, parseJsonObject } from './utils.js';
 
 interface ReviewResponse {
   score: number;
@@ -40,9 +40,7 @@ export async function reviewSurveySections(
   const sectionReviews: SurveyQualityReport['sectionReviews'] = [];
 
   for (const section of sections) {
-    const review = await reviewSection(context, topic, section);
-    const hardChecks = runHardChecks(section);
-    const finalReview = mergeReviewWithHardChecks(review, hardChecks);
+    let finalReview = await evaluateSectionDraft(context, topic, section);
     let finalSection = section;
     let rewriteApplied = false;
 
@@ -56,6 +54,7 @@ export async function reviewSurveySections(
           claimAlignments: alignClaimsToEvidence(rewritten, section.evidenceCards, section.claimAlignments)
         };
         rewriteApplied = true;
+        finalReview = await evaluateSectionDraft(context, topic, finalSection);
       }
     }
 
@@ -90,8 +89,13 @@ export async function reviewSurveySections(
           content: rewritten,
           claimAlignments: alignClaimsToEvidence(rewritten, reviewedSections[i].evidenceCards, reviewedSections[i].claimAlignments)
         };
+        const reevaluatedReview = await evaluateSectionDraft(context, topic, reviewedSections[i]);
         sectionReviews[i] = {
-          ...sectionReviews[i],
+          sectionId: reviewedSections[i].sectionId,
+          score: Math.max(0, reevaluatedReview.score - feedback.scorePenalty),
+          strengths: reevaluatedReview.strengths,
+          issues: uniqueTop([...reevaluatedReview.issues, ...feedback.issues]),
+          suggestions: uniqueTop([...reevaluatedReview.suggestions, ...feedback.suggestions]),
           rewriteApplied: true
         };
       }
@@ -125,6 +129,16 @@ export async function reviewSurveySections(
       suggestions
     }
   };
+}
+
+async function evaluateSectionDraft(
+  context: SkillContext,
+  topic: string,
+  section: SectionDraft
+): Promise<ReviewResponse> {
+  const review = await reviewSection(context, topic, section);
+  const hardChecks = runHardChecks(section);
+  return mergeReviewWithHardChecks(review, hardChecks);
 }
 
 // Cross-review roles: each reviews from a different perspective
@@ -236,7 +250,13 @@ async function rewriteSection(
 ): Promise<string | null> {
   const template = getSectionWritingTemplate(section.templateKind);
   const evidenceSummary = section.evidenceCards
-    .map((card) => `[${card.citation}] ${card.title}\n- Grounded claim: ${card.groundedClaim}\n- Limitation hint: ${card.limitationHint}`)
+    .map((card) => {
+      const quotables = getQuotableFindings(card);
+      const quotableBlock = quotables.length > 0
+        ? `\n- Verbatim-supported findings: ${quotables.join(' | ')}`
+        : '';
+      return `[${card.citation}] ${card.title}\n- Evidence level: ${card.evidenceLevel}\n- Grounded claim: ${card.groundedClaim}\n- Limitation hint: ${card.limitationHint}${quotableBlock}`;
+    })
     .join('\n');
   const claimSummary = section.claimAlignments
     .map((item) => `- Claim: ${item.claim}\n  Citations: ${item.citations.join(', ')}`)
@@ -268,6 +288,9 @@ ${claimSummary || 'No claim alignments available.'}
 ${section.content}
 
 Return ONLY the revised Markdown section text. Do NOT include:
+- A lead paragraph without citations; the first paragraph after the ## heading must already contain supporting citations
+- Empirical verbs such as "demonstrates", "achieves", "outperforms", or "shows" for review/perspective evidence cards; use hedged verbs such as "argues", "suggests", or "reviews" instead
+- Named benchmarks, systems, or quantitative claims that are not explicitly supported by the evidence cards
 - Manual heading numbering such as "### 1.1 ..." or "### Section 3 ..."
 - Any preamble like "Here's the revised section..."
 - Any postamble like "This revision expands to X words with..."
@@ -592,58 +615,76 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
  * with evidence card text. Numbers that appear in evidence cards are considered grounded.
  */
 function detectFabricatedNumbers(section: SectionDraft, candidateText: string = section.content): string[] {
-  // Collect all numbers from evidence cards as the "grounded" set
-  const evidenceText = section.evidenceCards
-    .map((card) => [
-      card.title,
-      String(card.year || ''),
-      card.keyContribution,
-      card.groundedClaim,
-      card.limitationHint,
-      ...getQuotableFindings(card)
-    ].join(' '))
-    .join(' ');
-  const groundedNumbers = new Set<string>();
-  for (const match of evidenceText.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
-    groundedNumbers.add(match[1]);
-  }
-  for (const match of evidenceText.matchAll(/(\d+(?:\.\d+)?)\s*[×x]/gi)) {
-    groundedNumbers.add(match[1]);
-  }
-  // Also ground simple integers that appear in evidence (e.g. "100 tasks", "23 benchmarks")
-  for (const match of evidenceText.matchAll(/\b(\d{2,})\b/g)) {
-    groundedNumbers.add(match[1]);
-  }
+  const groundedNumbers = collectGroundedNumberTokens(section.evidenceCards);
+  const supportedYears = new Set(section.evidenceCards.map((card) => String(card.year)).filter(Boolean));
 
   // Extract numbers from section content (skip citation markers [N])
   const contentWithoutCitations = candidateText.replace(/\[\d+\]/g, '');
   const fabricated: string[] = [];
+  const isGrounded = (token: string): boolean => groundedNumbers.has(token) || supportedYears.has(token);
+  const percentageRangePattern = /(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)\s*%/g;
+  const timeRangePattern = /(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)\s+times?\s+(?:faster|slower|more|less)\b/gi;
+
+  // Check bounded percentage ranges such as "80-90%" or "40 to 50%"
+  for (const match of contentWithoutCitations.matchAll(percentageRangePattern)) {
+    if (!isGrounded(match[1]) || !isGrounded(match[2])) {
+      fabricated.push(`${match[1]}-${match[2]}%`);
+    }
+  }
 
   // Check percentages
-  for (const match of contentWithoutCitations.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
-    if (!groundedNumbers.has(match[1])) {
+  const contentWithoutPercentageRanges = contentWithoutCitations.replace(percentageRangePattern, ' ');
+  for (const match of contentWithoutPercentageRanges.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
+    if (!isGrounded(match[1])) {
       fabricated.push(`${match[1]}%`);
+    }
+  }
+
+  // Check uncertainty ranges such as "2.34±1.99"
+  for (const match of contentWithoutCitations.matchAll(/(\d+(?:\.\d+)?)\s*(?:±|\+\/-)\s*(\d+(?:\.\d+)?)\b/g)) {
+    if (!isGrounded(match[1]) || !isGrounded(match[2])) {
+      fabricated.push(`${match[1]}±${match[2]}`);
     }
   }
 
   // Check multipliers (3x, 4.3×)
   for (const match of contentWithoutCitations.matchAll(/(\d+(?:\.\d+)?)\s*[×x]\b/gi)) {
-    if (!groundedNumbers.has(match[1])) {
+    if (!isGrounded(match[1])) {
       fabricated.push(`${match[1]}×`);
+    }
+  }
+
+  // Check comparative time multipliers (e.g. "3-4 times faster", "2 times faster")
+  for (const match of contentWithoutCitations.matchAll(timeRangePattern)) {
+    if (!isGrounded(match[1]) || !isGrounded(match[2])) {
+      fabricated.push(`${match[1]}-${match[2]} times`);
+    }
+  }
+  const contentWithoutTimeRanges = contentWithoutCitations.replace(timeRangePattern, ' ');
+  for (const match of contentWithoutTimeRanges.matchAll(/(\d+(?:\.\d+)?)\s+times?\s+(?:faster|slower|more|less)\b/gi)) {
+    if (!isGrounded(match[1])) {
+      fabricated.push(`${match[1]} times`);
     }
   }
 
   // A2: Check "N-fold" patterns (e.g. "5-fold improvement")
   for (const match of contentWithoutCitations.matchAll(/(\d+(?:\.\d+)?)-fold\b/gi)) {
-    if (!groundedNumbers.has(match[1])) {
+    if (!isGrounded(match[1])) {
       fabricated.push(`${match[1]}-fold`);
     }
   }
 
   // A2: Check decimal scores presented as results (e.g. "F1 of 0.87", "BLEU score of 34.5")
   for (const match of contentWithoutCitations.matchAll(/(?:score|accuracy|F1|BLEU|ROUGE|precision|recall|AUC)\s+(?:of\s+)?(\d+(?:\.\d+)?)\b/gi)) {
-    if (!groundedNumbers.has(match[1])) {
+    if (!isGrounded(match[1])) {
       fabricated.push(`score ${match[1]}`);
+    }
+  }
+
+  // Check counted entities such as "57 agents", "22 classes", "18 benchmarks"
+  for (const match of contentWithoutCitations.matchAll(/\b(\d{1,4}(?:\.\d+)?)\s+(?:tested\s+|distinct\s+|novel\s+|new\s+)?(agents?|classes?|benchmarks?|tasks?|papers?|systems?|datasets?|domains?|studies|samples?|participants?|workflows?)\b/gi)) {
+    if (!isGrounded(match[1])) {
+      fabricated.push(`${match[1]} ${match[2].toLowerCase()}`);
     }
   }
 
@@ -652,7 +693,7 @@ function detectFabricatedNumbers(section: SectionDraft, candidateText: string = 
     const num = match[1];
     // Skip years and small counts
     if (Number(num) > 100 || Number(num) < 1 || num.includes('.')) {
-      if (!groundedNumbers.has(num)) {
+      if (!isGrounded(num)) {
         fabricated.push(`achieving ${num}`);
       }
     }

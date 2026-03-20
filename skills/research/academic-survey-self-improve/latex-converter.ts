@@ -76,6 +76,22 @@ interface MarkdownTopLevelSection {
   content: string;
 }
 
+const CYRILLIC_TO_LATIN: Record<string, string> = {
+  А: 'A', а: 'a', Б: 'B', б: 'b', В: 'V', в: 'v', Г: 'G', г: 'g', Д: 'D', д: 'd',
+  Е: 'E', е: 'e', Ё: 'E', ё: 'e', Ж: 'Zh', ж: 'zh', З: 'Z', з: 'z', И: 'I', и: 'i',
+  Й: 'Y', й: 'y', К: 'K', к: 'k', Л: 'L', л: 'l', М: 'M', м: 'm', Н: 'N', н: 'n',
+  О: 'O', о: 'o', П: 'P', п: 'p', Р: 'R', р: 'r', С: 'S', с: 's', Т: 'T', т: 't',
+  У: 'U', у: 'u', Ф: 'F', ф: 'f', Х: 'Kh', х: 'kh', Ц: 'Ts', ц: 'ts', Ч: 'Ch', ч: 'ch',
+  Ш: 'Sh', ш: 'sh', Щ: 'Shch', щ: 'shch', Ъ: '', ъ: '', Ы: 'Y', ы: 'y', Ь: '', ь: '',
+  Э: 'E', э: 'e', Ю: 'Yu', ю: 'yu', Я: 'Ya', я: 'ya'
+};
+
+function stripAbstractKeywords(content: string): string {
+  return content
+    .replace(/\n+(?:\*\*Keywords(?:\*\*:|:\*\*)|Keywords:)[\s\S]*$/i, '')
+    .trim();
+}
+
 function extractTopLevelSections(markdown: string): MarkdownTopLevelSection[] {
   const normalized = normalizeMarkdownHeadings(markdown);
   const matches = Array.from(normalized.matchAll(/^##\s+(.+)$/gm));
@@ -307,6 +323,9 @@ function stripLlmMetaText(text: string): string {
  */
 function sanitizeForLatexFont(text: string): string {
   return text
+    .replace(/[А-Яа-яЁё]/g, (ch) => CYRILLIC_TO_LATIN[ch] ?? '')
+    .replace(/\u2014/g, '---')
+    .replace(/\u2013/g, '--')
     .replace(/\u2010|\u2011|\u2012/g, '-')  // Unicode hyphens → ASCII hyphen
     .replace(/[\u0400-\u04FF]+/g, '')        // Strip Cyrillic
     .replace(/[\u4E00-\u9FFF]+/g, '')        // Strip CJK
@@ -316,7 +335,12 @@ function sanitizeForLatexFont(text: string): string {
 
 function formatReference(paper: Paper, index: number): string {
   const authors = Array.isArray(paper.authors) && paper.authors.length > 0
-    ? escapeLatex(sanitizeForLatexFont(normalizeAuthorList(paper.authors).join(', ')))
+    ? escapeLatex(
+        normalizeAuthorList(paper.authors)
+          .map((author) => sanitizeForLatexFont(author))
+          .filter(Boolean)
+          .join(', ')
+      ) || 'Unknown Authors'
     : 'Unknown Authors';
   const title = escapeLatex(sanitizeForLatexFont(paper.title));
   const venue = escapeLatex(sanitizeForLatexFont(normalizeBibliographyVenue(paper)));
@@ -337,9 +361,7 @@ export function convertToLatex(
 ): string {
   const title = escapeLatex(outline.title);
   const abstractSection = findTopLevelSection(finalSurvey.markdown, 'Abstract');
-  const abstractBody = (abstractSection?.content || outline.abstractDraft)
-    .replace(/\n+\*\*Keywords:\*\*[\s\S]*$/i, '')
-    .trim();
+  const abstractBody = stripAbstractKeywords(abstractSection?.content || outline.abstractDraft);
   const abstractText = convertParagraph(abstractBody);
 
   // Short title for running header (truncate at 60 chars)

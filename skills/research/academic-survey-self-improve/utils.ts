@@ -119,6 +119,7 @@ export function normalizeText(content: string): string {
 export function stripManualHeadingNumbering(text: string): string {
   return text
     .replace(/^(?:section\s+)?(?:\d+(?:\.\d+){0,3}|[ivxlcdm]+(?:\.\d+){0,3})(?:[)\].:-])?\s+/i, '')
+    .replace(/^(?:\([a-z]\)|[a-z]\))(?:[)\].:-])?\s+/i, '')
     .replace(/^(?:part|chapter)\s+\d+(?:[)\].:-])?\s+/i, '')
     .trim();
 }
@@ -242,7 +243,7 @@ export function getQuotableFindings(card: Pick<EvidenceCard, 'quotableFindings'>
     .filter(Boolean);
 }
 
-function collectGroundedNumberTokens(cards: EvidenceCard[]): Set<string> {
+export function collectGroundedNumberTokens(cards: EvidenceCard[]): Set<string> {
   const groundedNumbers = new Set<string>();
   const evidenceText = cards
     .map((card) => [

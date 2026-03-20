@@ -151,6 +151,12 @@ describe('LaTeX Converter', () => {
     expect(latex).toContain('Task-based agents');
   });
 
+  it('strips markdown keywords from abstract before rendering LaTeX', () => {
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
+
+    expect(latex.match(/Keywords/g) || []).toHaveLength(1);
+  });
+
   it('includes body sections', () => {
     const latex = convertToLatex(makeOutline(), makeFinalSurvey(), makePapers());
 
@@ -196,10 +202,59 @@ describe('LaTeX Converter', () => {
     expect(latex).toContain('\\section{Conclusion}');
   });
 
+  it('strips manual letter labels from subsection headings', () => {
+    const finalSurvey = makeFinalSurvey();
+    finalSurvey.markdown = `# A Survey of AI Agents for Scientific Research
+
+## Abstract
+
+This survey examines AI agents designed for scientific research tasks.
+
+## Introduction
+
+### (a) Background
+
+AI agents increasingly support scientific workflows by combining planning, retrieval, and tool use [1].
+
+## Background and Evolution
+
+AI agents have evolved significantly [1].
+
+## Conclusion
+
+These systems continue to expand the scope of scientific automation.`;
+    const latex = convertToLatex(makeOutline(), finalSurvey, makePapers());
+
+    expect(latex).toContain('\\subsection{Background}');
+    expect(latex).not.toContain('\\subsection{(a) Background}');
+  });
+
+  it('preserves non-latin author names through transliteration in bibliography', () => {
+    const papers: Paper[] = [
+      {
+        title: 'DORA AI Scientist',
+        authors: ['Владимир Наумов', 'Diana Zagirova'],
+        year: 2025,
+        url: 'https://example.com/dora',
+        summary: 'A multi-agent virtual research team.',
+        journal: 'Preprint',
+        source: 'openalex'
+      }
+    ];
+    const latex = convertToLatex(makeOutline(), makeFinalSurvey(), papers);
+
+    expect(latex).toContain('Vladimir Naumov');
+    expect(latex).not.toContain('\\bibitem{ref1} , Diana Zagirova');
+  });
+
   it('escapes special LaTeX characters', () => {
     const outline = makeOutline();
-    outline.abstractDraft = 'Testing 100% accuracy & special chars like $10 cost.';
-    const latex = convertToLatex(outline, makeFinalSurvey(), makePapers());
+    const finalSurvey = makeFinalSurvey();
+    finalSurvey.markdown = finalSurvey.markdown.replace(
+      'This survey examines AI agents designed for scientific research tasks.',
+      'Testing 100% accuracy & special chars like $10 cost.'
+    );
+    const latex = convertToLatex(outline, finalSurvey, makePapers());
 
     expect(latex).toContain('100\\%');
     expect(latex).toContain('\\&');

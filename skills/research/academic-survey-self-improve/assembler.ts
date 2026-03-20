@@ -412,19 +412,20 @@ Requirements:
 - 600-1000 words (this is a substantial section, NOT a brief paragraph)
 - Structure the introduction as follows:
 
-(a) **Background** (1-2 paragraphs): Motivate the topic — why is it important now? What recent developments make this survey timely? Describe the broader context and practical significance.
+### Background (1-2 paragraphs): Motivate the topic — why is it important now? What recent developments make this survey timely? Describe the broader context and practical significance.
 
-(b) **Motivation and Gaps** (1 paragraph): What gaps exist in the current literature? Why is a new survey needed? What does this survey offer that prior surveys do not?
+### Motivation and Gaps (1 paragraph): What gaps exist in the current literature? Why is a new survey needed? What does this survey offer that prior surveys do not?
 
-(c) **Contributions** (bulleted list): State 3-5 specific contributions of this survey. Use a bulleted list format:
+### Contributions (bulleted list): State 3-5 specific contributions of this survey. Use a bulleted list format:
 - We provide a comprehensive taxonomy of ...
 - We systematically compare ...
 - We identify key open challenges ...
 
-(d) **Section Roadmap** (1 paragraph): Describe the organization. "The remainder of this survey is organized as follows. Section 2 covers..., Section 3 examines..., ..." Map each section number to its title and a one-sentence description.
+### Section Roadmap (1 paragraph): Describe the organization. "The remainder of this survey is organized as follows. Section 2 covers..., Section 3 examines..., ..." Map each section number to its title and a one-sentence description.
 
 - Do NOT include citations [N]
 - Do NOT overlap with the abstract — the introduction should complement it
+- Use plain Markdown sub-headings only. Do NOT prefix them with "(a)", "(b)", "1.1", or similar manual labels.
 - Return ONLY the markdown section`;
 
   try {

@@ -30,6 +30,47 @@ export class SessionManager {
     this.loadSessions();
   }
 
+  public appendEvent(sessionId: string, type: string, content: any): number {
+    const db = this.storage.getDb();
+    const payload = content === undefined ? null : JSON.stringify(content);
+    const result = db.prepare(`
+      INSERT INTO session_events (session_id, type, content)
+      VALUES (?, ?, ?)
+    `).run(sessionId, type, payload);
+
+    const id = Number(result.lastInsertRowid);
+    const keep = 5000;
+    db.prepare(`
+      DELETE FROM session_events
+      WHERE session_id = ?
+        AND id < (
+          SELECT id FROM session_events
+          WHERE session_id = ?
+          ORDER BY id DESC
+          LIMIT 1 OFFSET ?
+        )
+    `).run(sessionId, sessionId, keep);
+
+    return id;
+  }
+
+  public getEventsSince(sessionId: string, afterId: number, limit: number = 1000): Array<{ id: number; type: string; content: any }> {
+    const db = this.storage.getDb();
+    const rows = db.prepare(`
+      SELECT id, type, content
+      FROM session_events
+      WHERE session_id = ? AND id > ?
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(sessionId, afterId, limit) as any[];
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      type: String(row.type),
+      content: row.content ? JSON.parse(row.content) : undefined
+    }));
+  }
+
   private loadSessions() {
     try {
       const db = this.storage.getDb();
@@ -260,6 +301,33 @@ export class SessionManager {
     } catch (e) {
         console.error('Failed to delete session from DB:', e);
     }
+  }
+
+  public deleteAllSessions(userId: string): { deleted: number; sessionIds: string[] } {
+    const sessionIds = this.getUserSessions(userId).map(s => s.id);
+    const deleted = sessionIds.length;
+
+    if (deleted === 0) {
+      return { deleted: 0, sessionIds: [] };
+    }
+
+    for (const id of sessionIds) {
+      this.sessions.delete(id);
+    }
+    this.activeSessions.delete(userId);
+
+    try {
+      const db = this.storage.getDb();
+      const tx = db.transaction(() => {
+        db.prepare('DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ?)').run(userId);
+        db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+      });
+      tx();
+    } catch (e) {
+      console.error('Failed to delete all sessions from DB:', e);
+    }
+
+    return { deleted, sessionIds };
   }
 
   public stopSession(sessionId: string) {

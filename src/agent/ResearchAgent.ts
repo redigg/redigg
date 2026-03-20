@@ -8,8 +8,10 @@ import { CronManager } from '../scheduling/CronManager.js';
 import { EventManager } from '../events/EventManager.js';
 import { QualityManager } from '../quality/QualityManager.js';
 import { createLogger } from '../utils/logger.js';
+import { clampInt, withTimeout } from '../utils/concurrency.js';
 import { buildChatGraph } from './graph/chatGraph.js';
 import { runPlan } from './execution/planRunner.js';
+import { resolveToolToSkillId } from './execution/toolRouter.js';
 import type { AgentProgressHandler } from '../protocol/progress.js';
 import { ensureSessionWorkspace } from '../workspace/sessionWorkspace.js';
 import AcademicSurveySelfImproveSkill from '../../skills/research/academic-survey-self-improve/index.js';
@@ -143,19 +145,44 @@ export class ResearchAgent {
       });
   }
 
+  private heartbeatRunInFlight = false;
+  private heartbeatRunQueued = false;
+  private heartbeatRunTimer: NodeJS.Timeout | null = null;
+
+  private queueHeartbeatRun() {
+    if (process.env.NODE_ENV === 'test') return;
+    this.heartbeatRunQueued = true;
+    if (this.heartbeatRunTimer) return;
+
+    this.heartbeatRunTimer = setTimeout(() => {
+      this.heartbeatRunTimer = null;
+      void this.runHeartbeatLoop();
+    }, 0);
+  }
+
+  private async runHeartbeatLoop() {
+    if (this.heartbeatRunInFlight) return;
+    this.heartbeatRunInFlight = true;
+
+    try {
+      while (this.heartbeatRunQueued) {
+        this.heartbeatRunQueued = false;
+        await this.heartbeat();
+      }
+    } finally {
+      this.heartbeatRunInFlight = false;
+    }
+  }
+
   public async start() {
-    logger.info('Starting heartbeat...');
-    this.heartbeatInterval = setInterval(() => this.heartbeat(), 60000); // Every minute
-    
-    // Initial check on start
-    this.heartbeat().catch(e => logger.error('Initial heartbeat failed:', e));
+    logger.info('Agent started. Heartbeat will run after each chat.');
   }
 
   public stop() {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
-      logger.info('Stopped heartbeat.');
+      logger.info('Stopped heartbeat interval.');
     }
   }
 
@@ -276,6 +303,8 @@ export class ResearchAgent {
         if (!this.sessionManager.isSessionStopped(session.id)) {
             this.sessionManager.setSessionStatus(session.id, 'active');
         }
+
+        this.queueHeartbeatRun();
     }
   }
 
@@ -286,33 +315,47 @@ export class ResearchAgent {
       onProgress?: AgentProgressHandler
   ): Promise<{ intent: string, steps: any[] }> {
       const startTime = Date.now();
+      const prefersChinese = /[\u4e00-\u9fff]/.test(message);
+
+      onProgress?.('segment', {
+        id: 'planning',
+        type: 'thinking',
+        title: 'Planning',
+        status: 'active'
+      });
+      const skillCatalog = this.skillManager.getAllSkills()
+        .map((skill) => ({
+          id: skill.id,
+          name: skill.name,
+          description: skill.description,
+          tags: Array.isArray(skill.tags) ? skill.tags : []
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id));
+
+      const skillCatalogText = skillCatalog
+        .map((s) => `- ${s.id}: ${s.description || s.name}${s.tags.includes('declarative') ? ' (declarative)' : ''}`)
+        .join('\n');
       const prompt = `
 You are a planning engine for a research agent.
 User Request: "${message}"
 Force Auto Mode: ${forceAuto}
 
-Available Tools:
-- LiteratureReview(topic): Search for papers/web.
-- PaperAnalysis(title): Analyze a specific paper in depth.
-- ConceptExplainer(concept): Explain a scientific concept.
-- PdfGenerator(title, content): Generate a PDF report.
-- CodeAnalysis(path): Analyze project structure/code.
-- MemorySearch(query): Search past memories.
-- FileOps(operation): Organize files.
-- AgentOrchestration(operation): Create/manage sub-agents.
-- Evolution(intent): Create new skills.
-- AutoResearch(topic, iterations): Continuously optimize and improve a research report in a loop.
-- Chat(message): Reply to user (final step).
+Built-in Tools:
+- AutoResearch: Continuously optimize and improve a report in a loop.
+- Chat: Reply to user (final step).
+
+Executable Skills (tool name should be EXACTLY the skill id):
+${skillCatalogText}
 
 Return a JSON plan:
 {
   "intent": "single" | "multi_step",
   "steps": [
-    { 
-      "id": "1", 
-      "description": "Concise action description", 
-      "tool": "ToolName", 
-      "params": { ... } 
+    {
+      "id": "1",
+      "description": "Concise action description",
+      "tool": "AutoResearch" | "Chat" | "<skill_id>",
+      "params": { }
     }
   ]
 }
@@ -324,25 +367,13 @@ Rules:
 4. If the user wants to test PDF generation directly or asks for a PDF without confirmation, just generate it.
 `;
       try {
-          let fullContent = '';
-          if (this.llm.chatStream && onProgress) {
-              await this.llm.chatStream([{ role: 'user', content: prompt }], {
-                  onThinking: (token) => {
-                      onProgress('thinking', token);
-                  },
-                  onToken: (token) => {
-                      fullContent += token;
-                      // We can choose to show planning process as thinking too, 
-                      // or just show it as logs. For now, showing as thinking is good.
-                      onProgress('thinking', token);
-                  }
-              });
-          } else {
-              const response = await this.llm.chat([{ role: 'user', content: prompt }]);
-              fullContent = response.content;
-              // Call onProgress even in fallback to show something
-              onProgress?.('thinking', fullContent);
-          }
+          onProgress?.('token', prefersChinese
+            ? '我先明确任务目标，并拆成可执行的步骤，然后边做边补充信息。\n\n'
+            : "I'll clarify the goal, break it into executable steps, and iterate between searching and synthesizing.\n\n"
+          );
+
+          const response = await this.llm.chat([{ role: 'user', content: prompt }]);
+          const fullContent = response.content;
           
           // Log stats
           const duration = Date.now() - startTime;
@@ -356,9 +387,25 @@ Rules:
               text = text.replace(/^```(json)?/, '').replace(/```$/, '');
           }
           const plan = JSON.parse(text);
+          onProgress?.('token', prefersChinese ? '计划已生成，开始执行。\n\n' : 'Plan ready. Starting execution.\n\n');
+
+          onProgress?.('segment', {
+            id: 'planning',
+            type: 'thinking',
+            title: 'Planning',
+            status: 'completed'
+          });
           return forceAuto ? this.normalizeAutoResearchPlan(plan, message) : plan;
       } catch (e) {
           logger.error('Planning failed:', e);
+
+          onProgress?.('segment', {
+            id: 'planning',
+            type: 'thinking',
+            title: 'Planning',
+            status: 'error',
+            error: String(e)
+          });
           return { intent: 'single', steps: [] };
       }
   }
@@ -409,20 +456,47 @@ Rules:
 
       const skillHandlers = {
           onLog: (type: string, content: string) => {
-              if (type === 'thinking' && sendStepThinking) {
-                  sendStepThinking(step.id, content);
-              } else {
-                  log(`[Skill:${step.tool}] ${content}`);
+              if (type === 'thinking') {
+                  if (process.env.SHOW_THINKING === 'true' && sendStepThinking) {
+                      sendStepThinking(step.id, content);
+                  }
+                  return;
               }
+
+              if (type === 'action') {
+                  if (!content.startsWith('- ')) {
+                      onProgress?.('token', `${content}\n`);
+                      return;
+                  }
+              }
+
+              log(`[Skill:${step.tool}] ${content}`);
           },
           onProgress: async (progress: number, description: string, metadata?: any) => {
-               log(`[Skill Progress] ${progress}% - ${description}`, metadata);
+               if (metadata && typeof metadata.chat === 'string' && metadata.chat.trim()) {
+                   onProgress?.('token', `\n\n${metadata.chat.trim()}\n`);
+               }
+
+               if (metadata && Array.isArray(metadata.todos)) {
+                   for (const todo of metadata.todos) {
+                       if (todo && typeof todo.id === 'string') {
+                           onProgress?.('todo', todo);
+                       }
+                   }
+               }
+
+               if (metadata && metadata.silentStepProgress) {
+                   return;
+               }
+
+               log(`[Skill] ${description}`, metadata);
+
                // Update the step in UI
-               onProgress?.('todo', { 
-                   id: step.id, 
-                   status: 'in_progress', 
-                   content: `${step.description} (${progress}%)`,
-                   metadata: metadata 
+               onProgress?.('todo', {
+                   id: step.id,
+                   status: 'in_progress',
+                   content: `${step.description}: ${description}`,
+                   metadata: metadata
                });
           }
       };
@@ -485,6 +559,8 @@ Rules:
               })();
 
               const shouldDelay = !(process.env.NODE_ENV === 'test' || process.env.VITEST === 'true');
+              const actionTimeoutMs = clampInt(process.env.AUTO_RESEARCH_ACTION_TIMEOUT_MS, 2000, 600000, 60000);
+              const pdfEvery = clampInt(process.env.AUTO_RESEARCH_PDF_EVERY, 0, 50, 1);
               const maxRounds = parsedIterations;
               log(
                 maxRounds
@@ -525,17 +601,14 @@ Return ONLY the improvement task description.
                   let improvementTask = '';
                   if (this.llm.chatStream && sendStepThinking) {
                       sendStepThinking(step.id, `\n\n> **Round ${round} Improvement Planning**\n`);
+                      onProgress?.('token', `\n\n第 ${round} 轮：先确定一个最关键的改进点。\n`);
                       await this.llm.chatStream([{ role: 'user', content: improvePrompt }], {
-                          onThinking: (token) => {
-                              sendStepThinking(step.id, token);
-                          },
                           onToken: (token) => {
                               improvementTask += token;
-                              sendStepThinking(step.id, token);
                           }
-                      });
+                      }, { timeoutMs: actionTimeoutMs });
                   } else {
-                      const planRes = await this.llm.chat([{ role: 'user', content: improvePrompt }]);
+                      const planRes = await this.llm.chat([{ role: 'user', content: improvePrompt }], { timeoutMs: actionTimeoutMs });
                       improvementTask = planRes.content.trim();
                   }
                   
@@ -560,29 +633,34 @@ Action: Perform the task and rewrite the FULL content to include the new informa
 `;
                   let refinedContent = '';
                   if (this.llm.chatStream && sendStepThinking) {
-                       sendStepThinking(step.id, `\n\n> **Executing Improvement: ${improvementTask}**\n`);
+                       onProgress?.('token', `\n\n第 ${round} 轮改进点：${improvementTask.trim()}\n`);
+                       onProgress?.('token', `开始应用改进并重写相关内容。\n`);
                        await this.llm.chatStream([{ role: 'user', content: refinePrompt }], {
-                           onThinking: (token) => {
-                               sendStepThinking(step.id, token);
-                           },
-                           onToken: (token) => {
-                               refinedContent += token;
-                               sendStepThinking(step.id, token);
-                           }
-                       });
+                            onToken: (token) => {
+                                refinedContent += token;
+                            }
+                       }, { timeoutMs: actionTimeoutMs });
                   } else {
-                       const refineRes = await this.llm.chat([{ role: 'user', content: refinePrompt }]);
+                       const refineRes = await this.llm.chat([{ role: 'user', content: refinePrompt }], { timeoutMs: actionTimeoutMs });
                        refinedContent = refineRes.content;
                   }
 
                   currentContent = refinedContent;
+
+                  onProgress?.('token', `第 ${round} 轮完成。\n`);
                   
                   // 3. Generate Intermediate PDF
                   const title = `${topic} - v${round}`;
-                  log(`[AutoResearch] Generating PDF version ${round}...`);
-                  const pdfRes = await this.skillManager.executeSkill('pdf_generator', userId, { title, content: currentContent, sessionId: session.id }, skillHandlers);
+                  const shouldGeneratePdf = pdfEvery > 0 ? (round % pdfEvery === 0) : false;
+                  const pdfRes = shouldGeneratePdf
+                    ? await withTimeout(
+                        this.skillManager.executeSkill('pdf_generator', userId, { title, content: currentContent, sessionId: session.id }, skillHandlers),
+                        actionTimeoutMs,
+                        async () => ({ success: false } as any)
+                      )
+                    : null;
                   
-                  if (pdfRes.url && pdfRes.file_path) {
+                  if (pdfRes && pdfRes.url && pdfRes.file_path) {
                        const url = pdfRes.url.startsWith('/') ? pdfRes.url : `/${pdfRes.url}`;
                        const artifact = {
                            id: `file-${Date.now()}`,
@@ -632,9 +710,6 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
 
               if (this.llm.chatStream && onProgress) {
                   await this.llm.chatStream(messages as any, {
-                      onThinking: (token) => {
-                          onProgress('thinking', token);
-                      },
                       onToken: (token) => {
                           reply += token;
                           onProgress('token', token);
@@ -655,7 +730,18 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
               break;
           }
           default:
-              throw new Error(`Unknown tool: ${step.tool}`);
+              {
+                  const skillId = resolveToolToSkillId(this.skillManager, String(step.tool || ''));
+                  if (skillId) {
+                      const result = await this.skillManager.executeSkill(skillId, userId, step.params || {}, skillHandlers);
+                      output =
+                        typeof result === 'string'
+                          ? result
+                          : String((result as any).formatted_output || (result as any).summary || (result as any).message || JSON.stringify(result));
+                      break;
+                  }
+                  throw new Error(`Unknown tool: ${step.tool}`);
+              }
       }
 
       return { output, artifacts, usage };
@@ -720,21 +806,58 @@ IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
   ): Promise<string> {
       log(`[AutoResearch] Building initial survey draft with academic_survey_self_improve...`);
 
+      const actionTimeoutMs = clampInt(process.env.AUTO_RESEARCH_ACTION_TIMEOUT_MS, 2000, 600000, 60000);
+      const useCache = process.env.AUTO_RESEARCH_USE_CACHE === 'false' ? false : true;
+      const performance = {
+        parallelism: {
+          queryConcurrency: clampInt(process.env.AUTO_RESEARCH_QUERY_CONCURRENCY, 1, 6, 3),
+          snowballConcurrency: clampInt(process.env.AUTO_RESEARCH_SNOWBALL_CONCURRENCY, 1, 4, 2),
+          sectionWriteConcurrency: clampInt(process.env.AUTO_RESEARCH_WRITE_CONCURRENCY, 1, 6, 3),
+          sectionReviewConcurrency: clampInt(process.env.AUTO_RESEARCH_REVIEW_CONCURRENCY, 1, 6, 2),
+          figureConcurrency: clampInt(process.env.AUTO_RESEARCH_FIGURE_CONCURRENCY, 1, 4, 2)
+        },
+        timeouts: {
+          queryTimeoutMs: clampInt(process.env.AUTO_RESEARCH_QUERY_TIMEOUT_MS, 2000, 120000, actionTimeoutMs),
+          llmTimeoutMs: clampInt(process.env.AUTO_RESEARCH_LLM_TIMEOUT_MS, 2000, 240000, actionTimeoutMs),
+          llmRewriteTimeoutMs: clampInt(process.env.AUTO_RESEARCH_LLM_REWRITE_TIMEOUT_MS, 2000, 300000, actionTimeoutMs * 2),
+          snowballTimeoutMs: clampInt(process.env.AUTO_RESEARCH_SNOWBALL_TIMEOUT_MS, 2000, 120000, actionTimeoutMs)
+        }
+      };
+
       try {
           const result = await this.skillManager.executeSkill(
               'academic_survey_self_improve',
               userId,
-              { topic, depth: 'standard' },
+              { topic, depth: 'standard', useCache, performance },
               {
                   onLog: (type: any, content: string) => {
-                      if (type === 'thinking' && onThinking) {
-                          onThinking(content);
+                      if (type === 'thinking') {
+                          if (process.env.SHOW_THINKING === 'true' && onThinking) {
+                              onThinking(content);
+                          }
+                          return;
                       } else {
                           log(`[AutoResearch][Seed] ${content}`);
                       }
                   },
                   onProgress: async (progress: number, description: string, metadata?: any) => {
-                      log(`[AutoResearch][Seed] ${progress}% - ${description}`, metadata);
+                      if (metadata && typeof metadata.chat === 'string' && metadata.chat.trim()) {
+                          onProgress?.('token', `\n\n${metadata.chat.trim()}\n`);
+                      }
+
+                      if (metadata && Array.isArray(metadata.todos)) {
+                          for (const todo of metadata.todos) {
+                              if (todo && typeof todo.id === 'string') {
+                                  onProgress?.('todo', todo);
+                              }
+                          }
+                      }
+
+                      if (metadata && metadata.silentStepProgress) {
+                          return;
+                      }
+
+                      log(`[AutoResearch][Seed] ${description}`, metadata);
                   },
                   onTodo: async (content: string, priority: string) => {
                       onProgress?.('todo', {
@@ -1059,9 +1182,6 @@ Instructions:
             { role: 'system', content: systemPrompt },
             { role: 'user', content: message }
         ], {
-            onThinking: (token) => {
-                onProgress('thinking', token);
-            },
             onToken: (token) => {
                 reply += token;
                 onProgress('token', token);
@@ -1153,14 +1273,34 @@ Title:`;
         { topic },
         {
             onLog: (type, content) => {
-                if (type === 'thinking' && onThinking) {
-                    onThinking(content);
+                if (type === 'thinking') {
+                    if (process.env.SHOW_THINKING === 'true' && onThinking) {
+                        onThinking(content);
+                    }
+                    return;
                 } else {
                     log(`[Skill] ${content}`);
                 }
             },
             onProgress: async (progress, description, metadata) => {
-                 log(`[Skill Progress] ${progress}% - ${description}`, metadata);
+                 if (metadata && typeof metadata.chat === 'string' && metadata.chat.trim()) {
+                     onProgress?.('token', `\n\n${metadata.chat.trim()}\n`);
+                 }
+
+                 log(`[Skill] ${description}`, metadata);
+
+                 if (metadata && Array.isArray(metadata.todos)) {
+                     for (const todo of metadata.todos) {
+                         if (todo && typeof todo.id === 'string') {
+                             onProgress?.('todo', todo);
+                         }
+                     }
+                 }
+
+                 if (metadata && metadata.silentStepProgress) {
+                     return;
+                 }
+
                  if (metadata && metadata.papers) {
                      // Emit todo/progress update for UI
                      onProgress?.('todo', { 

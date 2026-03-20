@@ -53,6 +53,17 @@ export async function runPlan(args: {
     step.status = 'in_progress';
     sendPlan({ steps: plan.steps });
 
+    onProgress?.('segment', {
+      id: String(step.id || `${step.tool}:${step.description}`),
+      type: step.tool === 'Chat' ? 'chat' : 'action',
+      title: String(step.description || step.tool || 'Step'),
+      status: 'active'
+    });
+
+    if (step.tool && step.tool !== 'Chat') {
+      onProgress?.('token', `\n\n${step.description}\n`);
+    }
+
     let retryCount = 0;
     const maxRetries = 2;
     let success = false;
@@ -94,6 +105,17 @@ export async function runPlan(args: {
         step.result = result.output;
         success = true;
 
+        onProgress?.('segment', {
+          id: String(step.id || `${step.tool}:${step.description}`),
+          type: step.tool === 'Chat' ? 'chat' : 'action',
+          title: String(step.description || step.tool || 'Step'),
+          status: 'completed'
+        });
+
+        if (step.tool && step.tool !== 'Chat') {
+          onProgress?.('token', `\n${step.description}：完成。\n`);
+        }
+
         if (step.tool === 'Chat') {
           reply = result.output;
         }
@@ -107,6 +129,14 @@ export async function runPlan(args: {
           step.status = 'failed';
           step.error = errorMsg;
           log(`[Error] Step failed permanently: ${step.description}`, { duration });
+
+          onProgress?.('segment', {
+            id: String(step.id || `${step.tool}:${step.description}`),
+            type: step.tool === 'Chat' ? 'chat' : 'action',
+            title: String(step.description || step.tool || 'Step'),
+            status: 'error',
+            error: errorMsg
+          });
         } else {
           log(`[Warning] Step failed, retrying... (${errorMsg})`, { duration });
           await new Promise(resolve => setTimeout(resolve, 1000));

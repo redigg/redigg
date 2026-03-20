@@ -37,6 +37,7 @@ interface ChatMessage {
   thinking?: string;
   logs?: string[];
   todos?: any[];
+  segments?: any[];
   attachments?: any[];
   timestamp: Date;
   stats?: {
@@ -87,6 +88,7 @@ interface Config {
 function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [inputFocusNonce, setInputFocusNonce] = useState(0);
   const [isConnecting, setIsConnecting] = useState(false);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [skillPacks, setSkillPacks] = useState<SkillPack[]>([]);
@@ -100,7 +102,21 @@ function App() {
   const [tokenCount, setTokenCount] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'session' | 'memory', id: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'session' | 'memory' | 'all_sessions', id?: string } | null>(null);
+  const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
+  const [skillPreview, setSkillPreview] = useState<{ skill: Skill; snippet: string } | null>(null);
+
+  const upsertSegment = (list: any[] = [], next: any) => {
+    const id = String(next?.id || '');
+    if (!id) return list;
+    const idx = list.findIndex((s) => String(s?.id || '') === id);
+    if (idx >= 0) {
+      const copy = list.slice();
+      copy[idx] = { ...copy[idx], ...next };
+      return copy;
+    }
+    return [...list, next];
+  };
   const [uiLang, setUiLang] = useState<'en' | 'zh'>(() => {
     try {
       const stored = localStorage.getItem('uiLang');
@@ -142,6 +158,8 @@ function App() {
         deleteDescMemory: '此操作不可撤销，将永久删除该记忆。',
         cancel: '取消',
         delete: '删除',
+        clearAllChats: '清空全部聊天',
+        clearAllChatsDesc: '此操作不可撤销，将永久删除所有会话。',
         homeTitle: '我可以如何帮助你？',
         homeSubtitle: '从下面的示例开始吧。',
         examples: {
@@ -182,6 +200,8 @@ function App() {
         deleteDescMemory: 'This action cannot be undone. This will permanently delete the memory item.',
         cancel: 'Cancel',
         delete: 'Delete',
+        clearAllChats: 'Clear Chats',
+        clearAllChatsDesc: 'This action cannot be undone. This will permanently delete all chat sessions.',
         homeTitle: 'How can I help you research?',
         homeSubtitle: 'Try one of these examples to get started.',
         examples: {
@@ -312,6 +332,20 @@ function App() {
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
   }, []);
+
+  const buildSkillSnippet = (skill: Skill) => {
+    if (skill.id === 'literature_review') {
+      return 'Conduct a literature review on: <topic>';
+    }
+    if (skill.id === 'code_analysis') {
+      return 'Analyze the codebase structure. Focus on: <area>';
+    }
+    if (skill.id === 'local_file_ops') {
+      return 'Help me organize my local files. specifically: <goal>';
+    }
+
+    return `Use the ${skill.id} skill to help me with: <your request>`;
+  };
 
   useEffect(() => {
     // Auto-scroll if enabled
@@ -519,6 +553,7 @@ function App() {
                               content: '',
                               logs: [],
                               todos: steps,
+                          segments: [],
                               timestamp: new Date(msg.timestamp)
                           };
                           reconstructedMessages.push(placeholder);
@@ -550,6 +585,7 @@ function App() {
                           role: 'agent',
                           content: '',
                           logs: [msg.content],
+                          segments: [],
                           timestamp: new Date(msg.timestamp)
                       };
                       reconstructedMessages.push(placeholder);
@@ -631,8 +667,10 @@ function App() {
       }
       
       setIsConnecting(true);
+
+      const lastEventId = window.localStorage.getItem(`redigg:lastEventId:${sessionId}`) || '0';
       
-      const eventSource = new EventSource(`/api/sessions/${sessionId}/events`);
+      const eventSource = new EventSource(`/api/sessions/${sessionId}/events?since=${encodeURIComponent(lastEventId)}`);
       
       abortControllerRef.current = {
           abort: () => {
@@ -642,6 +680,9 @@ function App() {
 
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        if (event.lastEventId) {
+          window.localStorage.setItem(`redigg:lastEventId:${sessionId}`, event.lastEventId);
+        }
         // ... (reuse the logic from handleSend? Refactor needed)
         // For now, let's copy the logic or extract it.
         handleSSEMessage(data, sessionId);
@@ -747,6 +788,18 @@ function App() {
               const newMsg = { ...lastMsg, todos: [...existingTodos, todoItem] };
               return [...prev.slice(0, lastIdx), newMsg];
           });
+        } else if (data.type === 'segment') {
+          const seg = data.content;
+          if (!seg || !seg.id) return;
+          setMessages(prev => {
+            const lastIdx = prev.length - 1;
+            const lastMsg = prev[lastIdx];
+            if (lastMsg && lastMsg.role === 'agent') {
+              const newMsg = { ...lastMsg, segments: upsertSegment(lastMsg.segments, seg) };
+              return [...prev.slice(0, lastIdx), newMsg];
+            }
+            return prev;
+          });
         }
 
         // Actually, the `handleSend` SSE logic is complex because it updates specific IDs.
@@ -783,7 +836,16 @@ function App() {
   const confirmDelete = async () => {
     if (!deleteTarget) return;
 
-    if (deleteTarget.type === 'session') {
+    if (deleteTarget.type === 'all_sessions') {
+      try {
+        await fetch(`/api/sessions?userId=web-user`, { method: 'DELETE' });
+        setSessions([]);
+        setMessages([]);
+        setCurrentSessionId(null);
+      } catch (err) {
+        console.error('Failed to delete all sessions:', err);
+      }
+    } else if (deleteTarget.type === 'session') {
       try {
         await fetch(`/api/sessions/${deleteTarget.id}`, { method: 'DELETE' });
         setSessions(prev => prev.filter(s => s.id !== deleteTarget.id));
@@ -816,6 +878,11 @@ function App() {
   const deleteMemory = (memoryId: string, e: React.MouseEvent) => {
       e.stopPropagation();
       setDeleteTarget({ type: 'memory', id: memoryId });
+      setDeleteDialogOpen(true);
+  };
+
+  const clearAllSessions = () => {
+      setDeleteTarget({ type: 'all_sessions' });
       setDeleteDialogOpen(true);
   };
 
@@ -884,6 +951,7 @@ function App() {
       role: 'agent',
       content: '',
       logs: [],
+      segments: [],
       timestamp: new Date()
     };
     
@@ -925,7 +993,8 @@ function App() {
       setIsConnecting(true); // Keep connecting true during SSE stream
       
       // Start listening to SSE events for this session
-      const eventSource = new EventSource(`/api/sessions/${currentSessionId!}/events`);
+      const lastEventId = window.localStorage.getItem(`redigg:lastEventId:${currentSessionId!}`) || '0';
+      const eventSource = new EventSource(`/api/sessions/${currentSessionId!}/events?since=${encodeURIComponent(lastEventId)}`);
       
       // Store controller for stopping. 
       // Note: EventSource doesn't use AbortController directly, but we can wrap it.
@@ -948,6 +1017,9 @@ function App() {
 
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        if (event.lastEventId) {
+          window.localStorage.setItem(`redigg:lastEventId:${currentSessionId!}`, event.lastEventId);
+        }
         
         if (data.type === 'session_title') {
           const title = data.content?.title;
@@ -1034,6 +1106,13 @@ function App() {
                 }
                 return msg;
             }));
+        } else if (data.type === 'segment') {
+            const seg = data.content;
+            setMessages(prev => prev.map(msg =>
+              msg.id === agentMsgId
+                ? { ...msg, segments: upsertSegment(msg.segments, seg) }
+                : msg
+            ));
         } else if (data.type === 'done') {
           eventSource.close();
           setIsConnecting(false); // Explicitly set connecting to false when done
@@ -1084,8 +1163,11 @@ function App() {
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" onClick={createNewSession} className="h-8 w-8 text-zinc-500 hover:text-indigo-600">
+            <Button variant="ghost" size="icon" onClick={createNewSession} className="h-8 w-8 text-zinc-500 hover:text-indigo-600" title={t.newChat}>
                 <Plus className="h-5 w-5" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={clearAllSessions} className="h-8 w-8 text-zinc-400 hover:text-red-600" title={t.clearAllChats}>
+                <Trash2 className="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(false)} className="h-8 w-8 text-zinc-400 hover:text-zinc-600 md:flex hidden">
                 <PanelLeftClose className="h-4 w-4" />
@@ -1230,15 +1312,9 @@ function App() {
                                             key={skill.id} 
                                             className="w-full text-left p-3 rounded-lg border border-zinc-100 bg-white hover:border-indigo-200 hover:shadow-sm transition-all group animate-in slide-in-from-bottom-2 duration-300 fill-mode-backwards"
                                             onClick={() => {
-                                               if (skill.id === 'literature_review') {
-                                                   setInput("Conduct a literature review on: ");
-                                               } else if (skill.id === 'code_analysis') {
-                                                   setInput("Analyze the codebase structure. Focus on: ");
-                                               } else if (skill.id === 'local_file_ops') {
-                                                   setInput("Help me organize my local files. specifically: ");
-                                               } else {
-                                                   setInput(`Use the ${skill.name} skill to help me with: `);
-                                               }
+                                               const snippet = buildSkillSnippet(skill);
+                                               setSkillPreview({ skill, snippet });
+                                               setSkillPreviewOpen(true);
                                             }}
                                           >
                                             <div className="flex items-center gap-2 font-medium text-zinc-900 group-hover:text-indigo-600 transition-colors text-sm">
@@ -1482,12 +1558,62 @@ function App() {
               <AlertDialogHeader>
                 <AlertDialogTitle>{t.deleteTitle}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  {deleteTarget?.type === 'session' ? t.deleteDescSession : t.deleteDescMemory}
+                  {deleteTarget?.type === 'all_sessions'
+                    ? t.clearAllChatsDesc
+                    : deleteTarget?.type === 'session'
+                      ? t.deleteDescSession
+                      : t.deleteDescMemory}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel onClick={() => setDeleteTarget(null)}>{t.cancel}</AlertDialogCancel>
                 <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700 focus:ring-red-600">{t.delete}</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog
+            open={skillPreviewOpen}
+            onOpenChange={(open) => {
+              setSkillPreviewOpen(open);
+              if (!open) {
+                setSkillPreview(null);
+              }
+            }}
+          >
+            <AlertDialogContent className="max-w-2xl">
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {skillPreview ? `${skillPreview.skill.name} (${skillPreview.skill.id})` : 'Skill'}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {skillPreview?.skill.description}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                <pre className="text-xs leading-relaxed text-zinc-800 whitespace-pre-wrap break-words font-mono">
+                  {skillPreview?.snippet || ''}
+                </pre>
+              </div>
+
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t.cancel}</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    if (!skillPreview) return;
+                    setInput((prev) => {
+                      const trimmed = prev.trim();
+                      if (!trimmed) return skillPreview.snippet;
+                      return `${prev}\n\n${skillPreview.snippet}`;
+                    });
+                    setSkillPreviewOpen(false);
+                    setInputFocusNonce((n) => n + 1);
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-600"
+                >
+                  Use
+                </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
@@ -1579,6 +1705,7 @@ function App() {
                     isThinking={msg.role === 'agent' && !msg.content && index === messages.length - 1}
                     logs={msg.logs}
                     todos={msg.todos}
+                    segments={msg.segments}
                     stats={msg.stats}
                     attachments={msg.attachments}
                     onCopy={() => handleCopy(msg.content)}
@@ -1621,6 +1748,7 @@ function App() {
                     placeholder="Ask a question about your research..." 
                     value={input}
                     onChange={setInput}
+                    focusNonce={inputFocusNonce}
                     sessionId={currentSessionId}
                     autoMode={currentAutoMode}
                     onAutoModeChange={handleAutoModeChange}

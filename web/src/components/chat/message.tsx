@@ -1,4 +1,4 @@
-import { User, Sparkles, Copy, RefreshCw, Paperclip, FileText, Code, Search, Circle, Brain, CheckCircle2, Loader2, ListTodo, ChevronDown } from "lucide-react";
+import { User, Sparkles, Copy, RefreshCw, Paperclip, FileText, Code, Search, Circle, Brain, CheckCircle2, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -11,8 +11,7 @@ import { useState } from "react";
 import { CodeBlock, CodeBlockCopyButton } from "@/components/ui/code-block";
 import { type BundledLanguage } from "shiki";
 import { InlineCitation, InlineCitationCard, InlineCitationCardTrigger, InlineCitationCardBody, InlineCitationCarousel, InlineCitationCarouselHeader, InlineCitationCarouselPrev, InlineCitationCarouselNext, InlineCitationCarouselIndex, InlineCitationCarouselContent, InlineCitationCarouselItem, InlineCitationSource } from "@/components/ai-elements/inline-citation";
-import { Reasoning, ReasoningTrigger } from "@/components/ai/reasoning";
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { ChainOfThought, ChainOfThoughtContent, ChainOfThoughtHeader, ChainOfThoughtStep } from "@/components/ai/chain-of-thought";
 
 interface ChatMessageProps {
   role: "user" | "agent";
@@ -21,6 +20,7 @@ interface ChatMessageProps {
   isThinking?: boolean;
   logs?: string[];
   todos?: any[];
+  segments?: any[];
   stats?: {
     duration?: number;
     tokens?: number;
@@ -58,7 +58,72 @@ const parseActivity = (log: string) => {
     return { icon: Circle, label: 'Processing', color: 'text-zinc-400', bg: 'bg-zinc-50', border: 'border-zinc-100' };
 };
 
-export function ChatMessage({ role, content, thinking, isThinking, logs, todos, stats, attachments, onCopy, onRegenerate }: ChatMessageProps) {
+type ActionGroup = {
+  label: string;
+  icon: any;
+  color: string;
+  bg: string;
+  border: string;
+  lines: string[];
+  tokenCount: number;
+};
+
+const groupLogsIntoActions = (logs: string[] = []): ActionGroup[] => {
+  const groups: ActionGroup[] = [];
+
+  for (const raw of logs) {
+    let displayLog = raw;
+    let logStats: any = null;
+    if (raw.includes('__STATS__')) {
+      const parts = raw.split('__STATS__');
+      displayLog = parts[0];
+      try {
+        logStats = JSON.parse(parts[1]);
+      } catch {
+        logStats = null;
+      }
+    }
+
+    const cleaned = displayLog.replace(/\[.*?\]/g, '').trim();
+    if (!cleaned) {
+      continue;
+    }
+
+    const activity = parseActivity(displayLog);
+    if ((activity as any).hidden) {
+      continue;
+    }
+
+    const tokenCount = logStats && typeof logStats.tokens === 'number' ? logStats.tokens : 0;
+    const last = groups[groups.length - 1];
+    if (last && last.label === activity.label) {
+      last.lines.push(cleaned);
+      last.tokenCount += tokenCount;
+      continue;
+    }
+
+    groups.push({
+      label: activity.label,
+      icon: activity.icon,
+      color: activity.color,
+      bg: activity.bg,
+      border: activity.border,
+      lines: [cleaned],
+      tokenCount
+    });
+  }
+
+  return groups;
+};
+
+const renderSegmentStatusIcon = (status: string) => {
+  if (status === 'completed') return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
+  if (status === 'active') return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
+  if (status === 'error') return <Circle className="h-3.5 w-3.5 text-red-500" />;
+  return <Circle className="h-3.5 w-3.5 text-zinc-300" />;
+};
+
+export function ChatMessage({ role, content, thinking, isThinking, logs, todos, segments, stats, attachments, onCopy, onRegenerate }: ChatMessageProps) {
     // State for copy feedback
     const [isCopied, setIsCopied] = useState(false);
 
@@ -111,156 +176,115 @@ export function ChatMessage({ role, content, thinking, isThinking, logs, todos, 
             </div>
           ) : (
             <>
-                {/* Plan & Todo List */}
-                {todos && todos.length > 0 && (
-                    <div className="mb-4 bg-white border border-zinc-200 rounded-lg overflow-hidden shadow-sm w-full max-w-md">
-                        <div className="bg-zinc-50/50 px-3 py-2 border-b border-zinc-100 flex items-center gap-2">
-                            <ListTodo className="h-3.5 w-3.5 text-indigo-500" />
-                            <span className="text-xs font-semibold text-zinc-700">Plan & Progress</span>
-                        </div>
-                        <div className="p-2 space-y-1">
-                            {todos.map((todo, i) => (
-                                <Collapsible key={todo.id || i} className="group w-full">
-                                    <div className="flex items-start gap-2 p-1.5 rounded-md hover:bg-zinc-50 transition-colors">
-                                        <div className="mt-0.5 shrink-0">
-                                            {todo.status === 'completed' ? (
-                                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                                            ) : todo.status === 'in_progress' ? (
-                                                <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />
-                                            ) : todo.status === 'failed' ? (
-                                                <CheckCircle2 className="h-3.5 w-3.5 text-red-500 fill-red-100" />
-                                            ) : (
-                                                <Circle className="h-3.5 w-3.5 text-zinc-300" />
-                                            )}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between gap-2">
-                                                <div className={cn("text-xs font-medium leading-snug", 
-                                                    todo.status === 'completed' ? "text-zinc-500 line-through decoration-zinc-300" : "text-zinc-800"
-                                                )}>
-                                                    {todo.description || todo.content}
-                                                </div>
-                                                {todo.thinking && (
-                                                    <CollapsibleTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="h-4 w-4 p-0 text-zinc-400 hover:text-indigo-500">
-                                                            <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[state=open]:rotate-180" />
-                                                        </Button>
-                                                    </CollapsibleTrigger>
-                                                )}
-                                            </div>
+                {thinking || (todos && todos.length > 0) || (segments && segments.length > 0) || (logs && logs.length > 0) ? (
+                  <div className="mb-4 w-full max-w-md">
+                    <ChainOfThought
+                      defaultOpen={Boolean(
+                        isThinking ||
+                          (segments || []).some((s: any) => String(s?.status || '') === 'active')
+                      )}
+                    >
+                      <ChainOfThoughtHeader>Chain of Thought</ChainOfThoughtHeader>
+                      <ChainOfThoughtContent>
+                        {thinking && (
+                          <ChainOfThoughtStep
+                            icon={Brain}
+                            label="Thinking"
+                            status={isThinking ? 'active' : 'complete'}
+                          >
+                            <div className="prose prose-zinc prose-sm max-w-none dark:prose-invert prose-p:leading-relaxed">
+                              <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                                {thinking}
+                              </ReactMarkdown>
+                            </div>
+                          </ChainOfThoughtStep>
+                        )}
 
-                                            {/* Show metadata like paper count */}
-                                            {todo.metadata && todo.metadata.papers && (
-                                                <div className="mt-1.5 flex flex-col gap-1">
-                                                    {todo.metadata.papers.slice(0, 3).map((p: any, idx: number) => (
-                                                        <a key={idx} href={p.url || '#'} target="_blank" rel="noopener noreferrer" 
-                                                           className="flex items-center gap-1.5 text-[10px] text-blue-600 hover:underline truncate bg-blue-50/50 px-1.5 py-0.5 rounded border border-blue-100/50 hover:bg-blue-50 w-fit max-w-full">
-                                                            <FileText className="h-3 w-3 shrink-0 opacity-70" />
-                                                            <span className="truncate">{p.title}</span>
-                                                        </a>
-                                                    ))}
-                                                    {todo.metadata.papers.length > 3 && (
-                                                        <span className="text-[10px] text-zinc-400 px-1 italic">+{todo.metadata.papers.length - 3} more papers found...</span>
-                                                    )}
-                                                </div>
-                                            )}
+                        {(() => {
+                          const segById = new Map<string, any>();
+                          for (const s of segments || []) {
+                            const id = String((s as any)?.id || '');
+                            if (!id) continue;
+                            segById.set(id, s);
+                          }
 
-                                            {todo.thinking && (
-                                                <CollapsibleContent className="mt-2 text-[11px] text-zinc-500 italic bg-zinc-50/50 p-2 rounded border border-zinc-100/50 overflow-hidden data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-200">
-                                                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
-                                                        {todo.thinking}
-                                                    </ReactMarkdown>
-                                                </CollapsibleContent>
-                                            )}
-                                        </div>
-                                    </div>
-                                </Collapsible>
-                            ))}
-                        </div>
-                    </div>
-                )}
+                          const todoById = new Map<string, any>();
+                          for (const t of todos || []) {
+                            const id = String((t as any)?.id || '');
+                            if (!id) continue;
+                            todoById.set(id, t);
+                          }
 
-                { (thinking || (logs && logs.length > 0)) && (
-                    <div className="mb-4">
-                        <Reasoning 
-                            isStreaming={isThinking || (isThinking && !!thinking)} 
-                            duration={stats?.duration ? Math.round(stats.duration / 1000) : undefined}
-                        >
-                            <ReasoningTrigger className="w-fit" />
-                            <CollapsibleContent className="mt-4 space-y-4">
-                                {thinking && (
-                                    <div className="text-sm text-muted-foreground italic outline-none border-b border-zinc-100 pb-4 mb-2">
-                                        <ReactMarkdown 
-                                            remarkPlugins={[remarkGfm, remarkBreaks]} 
-                                        >
-                                            {thinking}
-                                        </ReactMarkdown>
-                                    </div>
+                          const ids = Array.from(new Set([...segById.keys(), ...todoById.keys()]));
+                          return ids.map((id) => {
+                            const seg = segById.get(id);
+                            const todo = todoById.get(id);
+
+                            const segStatus = String(seg?.status || '');
+                            const todoStatus = String(todo?.status || '');
+                            const status = segStatus === 'active' || todoStatus === 'in_progress'
+                              ? 'active'
+                              : todoStatus === 'pending'
+                                ? 'pending'
+                                : 'complete';
+                            const isError = segStatus === 'error' || todoStatus === 'failed';
+                            const label = String(seg?.title || todo?.description || todo?.content || id);
+                            const thought = String(todo?.thinking || '');
+
+                            return (
+                              <ChainOfThoughtStep
+                                key={id}
+                                icon={String(seg?.type || '') === 'thinking' ? Brain : undefined}
+                                label={label}
+                                status={status as any}
+                                className={cn(isError ? 'text-red-600' : undefined)}
+                              >
+                                {isError && seg?.error && (
+                                  <div className="text-xs text-red-600 break-words">{String(seg.error)}</div>
                                 )}
-                                <div className="space-y-2 pl-2 border-l-2 border-zinc-100 ml-2">
-                                    {logs?.map((log, i) => {
-                                    // Parse stats if available
-                                    let displayLog = log;
-                                    let logStats = null;
-                                    if (log.includes('__STATS__')) {
-                                        const parts = log.split('__STATS__');
-                                        displayLog = parts[0];
-                                        try {
-                                            logStats = JSON.parse(parts[1]);
-                                        } catch (e) {}
-                                    }
-                                    
-                                    const activity = parseActivity(displayLog);
-                                    if (activity.hidden) return null;
-                                    const ActivityIcon = activity.icon;
+                                {thought && (
+                                  <div className="prose prose-zinc prose-sm max-w-none dark:prose-invert prose-p:leading-relaxed">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                                      {thought}
+                                    </ReactMarkdown>
+                                  </div>
+                                )}
+                              </ChainOfThoughtStep>
+                            );
+                          });
+                        })()}
 
-                                    // Check if this log has tokens
-                                    const tokenCount = (logStats && typeof logStats.tokens === 'number') ? logStats.tokens : 0;
+                        {groupLogsIntoActions(logs || []).map((group, idx, arr) => {
+                          const ActivityIcon = group.icon;
+                          const isActive = Boolean(isThinking && idx === arr.length - 1);
+                          const status = isActive ? 'active' : 'complete';
 
-                                    return (
-                                        <div key={i} className="group flex items-start gap-3 text-xs relative pb-2 last:pb-0">
-                                            <div className={cn(
-                                                "shrink-0 h-5 w-5 rounded-full flex items-center justify-center border shadow-sm z-10 mt-0.5",
-                                                activity.bg, activity.border
-                                            )}>
-                                                <ActivityIcon className={cn("h-2.5 w-2.5", activity.color)} />
-                                            </div>
-                                            
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-baseline justify-between gap-2">
-                                                    <span className="font-medium text-zinc-700">{activity.label}</span>
-                                                    {tokenCount > 0 && (
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-[10px] text-zinc-400 font-mono">
-                                                                {tokenCount} tokens
-                                                            </span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div className="text-zinc-500 mt-0.5 leading-relaxed break-words">
-                                                    {displayLog.replace(/\[.*?\]/g, '').trim()}
-                                                    {/* Check for PDF link in log */}
-                                                    {displayLog.match(/\[Download PDF\]\((.*?)\)/) && (
-                                                        <a 
-                                                            href={displayLog.match(/\[Download PDF\]\((.*?)\)/)?.[1] || '#'} 
-                                                            target="_blank" 
-                                                            rel="noopener noreferrer"
-                                                            className="inline-flex items-center gap-1 ml-2 text-red-600 hover:underline font-medium"
-                                                        >
-                                                            <FileText className="h-3 w-3" />
-                                                            Download PDF
-                                                        </a>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
+                          return (
+                            <ChainOfThoughtStep
+                              key={`${group.label}-${idx}`}
+                              icon={ActivityIcon}
+                              label={group.label}
+                              description={group.lines[0]}
+                              status={status as any}
+                            >
+                              {group.lines.length > 1 && (
+                                <div className="space-y-1">
+                                  {group.lines.slice(1).map((line, lineIdx) => (
+                                    <div key={lineIdx} className="text-xs text-muted-foreground leading-relaxed break-words">
+                                      {line}
+                                    </div>
+                                  ))}
                                 </div>
-                            </CollapsibleContent>
-                        </Reasoning>
-                    </div>
-                )}
+                              )}
+                            </ChainOfThoughtStep>
+                          );
+                        })}
+                      </ChainOfThoughtContent>
+                    </ChainOfThought>
+                  </div>
+                ) : null}
+
+
 
                 <div className="text-left w-full">
                     {/* Auto Mode Badge */}

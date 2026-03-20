@@ -365,10 +365,29 @@ export class A2AGateway {
         }
     });
 
+    this.app.delete('/api/sessions', (req, res) => {
+        const userId = (req.query.userId as string) || 'web-user';
+        try {
+            const { deleted, sessionIds } = this.agent.sessionManager.deleteAllSessions(userId);
+            for (const sessionId of sessionIds) {
+                try {
+                    fs.rmSync(path.join(process.cwd(), 'workspace', 'sessions', sessionId), { recursive: true, force: true });
+                } catch {}
+            }
+            res.json({ success: true, deleted });
+        } catch (error) {
+            logger.error('Delete all sessions error:', error);
+            res.status(500).json({ error: String(error) });
+        }
+    });
+
     this.app.delete('/api/sessions/:sessionId', (req, res) => {
         const { sessionId } = req.params;
         try {
             this.agent.sessionManager.deleteSession(sessionId);
+            try {
+                fs.rmSync(path.join(process.cwd(), 'workspace', 'sessions', sessionId), { recursive: true, force: true });
+            } catch {}
             res.json({ success: true });
         } catch (error) {
             logger.error('Delete session error:', error);
@@ -407,16 +426,33 @@ export class A2AGateway {
             // Logs are now persisted by agent itself to DB, so we don't need to do anything here
             // BUT we want to broadcast via SSE/WebSocket for real-time updates.
             if (sessionId) {
-                sessionEvents.emit(`session:${sessionId}`, { type, content });
+                const shouldPersist = (() => {
+                  if (type === 'segment' || type === 'plan' || type === 'todo' || type === 'stats' || type === 'session_title' || type === 'error') {
+                    return true;
+                  }
+                  if (type === 'token') {
+                    const text = String(content || '');
+                    return text.length <= 400 && text.includes('\n');
+                  }
+                  return false;
+                })();
+
+                const eventId = shouldPersist
+                  ? this.agent.sessionManager.appendEvent(sessionId, type, content)
+                  : null;
+
+                sessionEvents.emit(`session:${sessionId}`, { id: eventId, type, content });
             }
         }, sessionId, { autoMode }).catch(err => {
             logger.error('Async chat error:', err);
             if (sessionId) {
-                sessionEvents.emit(`session:${sessionId}`, { type: 'error', content: String(err) });
+                const eventId = this.agent.sessionManager.appendEvent(sessionId, 'error', String(err));
+                sessionEvents.emit(`session:${sessionId}`, { id: eventId, type: 'error', content: String(err) });
             }
         }).finally(() => {
             if (sessionId) {
-                sessionEvents.emit(`session:${sessionId}`, { type: 'done' });
+                const eventId = this.agent.sessionManager.appendEvent(sessionId, 'done', null);
+                sessionEvents.emit(`session:${sessionId}`, { id: eventId, type: 'done' });
             }
         });
 
@@ -431,7 +467,27 @@ export class A2AGateway {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
 
+        const lastEventIdHeader = req.header('Last-Event-ID');
+        const sinceQuery = typeof req.query.since === 'string' ? req.query.since : undefined;
+        const sinceRaw = sinceQuery || lastEventIdHeader || '0';
+        const since = Number.parseInt(String(sinceRaw), 10);
+
+        if (Number.isFinite(since) && since >= 0) {
+            try {
+                const pastEvents = this.agent.sessionManager.getEventsSince(sessionId, since, 2000);
+                for (const evt of pastEvents) {
+                    res.write(`id: ${evt.id}\n`);
+                    res.write(`data: ${JSON.stringify({ id: evt.id, type: evt.type, content: evt.content })}\n\n`);
+                }
+            } catch (e) {
+                logger.error('Failed to replay session events', e);
+            }
+        }
+
         const handler = (data: any) => {
+            if (data && data.id) {
+                res.write(`id: ${data.id}\n`);
+            }
             res.write(`data: ${JSON.stringify(data)}\n\n`);
         };
 
@@ -501,6 +557,8 @@ export class A2AGateway {
                 } else if (type === 'todo') {
                     // Send todo
                     res.write(`data: ${JSON.stringify({ type: 'todo', content })}\n\n`);
+                } else if (type === 'segment') {
+                    res.write(`data: ${JSON.stringify({ type: 'segment', content })}\n\n`);
                 }
             }, sessionId);
             

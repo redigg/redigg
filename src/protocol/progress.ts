@@ -2,6 +2,7 @@ export type AgentProgressEventType =
   | 'token'
   | 'thinking'
   | 'log'
+  | 'segment'
   | 'plan'
   | 'todo'
   | 'stats'
@@ -10,4 +11,3 @@ export type AgentProgressEventType =
   | 'error';
 
 export type AgentProgressHandler = (type: AgentProgressEventType, content: any) => void;
-

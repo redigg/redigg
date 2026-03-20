@@ -1,7 +1,7 @@
 import { Send, Paperclip, X, Sparkles, StopCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -16,9 +16,10 @@ interface ChatInputProps {
   autoMode?: boolean;
   onAutoModeChange?: (checked: boolean) => void;
   sessionId?: string | null;
+  focusNonce?: number;
 }
 
-export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redigg...", value, onChange, autoMode: controlledAutoMode, onAutoModeChange, sessionId }: ChatInputProps) {
+export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redigg...", value, onChange, autoMode: controlledAutoMode, onAutoModeChange, sessionId, focusNonce }: ChatInputProps) {
   const [internalInput, setInternalInput] = useState("");
   const [attachments, setAttachments] = useState<any[]>([]);
   const [internalAutoMode, setInternalAutoMode] = useState(false);
@@ -46,6 +47,15 @@ export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redi
           setInternalAutoMode(checked);
       }
   };
+
+  useEffect(() => {
+    if (!focusNonce) return;
+    textareaRef.current?.focus();
+    const el = textareaRef.current;
+    if (!el) return;
+    const len = el.value.length;
+    el.setSelectionRange(len, len);
+  }, [focusNonce]);
 
   const handleSubmit = () => {
     if ((!input.trim() && attachments.length === 0) || isLoading) return;

@@ -16,6 +16,7 @@ export class SQLiteStorage {
     }
 
     this.db = new Database(finalPath);
+    this.db.pragma('foreign_keys = ON');
     this.init();
   }
 
@@ -58,6 +59,17 @@ export class SQLiteStorage {
         FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+
+      -- Session Event Stream Table (for SSE replay)
+      CREATE TABLE IF NOT EXISTS session_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        content TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_events_session ON session_events(session_id, id);
     `);
 
     // Simple migration for existing tables (if any)

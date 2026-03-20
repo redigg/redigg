@@ -122,8 +122,9 @@ Requirements for the markdown:
   * Do NOT invent accuracy percentages (e.g. "achieving 89% accuracy") unless the EXACT number appears in an evidence card above.
   * Do NOT invent improvement factors (e.g. "3x faster", "4.3× improvement") unless stated verbatim in an evidence card.
   * Do NOT invent counts or ratios (e.g. "72% of tasks", "31% recall") unless in an evidence card.
-  * If you need to describe performance, use qualitative language: "significantly outperforms", "shows substantial improvement", "achieves competitive results".
+  * If you need to describe performance without exact grounded numbers, use hedged qualitative language such as "is reported as promising", "is described as competitive", or "the authors argue that it improves ...".
   * You MAY use numbers that appear in evidence card fields (keyContribution, groundedClaim, limitationHint).
+- COMPARATIVE CLAIM RULE: Do NOT write cross-system or cross-domain superiority claims such as "outperforms generalists", "better than monolithic systems", or "higher validated output rates" unless the evidence cards explicitly report that comparison.
 - TABLE GROUNDING RULE: If you include a Markdown table, every quantitative cell must be directly supported by the cited evidence card or its quotable findings. If the evidence card does not provide the exact number, write "N/A" or a qualitative phrase instead of inventing a value.
 - SECTION LEAD-IN RULE: The first paragraph after the ## heading must already be grounded in the evidence cards. Do NOT open with unsupported benchmark names, dataset names, or performance claims.
 - Avoid all listed anti-patterns.
@@ -249,7 +250,8 @@ Expand the section by:
 3. Adding comparisons between methods/approaches
 4. Discussing tradeoffs and limitations
 5. Preserving plain Markdown headings only (no manual numbering such as 1.1 or Section 3)
-6. Using exact quantitative values only when they appear in the evidence cards; otherwise use qualitative language or "N/A" in tables
+6. Using exact quantitative values only when they appear in the evidence cards; otherwise use hedged qualitative language or "N/A" in tables
+7. Avoiding empirical verbs for review/perspective evidence cards; prefer "argues", "suggests", or "according to [N]"
 
 Evidence cards available:
 ${evidenceSummary}

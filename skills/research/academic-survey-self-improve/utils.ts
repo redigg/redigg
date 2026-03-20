@@ -243,6 +243,10 @@ export function getQuotableFindings(card: Pick<EvidenceCard, 'quotableFindings'>
     .filter(Boolean);
 }
 
+export function normalizeNumericToken(token: string): string {
+  return String(token || '').replace(/,/g, '').trim();
+}
+
 export function collectGroundedNumberTokens(cards: EvidenceCard[]): Set<string> {
   const groundedNumbers = new Set<string>();
   const evidenceText = cards
@@ -256,14 +260,14 @@ export function collectGroundedNumberTokens(cards: EvidenceCard[]): Set<string> 
     ].join(' '))
     .join(' ');
 
-  for (const match of evidenceText.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
-    groundedNumbers.add(match[1]);
+  for (const match of evidenceText.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*%/g)) {
+    groundedNumbers.add(normalizeNumericToken(match[1]));
   }
-  for (const match of evidenceText.matchAll(/(\d+(?:\.\d+)?)\s*[×x]/gi)) {
-    groundedNumbers.add(match[1]);
+  for (const match of evidenceText.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*[×x]/gi)) {
+    groundedNumbers.add(normalizeNumericToken(match[1]));
   }
-  for (const match of evidenceText.matchAll(/\b(\d{1,4}(?:\.\d+)?)\b/g)) {
-    groundedNumbers.add(match[1]);
+  for (const match of evidenceText.matchAll(/\b(\d[\d,]*(?:\.\d+)?)\b/g)) {
+    groundedNumbers.add(normalizeNumericToken(match[1]));
   }
 
   return groundedNumbers;
@@ -306,8 +310,9 @@ function cellHasUnsupportedNumericClaim(cell: string, supportingCards: EvidenceC
   if (!/\d/.test(plainCell)) return false;
 
   const groundedNumbers = collectGroundedNumberTokens(supportingCards);
-  const supportedYears = new Set(supportingCards.map((card) => String(card.year)).filter(Boolean));
-  const numericTokens = Array.from(plainCell.matchAll(/\b(\d{1,4}(?:\.\d+)?)\b/g)).map((match) => match[1]);
+  const supportedYears = new Set(supportingCards.map((card) => normalizeNumericToken(String(card.year))).filter(Boolean));
+  const numericTokens = Array.from(plainCell.matchAll(/\b(\d[\d,]*(?:\.\d+)?)\b/g))
+    .map((match) => normalizeNumericToken(match[1]));
   if (numericTokens.length === 0) return false;
 
   return numericTokens.some((token) => {

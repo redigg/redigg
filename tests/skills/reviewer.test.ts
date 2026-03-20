@@ -273,4 +273,95 @@ describe('reviewSurveySections', () => {
     expect(result.qualityReport.sectionReviews[0].issues.join(' ')).toContain('57 agents');
     expect(result.qualityReport.sectionReviews[0].issues.join(' ')).toContain('22 classes');
   });
+
+  it('should preserve comma-formatted grounded counts without malformed fabricated-number warnings', async () => {
+    const originalDraft = '## Methods: Advanced Reasoning Capabilities\n\nGraph-based contradiction analysis remains attractive because it can scale structured evidence synthesis to large corpora when the underlying knowledge representation is stable [1]. The cited evidence explicitly notes that pairwise document comparisons become prohibitive beyond 10,000 papers, making that count a grounded tractability threshold rather than an invented benchmark statistic [1]. This limitation is used here only to characterize computational scaling pressure, not to claim unsupported system-level superiority or accuracy gains [1].';
+    const chat = vi.fn()
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          score: 86,
+          strengths: ['Grounded and specific'],
+          issues: [],
+          suggestions: [],
+          needsRewrite: false
+        })
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          score: 85,
+          strengths: ['Clear synthesis'],
+          issues: [],
+          suggestions: [],
+          needsRewrite: false
+        })
+      })
+      .mockResolvedValueOnce({
+        content: originalDraft
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          score: 86,
+          strengths: ['Grounded and specific'],
+          issues: [],
+          suggestions: [],
+          needsRewrite: false
+        })
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          score: 85,
+          strengths: ['Clear synthesis'],
+          issues: [],
+          suggestions: [],
+          needsRewrite: false
+        })
+      });
+
+    const context: SkillContext = {
+      llm: { chat } as any,
+      memory: {} as any,
+      workspace: '/tmp',
+      userId: 'test-user',
+      log: vi.fn()
+    };
+
+    const sections: SectionDraft[] = [
+      {
+        sectionId: 'methods-reasoning',
+        title: 'Methods: Advanced Reasoning Capabilities',
+        templateKind: 'methods',
+        content: originalDraft,
+        paperCount: 1,
+        citations: [1],
+        targetWordCount: 80,
+        claimAlignments: [
+          {
+            claim: 'The cited evidence explicitly notes that pairwise document comparisons become prohibitive beyond 10,000 papers, making that count a grounded tractability threshold rather than an invented benchmark statistic.',
+            citations: [1],
+            evidenceTitles: ['SciAgents']
+          }
+        ],
+        evidenceCards: [
+          {
+            citation: 1,
+            title: 'SciAgents',
+            year: 2024,
+            source: 'openalex',
+            paperTypeSignals: ['methods', 'system'],
+            evidenceFocus: ['methods', 'reasoning'],
+            keyContribution: 'SciAgents applies bioinspired graph reasoning to scientific discovery workflows.',
+            groundedClaim: 'Graph-based approaches face scaling constraints as pairwise comparisons grow rapidly with corpus size.',
+            limitationHint: 'Pairwise document comparisons become prohibitive beyond 10,000 papers.',
+            evidenceLevel: 'system',
+            quotableFindings: ['pairwise document comparisons become prohibitive beyond 10,000 papers']
+          }
+        ]
+      }
+    ];
+
+    const result = await reviewSurveySections(context, 'AI Agent for Scientific Research', sections);
+
+    expect(result.qualityReport.sectionReviews[0].issues.join(' ')).not.toContain('Potentially fabricated numbers detected');
+    expect(result.qualityReport.sectionReviews[0].issues.join(' ')).not.toContain('000 papers');
+  });
 });

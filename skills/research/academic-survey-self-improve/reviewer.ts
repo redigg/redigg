@@ -1,7 +1,7 @@
 import type { SkillContext } from '../../../src/skills/types.js';
 import type { SectionDraft, SurveyQualityReport } from './types.js';
 import { getSectionWritingTemplate } from './section-templates.js';
-import { alignClaimsToEvidence, collectGroundedNumberTokens, countWords, getQuotableFindings, normalizeText, parseJsonObject } from './utils.js';
+import { alignClaimsToEvidence, collectGroundedNumberTokens, countWords, getQuotableFindings, normalizeNumericToken, normalizeText, parseJsonObject } from './utils.js';
 
 interface ReviewResponse {
   score: number;
@@ -45,8 +45,8 @@ export async function reviewSurveySections(
     let rewriteApplied = false;
 
     // Only rewrite on critical hard-check issues OR very low LLM review score
-    if (finalReview.score < 60 || finalReview.needsRewrite) {
-      const rewritten = await rewriteSection(context, topic, section, finalReview.suggestions);
+    if (finalReview.score <= 60 || finalReview.needsRewrite || hasBlockingGroundingIssue(finalReview)) {
+      const rewritten = await rewriteSection(context, topic, section, finalReview.issues, finalReview.suggestions);
       if (rewritten) {
         finalSection = {
           ...section,
@@ -82,7 +82,13 @@ export async function reviewSurveySections(
     };
 
     if (feedback.forceRewrite) {
-      const rewritten = await rewriteSection(context, topic, reviewedSections[i], sectionReviews[i].suggestions);
+      const rewritten = await rewriteSection(
+        context,
+        topic,
+        reviewedSections[i],
+        sectionReviews[i].issues,
+        sectionReviews[i].suggestions
+      );
       if (rewritten) {
         reviewedSections[i] = {
           ...reviewedSections[i],
@@ -160,7 +166,13 @@ async function reviewSection(
 ): Promise<ReviewResponse> {
   const template = getSectionWritingTemplate(section.templateKind);
   const evidenceSummary = section.evidenceCards
-    .map((card) => `[${card.citation}] ${card.title} | focus: ${card.evidenceFocus.join(', ') || 'general'} | claim: ${card.groundedClaim}`)
+    .map((card) => {
+      const quotableFindings = getQuotableFindings(card);
+      const quotableBlock = quotableFindings.length > 0
+        ? ` | quotables: ${quotableFindings.join(' | ')}`
+        : '';
+      return `[${card.citation}] ${card.title} | evidence level: ${card.evidenceLevel} | focus: ${card.evidenceFocus.join(', ') || 'general'} | claim: ${card.groundedClaim}${quotableBlock}`;
+    })
     .join('\n');
 
   const basePrompt = `
@@ -246,6 +258,7 @@ async function rewriteSection(
   context: SkillContext,
   topic: string,
   section: SectionDraft,
+  issues: string[],
   suggestions: string[]
 ): Promise<string | null> {
   const template = getSectionWritingTemplate(section.templateKind);
@@ -279,6 +292,9 @@ ${subheadingGuidance}
 Improve the following survey section using these suggestions:
 ${suggestions.join('\n') || 'Improve clarity and evidence grounding.'}
 
+Critical issues that must be fully removed from the revision:
+${issues.join('\n') || 'No explicit issue list available.'}
+
 You must stay within the following evidence cards. NEVER fabricate specific numbers, percentages, or statistics not present in the evidence cards:
 ${evidenceSummary || 'No evidence cards available.'}
 
@@ -290,6 +306,7 @@ ${section.content}
 Return ONLY the revised Markdown section text. Do NOT include:
 - A lead paragraph without citations; the first paragraph after the ## heading must already contain supporting citations
 - Empirical verbs such as "demonstrates", "achieves", "outperforms", or "shows" for review/perspective evidence cards; use hedged verbs such as "argues", "suggests", or "reviews" instead
+- Cross-domain superiority claims such as "outperforms generalists" unless an evidence card explicitly reports that comparative result
 - Named benchmarks, systems, or quantitative claims that are not explicitly supported by the evidence cards
 - Manual heading numbering such as "### 1.1 ..." or "### Section 3 ..."
 - Any preamble like "Here's the revised section..."
@@ -616,14 +633,17 @@ function runHardChecks(section: SectionDraft): HardCheckResult {
  */
 function detectFabricatedNumbers(section: SectionDraft, candidateText: string = section.content): string[] {
   const groundedNumbers = collectGroundedNumberTokens(section.evidenceCards);
-  const supportedYears = new Set(section.evidenceCards.map((card) => String(card.year)).filter(Boolean));
+  const supportedYears = new Set(section.evidenceCards.map((card) => normalizeNumericToken(String(card.year))).filter(Boolean));
 
   // Extract numbers from section content (skip citation markers [N])
   const contentWithoutCitations = candidateText.replace(/\[\d+\]/g, '');
   const fabricated: string[] = [];
-  const isGrounded = (token: string): boolean => groundedNumbers.has(token) || supportedYears.has(token);
-  const percentageRangePattern = /(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)\s*%/g;
-  const timeRangePattern = /(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)\s+times?\s+(?:faster|slower|more|less)\b/gi;
+  const isGrounded = (token: string): boolean => {
+    const normalized = normalizeNumericToken(token);
+    return groundedNumbers.has(normalized) || supportedYears.has(normalized);
+  };
+  const percentageRangePattern = /(\d[\d,]*(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d[\d,]*(?:\.\d+)?)\s*%/g;
+  const timeRangePattern = /(\d[\d,]*(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d[\d,]*(?:\.\d+)?)\s+times?\s+(?:faster|slower|more|less)\b/gi;
 
   // Check bounded percentage ranges such as "80-90%" or "40 to 50%"
   for (const match of contentWithoutCitations.matchAll(percentageRangePattern)) {
@@ -634,21 +654,21 @@ function detectFabricatedNumbers(section: SectionDraft, candidateText: string = 
 
   // Check percentages
   const contentWithoutPercentageRanges = contentWithoutCitations.replace(percentageRangePattern, ' ');
-  for (const match of contentWithoutPercentageRanges.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
+  for (const match of contentWithoutPercentageRanges.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*%/g)) {
     if (!isGrounded(match[1])) {
       fabricated.push(`${match[1]}%`);
     }
   }
 
   // Check uncertainty ranges such as "2.34±1.99"
-  for (const match of contentWithoutCitations.matchAll(/(\d+(?:\.\d+)?)\s*(?:±|\+\/-)\s*(\d+(?:\.\d+)?)\b/g)) {
+  for (const match of contentWithoutCitations.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*(?:±|\+\/-)\s*(\d[\d,]*(?:\.\d+)?)\b/g)) {
     if (!isGrounded(match[1]) || !isGrounded(match[2])) {
       fabricated.push(`${match[1]}±${match[2]}`);
     }
   }
 
   // Check multipliers (3x, 4.3×)
-  for (const match of contentWithoutCitations.matchAll(/(\d+(?:\.\d+)?)\s*[×x]\b/gi)) {
+  for (const match of contentWithoutCitations.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*[×x]\b/gi)) {
     if (!isGrounded(match[1])) {
       fabricated.push(`${match[1]}×`);
     }
@@ -661,38 +681,38 @@ function detectFabricatedNumbers(section: SectionDraft, candidateText: string = 
     }
   }
   const contentWithoutTimeRanges = contentWithoutCitations.replace(timeRangePattern, ' ');
-  for (const match of contentWithoutTimeRanges.matchAll(/(\d+(?:\.\d+)?)\s+times?\s+(?:faster|slower|more|less)\b/gi)) {
+  for (const match of contentWithoutTimeRanges.matchAll(/(\d[\d,]*(?:\.\d+)?)\s+times?\s+(?:faster|slower|more|less)\b/gi)) {
     if (!isGrounded(match[1])) {
       fabricated.push(`${match[1]} times`);
     }
   }
 
   // A2: Check "N-fold" patterns (e.g. "5-fold improvement")
-  for (const match of contentWithoutCitations.matchAll(/(\d+(?:\.\d+)?)-fold\b/gi)) {
+  for (const match of contentWithoutCitations.matchAll(/(\d[\d,]*(?:\.\d+)?)-fold\b/gi)) {
     if (!isGrounded(match[1])) {
       fabricated.push(`${match[1]}-fold`);
     }
   }
 
   // A2: Check decimal scores presented as results (e.g. "F1 of 0.87", "BLEU score of 34.5")
-  for (const match of contentWithoutCitations.matchAll(/(?:score|accuracy|F1|BLEU|ROUGE|precision|recall|AUC)\s+(?:of\s+)?(\d+(?:\.\d+)?)\b/gi)) {
+  for (const match of contentWithoutCitations.matchAll(/(?:score|accuracy|F1|BLEU|ROUGE|precision|recall|AUC)\s+(?:of\s+)?(\d[\d,]*(?:\.\d+)?)\b/gi)) {
     if (!isGrounded(match[1])) {
       fabricated.push(`score ${match[1]}`);
     }
   }
 
   // Check counted entities such as "57 agents", "22 classes", "18 benchmarks"
-  for (const match of contentWithoutCitations.matchAll(/\b(\d{1,4}(?:\.\d+)?)\s+(?:tested\s+|distinct\s+|novel\s+|new\s+)?(agents?|classes?|benchmarks?|tasks?|papers?|systems?|datasets?|domains?|studies|samples?|participants?|workflows?)\b/gi)) {
+  for (const match of contentWithoutCitations.matchAll(/\b(\d[\d,]*(?:\.\d+)?)\s+(?:tested\s+|distinct\s+|novel\s+|new\s+)?(agents?|classes?|benchmarks?|tasks?|papers?|systems?|datasets?|domains?|studies|samples?|participants?|workflows?)\b/gi)) {
     if (!isGrounded(match[1])) {
       fabricated.push(`${match[1]} ${match[2].toLowerCase()}`);
     }
   }
 
   // A2: Check "achieving/reaching/obtaining N" patterns with specific numbers
-  for (const match of contentWithoutCitations.matchAll(/(?:achiev|reach|obtain|attain|record)(?:ing|ed|s)?\s+(?:a\s+)?(\d+(?:\.\d+)?)\b/gi)) {
+  for (const match of contentWithoutCitations.matchAll(/(?:achiev|reach|obtain|attain|record)(?:ing|ed|s)?\s+(?:a\s+)?(\d[\d,]*(?:\.\d+)?)\b/gi)) {
     const num = match[1];
     // Skip years and small counts
-    if (Number(num) > 100 || Number(num) < 1 || num.includes('.')) {
+    if (Number(normalizeNumericToken(num)) > 100 || Number(normalizeNumericToken(num)) < 1 || num.includes('.')) {
       if (!isGrounded(num)) {
         fabricated.push(`achieving ${num}`);
       }
@@ -700,6 +720,18 @@ function detectFabricatedNumbers(section: SectionDraft, candidateText: string = 
   }
 
   return Array.from(new Set(fabricated));
+}
+
+function hasBlockingGroundingIssue(review: ReviewResponse): boolean {
+  const joined = review.issues.join(' ').toLowerCase();
+  return [
+    'potentially fabricated numbers detected',
+    'unsupported quantitative claims appear in the section lead paragraph',
+    'perspective/review papers but cited with empirical framing',
+    'the section lead paragraph introduces claims before citing any supporting evidence',
+    'citation placeholders remain in the section',
+    'the section does not cite any supporting evidence'
+  ].some((needle) => joined.includes(needle));
 }
 
 function extractLeadParagraph(content: string): string {

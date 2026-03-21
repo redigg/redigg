@@ -44,6 +44,8 @@ export interface Skill {
   name: string;
   description: string;
   tags?: string[];
+  parameters?: any;
+  readme?: string; // Raw markdown content from SKILL.md
   execute: (ctx: SkillContext, params: SkillParams) => Promise<SkillResult>;
 }
 

@@ -16,6 +16,8 @@ import { ResearchAgent } from '../agent/ResearchAgent.js';
 import { createLogger } from '../utils/logger.js';
 
 import { EventEmitter } from 'events';
+import type { Server } from 'http';
+import type { AddressInfo } from 'net';
 
 import { fileURLToPath } from 'url';
 import { ensureSessionWorkspace, getSessionWorkspacePaths } from '../workspace/sessionWorkspace.js';
@@ -56,6 +58,8 @@ export class A2AGateway {
   private app: express.Express;
   private port: number;
   private agent: ResearchAgent;
+  private server: Server | null = null;
+  private agentCard: AgentCard | null = null;
 
   constructor(agent: ResearchAgent, port: number = 4000) {
     this.agent = agent;
@@ -96,40 +100,52 @@ export class A2AGateway {
       ],
     };
 
+    this.agentCard = agentCard;
+
     const executor: AgentExecutor = {
       execute: async (requestContext: RequestContext, eventBus: ExecutionEventBus): Promise<void> => {
         const task = requestContext.task;
-        if (!task) {
-          logger.error('No task found in context');
-          eventBus.finished();
-          return;
+        const userMessageFromRequest = requestContext.userMessage;
+        let userMessage = '';
+        let input: any = null;
+
+        if (task) {
+          input = (task as any).input;
         }
 
-        const input = (task as any).input;
-        const userId = 'a2a-user'; // TODO: Extract from auth context if available
+        if (userMessageFromRequest && userMessageFromRequest.parts && userMessageFromRequest.parts.length > 0) {
+           const firstPart = userMessageFromRequest.parts[0] as any;
+           userMessage = firstPart.text || '';
+         }
 
-        logger.info(`Received request: ${JSON.stringify(input)}`);
-
-        try {
-          // Extract text from input (assuming simple text message for now)
-          let userMessage = '';
+        if (!userMessage && input) {
           if (typeof input === 'string') {
             userMessage = input;
-          } else if (input && typeof input === 'object' && 'text' in input) {
+          } else if (typeof input === 'object' && 'text' in input) {
             userMessage = (input as any).text;
-          } else if (input && typeof input === 'object' && 'message' in input) {
-             // Handle standard A2A message format
-             const msg = input as any;
-             if (msg.message && msg.message.parts && msg.message.parts.length > 0) {
-                userMessage = msg.message.parts[0].text;
-             }
           }
+        }
 
-          if (!userMessage) {
-            userMessage = "Hello";
-          }
+        if (!userMessage) {
+          userMessage = "Hello";
+        }
 
-          const reply = await this.agent.chat(userId, userMessage);
+        const userId = 'a2a-user';
+
+        logger.info(`A2A Request: ${userMessage.substring(0, 100)}`);
+
+        try {
+          const reply = await this.agent.chat(userId, userMessage, (type, content) => {
+            if (type === 'segment') {
+              logger.info(`[Segment] ${content?.title || content?.id} - ${content?.status}`);
+            } else if (type === 'log') {
+              logger.info(`[Log] ${content}`);
+            } else if (type === 'thinking') {
+              process.stdout.write(content);
+            } else if (type === 'token') {
+              process.stdout.write(content as string);
+            }
+          });
 
           const responseMessage: Message = {
             kind: 'message',
@@ -142,7 +158,15 @@ export class A2AGateway {
           eventBus.publish(responseMessage);
           eventBus.finished();
         } catch (error) {
-          logger.error('Error executing task:', error);
+          logger.error('A2A execution error:', error);
+          const errorMessage: Message = {
+            kind: 'message',
+            messageId: uuidv4(),
+            role: 'agent',
+            parts: [{ kind: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
+            contextId: requestContext.contextId,
+          };
+          eventBus.publish(errorMessage);
           eventBus.finished();
         }
       },
@@ -249,7 +273,19 @@ export class A2AGateway {
       const { message, userId = 'web-user' } = req.body;
       logger.info(`Chat request: ${message}`);
       try {
-        const reply = await this.agent.chat(userId, message);
+        let fullReply = '';
+        const reply = await this.agent.chat(userId, message, (type, content) => {
+          if (type === 'segment') {
+             logger.info(`[Segment] ${content?.title || content?.id} - ${content?.status}`);
+          } else if (type === 'thinking') {
+             process.stdout.write(content);
+          } else if (type === 'token') {
+             process.stdout.write(content as string);
+          } else if (type === 'log') {
+             logger.info(`[Action] ${content}`);
+          }
+        });
+        logger.info(`\n[Output] ${reply}`);
         res.json({ reply });
       } catch (error) {
         logger.error('Chat error:', error);
@@ -267,12 +303,13 @@ export class A2AGateway {
                 const pack = this.agent.skillManager.getAllPacks().find(p => p.skills.some(sk => sk.id === s.id));
                 // Find usage stats
                 const usage = skillStats.skills.find((stat: any) => stat.id === s.id)?.usage;
-                
+
                 return {
                     id: s.id,
-                    name: (s as any).name || s.id, 
+                    name: (s as any).name || s.id,
                     description: (s as any).description || '',
                     packId: pack?.id,
+                    readme: (s as any).readme || null,
                     usage: usage || { used: 0, success: 0, failed: 0 }
                 };
             });
@@ -397,7 +434,7 @@ export class A2AGateway {
 
     // Async Chat API
     this.app.post('/api/chat/async', (req, res) => {
-        let { message, userId = 'web-user', sessionId, webSearch, attachments, autoMode } = req.body;
+        let { message, userId = 'web-user', sessionId, webSearch, attachments } = req.body;
         
         if (!message && (!attachments || attachments.length === 0)) {
             res.status(400).json({ error: 'Message or attachments required' });
@@ -414,11 +451,6 @@ export class A2AGateway {
             message = `[WEB SEARCH REQUEST] ${message}\nPlease perform a literature review or web search to answer this question.`;
         }
         
-        // Process auto mode context
-        // if (autoMode) {
-             // We don't modify the message anymore, just pass the flag
-        // }
-
         logger.info(`Async Chat request: ${message} (Session: ${sessionId || 'auto'})`);
 
         // Start agent in background
@@ -427,7 +459,19 @@ export class A2AGateway {
             // BUT we want to broadcast via SSE/WebSocket for real-time updates.
             if (sessionId) {
                 const shouldPersist = (() => {
-                  if (type === 'segment' || type === 'plan' || type === 'todo' || type === 'stats' || type === 'session_title' || type === 'error') {
+                  if (
+                    type === 'segment' ||
+                    type === 'plan' ||
+                    type === 'todo' ||
+                    type === 'stats' ||
+                    type === 'session_title' ||
+                    type === 'error' ||
+                    type === 'thinking' ||
+                    type === 'log' ||
+                    type === 'tool_call' ||
+                    type === 'tool_result' ||
+                    type === 'done'
+                  ) {
                     return true;
                   }
                   if (type === 'token') {
@@ -443,7 +487,7 @@ export class A2AGateway {
 
                 sessionEvents.emit(`session:${sessionId}`, { id: eventId, type, content });
             }
-        }, sessionId, { autoMode }).catch(err => {
+        }, sessionId).catch(err => {
             logger.error('Async chat error:', err);
             if (sessionId) {
                 const eventId = this.agent.sessionManager.appendEvent(sessionId, 'error', String(err));
@@ -501,6 +545,18 @@ export class A2AGateway {
         });
     });
 
+    this.app.get('/api/sessions/:sessionId/events.json', (req, res) => {
+      const { sessionId } = req.params;
+      const sinceRaw = typeof req.query.since === 'string' ? req.query.since : '0';
+      const since = Number.parseInt(String(sinceRaw || '0'), 10);
+      try {
+        const events = this.agent.sessionManager.getEventsSince(sessionId, Number.isFinite(since) && since >= 0 ? since : 0, 2000);
+        res.json({ events });
+      } catch (e) {
+        res.status(500).json({ error: String(e) });
+      }
+    });
+
     // SSE Chat API (Deprecated for direct use, but kept for compatibility or real-time if needed)
     this.app.get('/api/chat/stream', async (req, res) => {
         let message = req.query.message as string;
@@ -548,6 +604,10 @@ export class A2AGateway {
                 } else if (type === 'thinking') {
                     // Send thinking
                     res.write(`data: ${JSON.stringify({ type: 'thinking', content })}\n\n`);
+                } else if (type === 'tool_call') {
+                    res.write(`data: ${JSON.stringify({ type: 'tool_call', content })}\n\n`);
+                } else if (type === 'tool_result') {
+                    res.write(`data: ${JSON.stringify({ type: 'tool_result', content })}\n\n`);
                 } else if (type === 'log') {
                     // Send log
                     res.write(`data: ${JSON.stringify({ type: 'log', content })}\n\n`);
@@ -672,11 +732,50 @@ export class A2AGateway {
 
   }
 
-  public start() {
-    this.app.listen(this.port, () => {
-      logger.success(`A2A Gateway started on http://localhost:${this.port}`);
-      logger.info(`- Agent Card: http://localhost:${this.port}/${AGENT_CARD_PATH}`);
-      logger.info(`- JSON-RPC: http://localhost:${this.port}/a2a/jsonrpc`);
+  public async start(): Promise<Server> {
+    if (this.server) return this.server;
+
+    return await new Promise<Server>((resolve, reject) => {
+      const server = this.app.listen(this.port, () => {
+        this.server = server;
+
+        const address = server.address();
+        if (address && typeof address === 'object') {
+          this.port = (address as AddressInfo).port;
+          if (this.agentCard) {
+            this.agentCard.url = `http://localhost:${this.port}/a2a/jsonrpc`;
+            this.agentCard.additionalInterfaces = [
+              { url: `http://localhost:${this.port}/a2a/jsonrpc`, transport: 'JSONRPC' },
+              { url: `http://localhost:${this.port}/a2a/rest`, transport: 'HTTP+JSON' },
+            ];
+          }
+        }
+
+        logger.success(`A2A Gateway started on http://localhost:${this.port}`);
+        logger.info(`- Agent Card: http://localhost:${this.port}/${AGENT_CARD_PATH}`);
+        logger.info(`- JSON-RPC: http://localhost:${this.port}/a2a/jsonrpc`);
+        resolve(server);
+      });
+
+      server.on('error', (err) => {
+        reject(err);
+      });
+    });
+  }
+
+  public getPort(): number {
+    return this.port;
+  }
+
+  public async stop(): Promise<void> {
+    if (!this.server) return;
+    const server = this.server;
+    this.server = null;
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
     });
   }
 }

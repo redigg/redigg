@@ -1,6 +1,6 @@
 import fs from 'fs';
 import type { SkillResult } from '../../skills/types.js';
-import type { Paper } from '../../skills/lib/ScholarTool.js';
+import type { Paper } from '../../../skills/01-literature/paper-search/ScholarTool.js';
 import type {
   BenchmarkMetric,
   SurveyBenchmarkCase,

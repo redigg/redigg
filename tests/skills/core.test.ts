@@ -5,7 +5,7 @@ import { MemoryManager } from '../../src/memory/MemoryManager.js';
 import { MemoryEvolutionSystem } from '../../src/memory/evolution/MemoryEvolutionSystem.js';
 import { SQLiteStorage } from '../../src/storage/sqlite.js';
 import path from 'path';
-import SchedulingSkill from '../../skills/agent/scheduling/index.js';
+import SchedulingSkill from '../../src/skills/builtin/agent/scheduling/index.js';
 
 describe('Core Skills Integration', () => {
   let agent: ResearchAgent;
@@ -72,8 +72,6 @@ describe('Core Skills Integration', () => {
     
     expect(packIds).toContain('agent');
     expect(packIds).toContain('system');
-    expect(packIds).toContain('research');
-    expect(packIds).toContain('vendor');
   });
 
   it('should be able to execute session_management skill', async () => {

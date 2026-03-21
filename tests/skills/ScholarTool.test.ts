@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ScholarTool } from '../../src/skills/lib/ScholarTool.js';
+import { ScholarTool } from '../../skills/01-literature/paper-search/ScholarTool.js';
 
 const arxivFeed = `<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">

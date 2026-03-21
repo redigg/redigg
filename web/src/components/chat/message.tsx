@@ -1,4 +1,4 @@
-import { User, Sparkles, Copy, RefreshCw, Paperclip, FileText, Code, Search, Circle, Brain, CheckCircle2, Loader2 } from "lucide-react";
+import { User, Sparkles, Copy, RefreshCw, Paperclip, FileText, Code, Search, Circle, Brain } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -114,13 +114,6 @@ const groupLogsIntoActions = (logs: string[] = []): ActionGroup[] => {
   }
 
   return groups;
-};
-
-const renderSegmentStatusIcon = (status: string) => {
-  if (status === 'completed') return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
-  if (status === 'active') return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
-  if (status === 'error') return <Circle className="h-3.5 w-3.5 text-red-500" />;
-  return <Circle className="h-3.5 w-3.5 text-zinc-300" />;
 };
 
 export function ChatMessage({ role, content, thinking, isThinking, logs, todos, segments, stats, attachments, onCopy, onRegenerate }: ChatMessageProps) {

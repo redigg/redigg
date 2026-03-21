@@ -39,93 +39,58 @@ describe('ResearchAgent - Planning', () => {
     }
   });
 
-  it('should create and execute a single-step plan', async () => {
-    const planJson = JSON.stringify({
-      intent: 'single',
-      steps: [
-        {
-          id: '1',
-          description: 'Search for papers on LLM',
-          tool: 'LiteratureReview',
-          params: { topic: 'LLM Reasoning' }
+  it('should handle research requests through chat interface', async () => {
+    // Mock the skill manager's executeSkill directly to track calls
+    const executeSkillSpy = vi.spyOn(agent.skillManager, 'executeSkill').mockResolvedValue({
+      success: true,
+      result: 'Found papers',
+      papers: []
+    } as any);
+
+    // Mock LLM to return tool calls immediately
+    vi.spyOn(llm, 'chat').mockResolvedValue({
+      content: '',
+      tool_calls: [{
+        id: 'call_1',
+        type: 'function',
+        function: {
+          name: 'paper_search',
+          arguments: JSON.stringify({ query: 'LLM reasoning', max_results: 3 })
         }
-      ]
+      }]
     });
 
-    // Replace chat method with a mock function directly
-    llm.chat = vi.fn()
-        .mockResolvedValueOnce({ content: planJson }) // 1. Planner
-        .mockResolvedValueOnce({ content: JSON.stringify({ score: 90, passed: true }) }) // 2. Quality Check
-        .mockResolvedValue({ content: 'Mock LLM Response' }); // Subsequent calls (e.g. Memory Evolution)
+    const reply = await agent.chat('user1', 'Search for LLM reasoning papers');
 
-    const onProgress = vi.fn();
-    
-    // Mock fetch for ScholarTool
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const url = String(input);
-      if (url.includes('arxiv.org')) {
-        return new Response(`
-          <feed xmlns="http://www.w3.org/2005/Atom">
-            <entry>
-              <id>http://arxiv.org/abs/1234.5678</id>
-              <title>LLM Reasoning Paper</title>
-              <summary>A paper about LLM reasoning.</summary>
-              <author><name>Author A</name></author>
-              <published>2023-01-01T00:00:00Z</published>
-              <link title="pdf" href="http://arxiv.org/pdf/1234.5678" />
-            </entry>
-          </feed>
-        `, { status: 200, headers: { 'Content-Type': 'application/xml' } });
-      }
-      return new Response(JSON.stringify({ results: [], data: [] }), { status: 200 });
-    });
-    
-    await agent.chat('user1', 'Search for papers on LLM Reasoning', onProgress);
-
-    const planCalls = onProgress.mock.calls.filter(c => c[0] === 'plan');
-    expect(planCalls.length).toBeGreaterThan(0);
-    
-    // Check initial plan
-    const firstPlan = planCalls[0][1];
-    if (firstPlan.steps && firstPlan.steps.length > 0) {
-         expect(firstPlan.steps[0].description).toBe('Search for papers on LLM');
-    }
+    expect(reply).toBeDefined();
+    expect(llm.chat).toHaveBeenCalled();
+    expect(executeSkillSpy).toHaveBeenCalled();
   });
 
-  it('should create and execute a multi-step plan', async () => {
-    const planJson = JSON.stringify({
-      intent: 'multi_step',
-      steps: [
-        {
-          id: '1',
-          description: 'Search memories',
-          tool: 'MemorySearch',
-          params: { query: 'Project X' }
-        },
-        {
-          id: '2',
-          description: 'Chat response',
-          tool: 'Chat',
-          params: { message: 'Summarize findings' }
+  it('should handle multi-step requests through chat interface', async () => {
+    // Mock the skill manager's executeSkill directly to track calls
+    const executeSkillSpy = vi.spyOn(agent.skillManager, 'executeSkill').mockResolvedValue({
+      success: true,
+      result: 'Research completed'
+    } as any);
+
+    // Mock LLM to return tool calls immediately
+    vi.spyOn(llm, 'chat').mockResolvedValue({
+      content: '',
+      tool_calls: [{
+        id: 'call_1',
+        type: 'function',
+        function: {
+          name: 'literature_review',
+          arguments: JSON.stringify({ topic: 'LLMs', max_papers: 2 })
         }
-      ]
+      }]
     });
 
-    llm.chat = vi.fn()
-        .mockResolvedValueOnce({ content: planJson }) // 1. Planner
-        .mockResolvedValueOnce({ content: 'Here is the summary...' }) // 2. Chat step
-        .mockResolvedValue({ content: 'Mock LLM Response' }); // Subsequent calls
+    const reply = await agent.chat('user1', 'Do a multi-step research on LLMs');
 
-    const onProgress = vi.fn();
-    
-    await agent.chat('user1', 'Find info on Project X and summarize', onProgress);
-
-    const planCalls = onProgress.mock.calls.filter(c => c[0] === 'plan');
-    expect(planCalls.length).toBeGreaterThan(0);
-    
-    const lastPlan = planCalls[planCalls.length - 1][1];
-    expect(lastPlan.steps.length).toBe(2);
-    expect(lastPlan.steps[0].status).toBe('completed');
-    expect(lastPlan.steps[1].status).toBe('completed');
+    expect(reply).toBeDefined();
+    expect(llm.chat).toHaveBeenCalled();
+    expect(executeSkillSpy).toHaveBeenCalled();
   });
 });

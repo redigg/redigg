@@ -6,6 +6,7 @@ export type ProgressEventType =
   | 'log'
   | 'plan'
   | 'todo'
+  | 'segment'
   | 'thinking'
   | 'stats'
   | 'session_title'
@@ -20,7 +21,6 @@ export type ChatGraphState = {
   userId: string;
   message: string;
   session: Session;
-  options?: { autoMode?: boolean };
   onProgress?: ProgressHandler;
   log: LogHandler;
   sendPlan: (plan: { steps: any[] }) => void;
@@ -36,7 +36,6 @@ export type ChatGraphDeps = {
   createPlan: (args: {
     message: string;
     log: LogHandler;
-    forceAuto: boolean;
     onProgress?: ProgressHandler;
   }) => Promise<Plan>;
   executePlan: (args: {
@@ -71,7 +70,6 @@ const channels: StateGraphArgs<ChatGraphState>['channels'] = {
   userId: { value: (_prev, next) => next, default: () => '' },
   message: { value: (_prev, next) => next, default: () => '' },
   session: { value: (_prev, next) => next, default: () => null as any },
-  options: { value: (_prev, next) => next, default: () => undefined },
   onProgress: { value: (_prev, next) => next, default: () => undefined },
   log: { value: (_prev, next) => next, default: () => (() => undefined) as any },
   sendPlan: { value: (_prev, next) => next, default: () => (() => undefined) as any },
@@ -92,7 +90,7 @@ export function buildChatGraph(deps: ChatGraphDeps) {
     const isConversational = /^(hello|hi|hey|thanks|thank you|bye|goodbye|ok|okay|yes|no|cool|great|wow|who are you|what are you)\b/i.test(
       normalized
     );
-    const shouldPlan = !isConversational || Boolean(state.options?.autoMode);
+    const shouldPlan = !isConversational;
     return { isConversational, shouldPlan };
   };
 
@@ -101,7 +99,6 @@ export function buildChatGraph(deps: ChatGraphDeps) {
       const plan = await deps.createPlan({
         message: state.message,
         log: state.log,
-        forceAuto: Boolean(state.options?.autoMode),
         onProgress: state.onProgress,
       });
 

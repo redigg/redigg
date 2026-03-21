@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import PdfGeneratorSkill from '../../skills/research/pdf-generator/index.ts';
-import { normalizePdfSourceContent, parseAcademicMarkdown } from '../../skills/research/pdf-generator/renderer.ts';
+import PdfGeneratorSkill from '../../skills/04-paper/pdf-generator/index.ts';
+import { normalizePdfSourceContent, parseAcademicMarkdown } from '../../skills/04-paper/pdf-generator/renderer.ts';
 import type { SkillContext } from '../../src/skills/types.js';
 
 describe('pdf_generator renderer', () => {
@@ -46,7 +46,7 @@ describe('PdfGeneratorSkill', () => {
   it('should generate a non-empty academic-style PDF', async () => {
     const skill = new PdfGeneratorSkill();
     const context: SkillContext = {
-      llm: {} as any,
+      llm: { complete: vi.fn().mockResolvedValue({ content: 'Mock formatted content' }) } as any,
       memory: {} as any,
       workspace: '/tmp',
       userId: 'test-user',

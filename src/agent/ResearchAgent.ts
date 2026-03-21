@@ -1,6 +1,6 @@
 import { MemoryManager } from '../memory/MemoryManager.js';
 import { MemoryEvolutionSystem } from '../memory/evolution/MemoryEvolutionSystem.js';
-import { SkillEvolutionSystem } from '../skills/evolution/SkillEvolutionSystem.js';
+import { SkillEvolutionSystem } from '../skills/builtin/agent/evolution/SkillEvolutionSystem.js';
 import { LLMClient } from '../llm/LLMClient.js';
 import { SkillManager } from '../skills/SkillManager.js';
 import { SessionManager, Session } from '../session/SessionManager.js';
@@ -8,14 +8,43 @@ import { CronManager } from '../scheduling/CronManager.js';
 import { EventManager } from '../events/EventManager.js';
 import { QualityManager } from '../quality/QualityManager.js';
 import { createLogger } from '../utils/logger.js';
-import { clampInt, withTimeout } from '../utils/concurrency.js';
-import { buildChatGraph } from './graph/chatGraph.js';
-import { runPlan } from './execution/planRunner.js';
-import { resolveToolToSkillId } from './execution/toolRouter.js';
 import type { AgentProgressHandler } from '../protocol/progress.js';
 import { ensureSessionWorkspace } from '../workspace/sessionWorkspace.js';
-import AcademicSurveySelfImproveSkill from '../../skills/research/academic-survey-self-improve/index.js';
-import { computeSurgeMetrics } from '../evals/survey-benchmark/metrics.js';
+import path from 'path';
+
+// Built-in Core Skills
+import LocalFileSkill from '../skills/builtin/system/local-file-ops/index.js';
+import CodeAnalysisSkill from '../skills/builtin/system/code-analysis/index.js';
+import BrowserControlSkill from '../skills/builtin/system/browser-control/index.js';
+import GetCurrentTimeSkill from '../skills/builtin/system/get-current-time/index.js';
+import ShellSkill from '../skills/builtin/system/shell/index.js';
+
+// Built-in Agent/System Skills
+import OrchestrationSkill from '../skills/builtin/agent/agent-orchestration/index.js';
+import EvolutionSkill from '../skills/builtin/agent/evolution/index.js';
+import HeartbeatSkill from '../skills/builtin/agent/heartbeat/index.js';
+import MemoryManagementSkill from '../skills/builtin/agent/memory-management/index.js';
+import MemorySearchSkill from '../skills/builtin/agent/memory-search/index.js';
+import SchedulingSkill from '../skills/builtin/agent/scheduling/index.js';
+import SessionManagementSkill from '../skills/builtin/agent/session-management/index.js';
+import SkillManagementSkill from '../skills/builtin/agent/skill-management/index.js';
+
+// Research Tools (Phase 1-4)
+import PaperSearchSkill from '../../skills/01-literature/paper-search/index.js';
+import PaperReaderSkill from '../../skills/01-literature/paper-reader/index.js';
+import BibtexManagerSkill from '../../skills/01-literature/bibtex-manager/index.js';
+import LiteratureReviewSkill from '../../skills/01-literature/literature-review/index.js';
+import PaperSummarizerSkill from '../../skills/01-literature/paper-summarizer/index.js';
+
+import HypothesisGeneratorSkill from '../../skills/02-idea/hypothesis-generator/index.js';
+import GapAnalyzerSkill from '../../skills/02-idea/gap-analyzer/index.js';
+
+import DataAnalysisSkill from '../../skills/03-experiment/data-analysis/index.js';
+import PlotGeneratorSkill from '../../skills/03-experiment/plot-generator/index.js';
+
+import LatexHelperSkill from '../../skills/04-paper/latex-helper/index.js';
+import PdfGeneratorSkill from '../../skills/04-paper/pdf-generator/index.js';
+import FigureGeneratorSkill from '../../skills/04-paper/figure-generator/index.js';
 
 const logger = createLogger('Agent');
 
@@ -30,7 +59,6 @@ export class ResearchAgent {
   public eventManager: EventManager;
   public qualityManager: QualityManager;
   private heartbeatInterval: NodeJS.Timeout | null = null;
-  private chatGraph: any;
 
   private getGatewayBaseUrl(): string {
     return process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || '4000'}`;
@@ -45,104 +73,116 @@ export class ResearchAgent {
     this.memoryManager = memoryManager;
     this.memoryEvo = memoryEvo;
     this.llm = llm;
-    this.sessionManager = new SessionManager(memoryManager.storage); // Reuse storage
+    this.sessionManager = new SessionManager(memoryManager.storage);
     this.cronManager = new CronManager();
     this.eventManager = new EventManager();
     this.qualityManager = new QualityManager(llm);
     
-    // Pass managers to SkillManager for injection into SkillContext
-    this.skillManager = skillManager || new SkillManager(llm, memoryManager, process.cwd());
+    this.skillManager = skillManager || new SkillManager(
+      llm, 
+      memoryManager, 
+      path.join(process.cwd(), 'workspace'),
+      undefined,
+      path.join(process.cwd(), 'src', 'skills', 'builtin')
+    );
 
-    // Keep the current survey mainline available even when disk dynamic-loading is unstable.
-    if (!this.skillManager.getSkill('academic_survey_self_improve')) {
-      this.skillManager.registerSkill(new AcademicSurveySelfImproveSkill());
+    // Register built-in skills directly (bypassing file system discovery)
+    if (!this.skillManager.getSkill('local_file_ops')) {
+        this.skillManager.registerSkill(new LocalFileSkill());
+    }
+    if (!this.skillManager.getSkill('code_analysis')) {
+        this.skillManager.registerSkill(new CodeAnalysisSkill());
+    }
+    if (!this.skillManager.getSkill('pdf_generator')) {
+        this.skillManager.registerSkill(new PdfGeneratorSkill());
     }
     
-    // Inject managers now that they are created
+    // Research Tools
+    if (!this.skillManager.getSkill('paper_search')) {
+        this.skillManager.registerSkill(new PaperSearchSkill());
+    }
+    if (!this.skillManager.getSkill('paper_reader')) {
+        this.skillManager.registerSkill(new PaperReaderSkill());
+    }
+    if (!this.skillManager.getSkill('paper_summarizer')) {
+        this.skillManager.registerSkill(new PaperSummarizerSkill());
+    }
+    if (!this.skillManager.getSkill('bibtex_manager')) {
+        this.skillManager.registerSkill(new BibtexManagerSkill());
+    }
+    if (!this.skillManager.getSkill('browser_control')) {
+        this.skillManager.registerSkill(new BrowserControlSkill());
+    }
+    if (!this.skillManager.getSkill('data_analysis')) {
+        this.skillManager.registerSkill(new DataAnalysisSkill());
+    }
+    if (!this.skillManager.getSkill('get_current_time')) {
+        this.skillManager.registerSkill(new GetCurrentTimeSkill());
+    }
+    if (!this.skillManager.getSkill('latex_helper')) {
+        this.skillManager.registerSkill(new LatexHelperSkill());
+    }
+    if (!this.skillManager.getSkill('memory_search')) {
+        this.skillManager.registerSkill(new MemorySearchSkill());
+    }
+    if (!this.skillManager.getSkill('plot_generator')) {
+        this.skillManager.registerSkill(new PlotGeneratorSkill());
+    }
+    if (!this.skillManager.getSkill('shell')) {
+        this.skillManager.registerSkill(new ShellSkill());
+    }
+
+    // Register Extensible Skills manually for now (until dynamic loading handles the paths correctly)
+    if (!this.skillManager.getSkill('literature_review')) {
+        this.skillManager.registerSkill(new LiteratureReviewSkill());
+    }
+
+    if (!this.skillManager.getSkill('hypothesis_generator')) {
+        this.skillManager.registerSkill(new HypothesisGeneratorSkill());
+    }
+    if (!this.skillManager.getSkill('gap_analyzer')) {
+        this.skillManager.registerSkill(new GapAnalyzerSkill());
+    }
+
+    if (!this.skillManager.getSkill('data_analysis')) {
+        this.skillManager.registerSkill(new DataAnalysisSkill());
+    }
+    
+    // Agent / System Skills
+    if (!this.skillManager.getSkill('agent_orchestration')) {
+        this.skillManager.registerSkill(new OrchestrationSkill());
+    }
+    if (!this.skillManager.getSkill('skill_evolution')) {
+        this.skillManager.registerSkill(new EvolutionSkill());
+    }
+    if (!this.skillManager.getSkill('heartbeat')) {
+        this.skillManager.registerSkill(new HeartbeatSkill());
+    }
+    if (!this.skillManager.getSkill('memory_management')) {
+        this.skillManager.registerSkill(new MemoryManagementSkill());
+    }
+    if (!this.skillManager.getSkill('scheduling')) {
+        this.skillManager.registerSkill(new SchedulingSkill());
+    }
+    if (!this.skillManager.getSkill('session_management')) {
+        this.skillManager.registerSkill(new SessionManagementSkill());
+    }
+    if (!this.skillManager.getSkill('skill_management')) {
+        this.skillManager.registerSkill(new SkillManagementSkill());
+    }
+    
     this.skillManager.setManagers({
         cron: this.cronManager,
         session: this.sessionManager,
-        skill: this.skillManager, // Self-reference for skills that need to execute other skills
+        skill: this.skillManager,
         event: this.eventManager,
     });
     
     this.skillEvo = new SkillEvolutionSystem(this.skillManager, llm);
     
-    // Trigger loading from disk (async)
     this.skillManager.loadSkillsFromDisk().catch(err => {
         logger.error('Failed to load skills from disk:', err);
     });
-
-    // Wire up events
-    this.setupEventListeners();
-
-    this.chatGraph = buildChatGraph({
-      createPlan: async ({ message, log, forceAuto, onProgress }) => {
-        return this.createPlan(message, log, forceAuto, onProgress);
-      },
-      executePlan: async ({ userId, session, message, plan, log, onProgress, sendPlan, sendStepThinking, accumulatedArtifacts }) => {
-        return this.executePlanFromGraph({
-          userId,
-          session,
-          message,
-          plan,
-          log,
-          onProgress,
-          sendPlan,
-          sendStepThinking,
-          accumulatedArtifacts,
-        });
-      },
-      executeLegacy: async ({ userId, session, message, log, onProgress }) => {
-        return this.executeLegacyLogic(session, userId, message, log, onProgress);
-      },
-      postProcess: async ({ userId, session, message, reply, log, onProgress }) => {
-        return this.handlePostProcessing(session, userId, message, reply, log, onProgress);
-      },
-    });
-  }
-
-  private async executePlanFromGraph(args: {
-    userId: string;
-    session: Session;
-    message: string;
-    plan: { intent: string; steps: any[] };
-    log: (content: string, stats?: any) => void;
-    onProgress?: AgentProgressHandler;
-    sendPlan: (plan: { steps: any[] }) => void;
-    sendStepThinking: (stepId: string, token: string) => void;
-    accumulatedArtifacts: any[];
-  }): Promise<{ reply: string; accumulatedArtifacts: any[] }> {
-    const { userId, session, plan, log, onProgress, sendPlan, sendStepThinking, accumulatedArtifacts } = args;
-
-    return runPlan({
-      userId,
-      session,
-      plan,
-      log,
-      onProgress,
-      sendPlan,
-      sendStepThinking,
-      accumulatedArtifacts,
-      isStopped: () => this.sessionManager.isSessionStopped(session.id),
-      executeStep: this.executeStep.bind(this),
-      addAssistantMessage: (reply, metadata) => this.sessionManager.addMessage(session.id, 'assistant', reply, metadata),
-      onStepError: (message, error) => {
-        logger.error(message, error);
-      },
-    });
-  }
-
-  private setupEventListeners() {
-      // Example: Log all commands
-      this.eventManager.on('command:executed', (payload) => {
-          logger.info(`[Event] Command Executed: ${payload.command}`);
-      });
-
-      // Example: Log memory additions
-      this.eventManager.on('memory:added', (payload) => {
-          logger.info(`[Event] Memory Added: ${payload.id} (${payload.type})`);
-      });
   }
 
   private heartbeatRunInFlight = false;
@@ -163,7 +203,6 @@ export class ResearchAgent {
   private async runHeartbeatLoop() {
     if (this.heartbeatRunInFlight) return;
     this.heartbeatRunInFlight = true;
-
     try {
       while (this.heartbeatRunQueued) {
         this.heartbeatRunQueued = false;
@@ -175,84 +214,65 @@ export class ResearchAgent {
   }
 
   public async start() {
-    logger.info('Agent started. Heartbeat will run after each chat.');
+    logger.info('Agent started.');
   }
 
   public stop() {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
-      logger.info('Stopped heartbeat interval.');
     }
   }
 
   private async heartbeat() {
-    logger.debug('[Agent] Heartbeat...');
-    
-    // Execute Heartbeat Skill
     try {
-        // SkillManager loads skills asynchronously, so "heartbeat" might not be ready on first call
-        // We should check if it's available or wait/retry, but for now we just catch error
         if (this.skillManager.getSkill('heartbeat')) {
-            const result = await this.skillManager.executeSkill('heartbeat', 'system', {});
-            
-            // Check for significant updates and notify active session if possible
-            const memoryStats = result.memory;
-            if (memoryStats && (memoryStats.moved > 0 || memoryStats.promoted > 0 || memoryStats.pruned > 0)) {
-                const msg = `[System Heartbeat] Memory Optimization: Moved ${memoryStats.moved} to short-term, Promoted ${memoryStats.promoted} to long-term.`;
-                logger.info(msg);
-                
-                // User requested not to send chat messages for background memory operations
-                // const session = this.sessionManager.getOrCreateActiveSession('web-user');
-                // if (session) {
-                //    this.sessionManager.addMessage(session.id, 'assistant', msg);
-                // }
-            }
-
-            const skillStats = result.skills;
-            if (skillStats) {
-                // Log stats
-            }
-        } else {
-             logger.warn('Heartbeat skill not found (yet). Skipping this beat.');
+            await this.skillManager.executeSkill('heartbeat', 'system', {});
         }
     } catch (e) {
         logger.error('Heartbeat skill failed:', e);
     }
+  }
 
-    // 3. Cron jobs are handled by CronManager independently
+  private buildToolsArray() {
+    return this.skillManager.getAllSkills()
+      .filter(s => !s.tags?.includes('declarative'))
+      .map(skill => {
+        // Safe tool name for OpenAI
+        const safeName = skill.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+        return {
+          type: 'function' as const,
+          function: {
+            name: safeName,
+            description: skill.description || `Execute ${skill.name}`,
+            parameters: skill.parameters || {
+              type: 'object',
+              properties: {
+                params: {
+                  type: 'object',
+                  description: 'Dynamic parameters for this skill based on its description.'
+                }
+              },
+              additionalProperties: true
+            }
+          }
+        };
+      });
   }
 
   public async chat(
     userId: string, 
     message: string, 
     onProgress?: AgentProgressHandler,
-    sessionId?: string,
-    options?: { autoMode?: boolean }
+    sessionId?: string
   ): Promise<string> {
-    // Helper to log and emit progress
     const log = (content: string, stats?: any) => {
       const payload = stats ? `${content}__STATS__${JSON.stringify(stats)}` : content;
       onProgress?.('log', payload);
-      if (stats) {
-        onProgress?.('stats', stats);
-      }
-      // Persist log to session history
+      if (stats) onProgress?.('stats', stats);
       this.sessionManager.addMessage(session.id, 'log', payload);
     };
 
-    const sendPlan = (plan: { steps: any[] }) => {
-      onProgress?.('plan', plan);
-      try {
-        this.sessionManager.addMessage(session.id, 'plan', JSON.stringify(plan));
-      } catch {}
-    };
-
-    const sendStepThinking = (stepId: string, token: string) => {
-      onProgress?.('todo', { id: stepId, thinking: token });
-    };
-
-    // Get or create session
     let session: Session;
     if (sessionId) {
       const existing = this.sessionManager.getSession(sessionId);
@@ -265,1193 +285,338 @@ export class ResearchAgent {
       session = this.sessionManager.getOrCreateActiveSession(userId);
     }
     
-    // Ensure session is active and running
     this.sessionManager.activateSession(session.id);
     this.sessionManager.setSessionStatus(session.id, 'running');
     
+    let finalReply = '';
+    const accumulatedArtifacts: any[] = [];
+
     try {
         await ensureSessionWorkspace(session.id);
-
-        // Update session title if it's the first user message
         if (session.messages.length === 0) {
             session.title = message.slice(0, 30) + (message.length > 30 ? '...' : '');
         }
 
         this.sessionManager.addMessage(session.id, 'user', message);
 
-        // 1. Plan
-        logger.info(`Creating plan for user ${userId}...`);
-        log(`[Agent] Planning response...`);
+        const tools = this.buildToolsArray();
+        const memories = await this.memoryManager.getFormattedMemories(userId, message);
         
-        const graphState = await this.chatGraph.invoke({
-          userId,
-          message,
-          session,
-          options,
-          onProgress,
-          log,
-          sendPlan,
-          sendStepThinking,
-          accumulatedArtifacts: [],
-        });
+        // System Prompt
+        const systemPrompt = `You are Redigg, an advanced autonomous research agent.
+You have access to a variety of tools (skills). You can call multiple tools sequentially or in parallel.
+If the user asks to analyze code, use 'code_analysis'.
+If the user asks to manage files, use 'local_file_ops'.
+If the user asks to generate a PDF, use 'pdf_generator'.
 
-        const reply = String(graphState?.reply || '');
-        return reply || 'I was unable to generate a response.';
+Context & Preferences:
+${memories || 'No prior context.'}
+
+IMPORTANT:
+- Think step by step. If you need information, use tools.
+- When you are done, summarize your findings directly to the user.
+- If a tool generates a file (like PDF), include a markdown link to it in your final response: [Filename.pdf](/url/path).`;
+
+        // Gather history
+        const historyMsgs = this.sessionManager.getHistory(session.id, 10)
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map(m => ({ role: m.role, content: m.content }));
+
+        const messages: any[] = [
+          { role: 'system', content: systemPrompt },
+          ...historyMsgs,
+          { role: 'user', content: message }
+        ];
+
+        const MAX_STEPS = 15;
+        let stepCount = 0;
+        let isDone = false;
+
+        onProgress?.('segment', { id: 'planning', type: 'thinking', title: 'Planning', status: 'active' });
+
+        let lastStreamText = '';
+        while (stepCount < MAX_STEPS && !isDone) {
+          if (this.sessionManager.isSessionStopped(session.id)) {
+            log('[Agent] Session stopped by user.');
+            finalReply = 'I stopped the task as requested.';
+            break;
+          }
+          
+          stepCount++;
+          log(`[Agent] Step ${stepCount}: Generating thought/action...`);
+
+          let streamText = '';
+          let toolCalls: any[] | undefined = undefined;
+
+          // Call LLM
+          if (this.llm.chatStream && onProgress) {
+             await this.llm.chatStream(messages, {
+                onToken: (t) => { streamText += t; onProgress('token', t); },
+                onThinking: (t) => { onProgress('thinking', t); },
+                onToolCallStart: (tc) => {
+                   log(`[Agent] Decided to use tool: ${tc.function.name}`);
+                   onProgress('todo', { id: tc.id, status: 'in_progress', content: `Using tool: ${tc.function.name}` });
+                },
+                onComplete: (text, tc) => { toolCalls = tc; }
+             }, { tools });
+          } else {
+             const res = await this.llm.chat(messages, { tools });
+             streamText = res.content;
+             toolCalls = res.tool_calls;
+             if (streamText) onProgress?.('token', streamText);
+          }
+          
+          // Fallback: parse text-based tool calls if the model failed to use native tool calling
+          if ((!toolCalls || toolCalls.length === 0) && streamText) {
+             const toolCallRegex = /<tool_call>\s*([a-zA-Z0-9_-]+)\s*\(?\s*(\{[\s\S]*?(?=\)?\s*(?:<tool_call>|$)))/g;
+             const nakedCallRegex = /([a-zA-Z0-9_-]+)\s*\(\s*([a-zA-Z0-9_-]+\s*=\s*[\s\S]*?)\s*\)/g;
+             
+             let match;
+             const extractedTools = [];
+             
+             // First try <tool_call> tag format
+             while ((match = toolCallRegex.exec(streamText)) !== null) {
+                 extractedTools.push({
+                     id: `call_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                     type: 'function',
+                     function: {
+                         name: match[1],
+                         arguments: match[2]
+                     }
+                 });
+             }
+             
+             // If still empty, try naked python-style function calls (e.g. tool_name(query="..."))
+             if (extractedTools.length === 0) {
+                 // Reset regex state just in case
+                 nakedCallRegex.lastIndex = 0;
+                 while ((match = nakedCallRegex.exec(streamText)) !== null) {
+                     const funcName = match[1];
+                     const argsStr = match[2];
+                     
+                     // Only accept if funcName matches a known tool
+                     if (tools.some(t => t.function.name === funcName)) {
+                         // Very basic kwarg to JSON converter for fallback
+                         const argsJson: any = {};
+                         // A slightly more robust parser for naked args
+                         const pairs = argsStr.split(/,\s*(?=[a-zA-Z0-9_]+\s*=)/);
+                         pairs.forEach(part => {
+                             const eqIdx = part.indexOf('=');
+                             if (eqIdx > -1) {
+                                 const k = part.slice(0, eqIdx).trim();
+                                 let val = part.slice(eqIdx + 1).trim();
+                                 if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+                                 else if (val.startsWith("'") && val.endsWith("'")) val = val.slice(1, -1);
+                                 argsJson[k] = val;
+                             }
+                         });
+                         
+                         extractedTools.push({
+                             id: `call_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                             type: 'function',
+                             function: {
+                                 name: funcName,
+                                 arguments: JSON.stringify(argsJson)
+                             }
+                         });
+                     }
+                 }
+             }
+             
+             if (extractedTools.length > 0) {
+                 toolCalls = extractedTools;
+             }
+          }
+
+          // Clean up the text so we don't show the raw tool call to the user
+          streamText = streamText.replace(/<tool_call>[\s\S]*$/, '').trim();
+          streamText = streamText.replace(/([a-zA-Z0-9_-]+)\s*\(\s*([a-zA-Z0-9_-]+\s*=\s*[\s\S]*?)\s*\)/g, '').trim();
+          
+          // Strip <think> tags from the final text so it doesn't clutter the history
+          streamText = streamText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+          streamText = streamText.replace(/<think>[\s\S]*/g, '').trim(); // in case it was unclosed
+          
+          // Fallback strip tool tags entirely if any remain
+          streamText = streamText.replace(/<tool_call>[\s\S]*$/, '').trim();
+
+          lastStreamText = streamText;
+
+          // Append assistant message
+          messages.push({
+            role: 'assistant',
+            content: streamText,
+            tool_calls: toolCalls
+          });
+
+          if (!toolCalls || toolCalls.length === 0) {
+            // No tools called, we are done!
+            finalReply = streamText;
+            isDone = true;
+            break;
+          }
+
+          // Execute tools
+          for (const tc of toolCalls) {
+             if (this.sessionManager.isSessionStopped(session.id)) break;
+
+             const toolName = tc.function.name;
+             const toolArgs = tc.function.arguments;
+             let parsedArgs: any = {};
+             try { parsedArgs = JSON.parse(toolArgs); } catch (e) {}
+
+             // Unpack wrapper if needed
+             if (parsedArgs.params && Object.keys(parsedArgs).length === 1) {
+                 parsedArgs = parsedArgs.params;
+             }
+
+             onProgress?.('tool_call', {
+               id: tc.id,
+               tool: toolName,
+               input: parsedArgs,
+               ts: Date.now(),
+             });
+
+             log(`[Skill:${toolName}] Executing with args: ${JSON.stringify(parsedArgs)}`);
+             
+             let toolResultStr = '';
+             try {
+                // Find original skill ID (un-safed)
+                const skill = this.skillManager.getAllSkills().find(s => s.id.replace(/[^a-zA-Z0-9_-]/g, '_') === toolName);
+                if (!skill) throw new Error(`Skill ${toolName} not found`);
+
+                const result = await this.skillManager.executeSkill(skill.id, userId, parsedArgs, {
+                  onLog: (type, content, metadata) => {
+                     const text = typeof content === 'string' ? content : (() => {
+                       try { return JSON.stringify(content); } catch { return String(content); }
+                     })();
+
+                     if (type === 'thinking') {
+                       onProgress?.('thinking', text);
+                       return;
+                     }
+
+                     if (type === 'tool_call') {
+                       onProgress?.('tool_call', {
+                         id: metadata?.id || `skill-${toolName}-${Date.now()}`,
+                         tool: metadata?.tool || String(metadata?.name || text || toolName),
+                         input: metadata?.input ?? metadata?.params ?? metadata ?? text,
+                         ts: Date.now(),
+                       });
+                       return;
+                     }
+
+                     if (type === 'tool_result') {
+                       const ok = typeof metadata?.ok === 'boolean' ? metadata.ok : metadata?.isError ? false : true;
+                       onProgress?.('tool_result', {
+                         id: metadata?.id || `skill-${toolName}-${Date.now()}`,
+                         tool: metadata?.tool || String(metadata?.name || text || toolName),
+                         ok,
+                         output: metadata?.output ?? metadata?.result ?? metadata ?? text,
+                         ts: Date.now(),
+                       });
+                       return;
+                     }
+
+                     if (type === 'error') {
+                       log(`[Skill:${toolName}] Error: ${text}`);
+                       return;
+                     }
+
+                     log(`[Skill:${toolName}] ${text}`);
+                  },
+                  onProgress: async (p, desc) => {
+                     onProgress?.('todo', { id: tc.id, status: 'in_progress', content: `[${toolName}] ${desc}` });
+                  }
+                });
+
+                // Extract artifacts if it's pdf_generator
+                if (toolName === 'pdf_generator' && result.url && result.file_path) {
+                    const url = result.url.startsWith('/') ? result.url : `/${result.url}`;
+                    accumulatedArtifacts.push({
+                        id: `file-${Date.now()}`,
+                        name: parsedArgs.title ? `${parsedArgs.title}.pdf` : 'document.pdf',
+                        type: 'file',
+                        url: `${this.getGatewayBaseUrl()}${url}`,
+                        path: result.file_path,
+                        mimeType: 'application/pdf'
+                    });
+                }
+
+                toolResultStr = typeof result === 'string' ? result : 
+                                typeof result.formatted_output === 'string' ? result.formatted_output : 
+                                typeof result.summary === 'string' ? result.summary : JSON.stringify(result);
+
+                onProgress?.('tool_result', {
+                  id: tc.id,
+                  tool: toolName,
+                  ok: true,
+                  output: toolResultStr.length > 8000 ? `${toolResultStr.slice(0, 8000)}\n...[truncated]...` : toolResultStr,
+                  ts: Date.now(),
+                });
+                
+                onProgress?.('todo', { id: tc.id, status: 'completed', content: `Finished: ${toolName}` });
+                log(`[Skill:${toolName}] Success`);
+             } catch (err: any) {
+                logger.error(`[Skill:${toolName}] Error:`, err);
+                toolResultStr = `Error executing tool: ${err.message || String(err)}`;
+
+                onProgress?.('tool_result', {
+                  id: tc.id,
+                  tool: toolName,
+                  ok: false,
+                  output: toolResultStr,
+                  ts: Date.now(),
+                });
+                onProgress?.('todo', { id: tc.id, status: 'failed', content: `Failed: ${toolName}` });
+                log(`[Skill:${toolName}] Error: ${err.message}`);
+             }
+
+             messages.push({
+               role: 'tool',
+               tool_call_id: tc.id,
+               content: toolResultStr
+             });
+          }
+        }
+
+        if (stepCount >= MAX_STEPS) {
+           log('[Agent] Max steps reached. Forcing completion.');
+           finalReply = lastStreamText || 'Task interrupted due to step limit.';
+        }
+
+        onProgress?.('segment', { id: 'planning', type: 'thinking', title: 'Planning', status: 'completed' });
+
+        const metadata = accumulatedArtifacts.length > 0 ? { attachments: accumulatedArtifacts } : undefined;
+        this.sessionManager.addMessage(session.id, 'assistant', finalReply, metadata);
+
+        // Background Consolidation
+        void this.memoryManager.consolidateMemories(userId).catch(e => logger.error('Consolidation failed', e));
+
+        if (session.messages.length <= 4 && (!session.title || session.title.length > 20)) {
+           void this.generateSessionTitle(session, message, finalReply).then(t => {
+               if (t) {
+                   session.title = t;
+                   onProgress?.('token', `\n[TITLE_GENERATED]${t}`);
+               }
+           });
+        }
+
+        return finalReply;
     } finally {
-        // Ensure session is back to active (not running) even if error occurred
-        // BUT if it was stopped, keep it as stopped.
         if (!this.sessionManager.isSessionStopped(session.id)) {
             this.sessionManager.setSessionStatus(session.id, 'active');
         }
-
         this.queueHeartbeatRun();
     }
   }
 
-  private async createPlan(
-      message: string, 
-      log?: (content: string, stats?: any) => void, 
-      forceAuto: boolean = false,
-      onProgress?: AgentProgressHandler
-  ): Promise<{ intent: string, steps: any[] }> {
-      const startTime = Date.now();
-      const prefersChinese = /[\u4e00-\u9fff]/.test(message);
-
-      onProgress?.('segment', {
-        id: 'planning',
-        type: 'thinking',
-        title: 'Planning',
-        status: 'active'
-      });
-      const skillCatalog = this.skillManager.getAllSkills()
-        .map((skill) => ({
-          id: skill.id,
-          name: skill.name,
-          description: skill.description,
-          tags: Array.isArray(skill.tags) ? skill.tags : []
-        }))
-        .sort((a, b) => a.id.localeCompare(b.id));
-
-      const skillCatalogText = skillCatalog
-        .map((s) => `- ${s.id}: ${s.description || s.name}${s.tags.includes('declarative') ? ' (declarative)' : ''}`)
-        .join('\n');
-      const prompt = `
-You are a planning engine for a research agent.
-User Request: "${message}"
-Force Auto Mode: ${forceAuto}
-
-Built-in Tools:
-- AutoResearch: Continuously optimize and improve a report in a loop.
-- Chat: Reply to user (final step).
-
-Executable Skills (tool name should be EXACTLY the skill id):
-${skillCatalogText}
-
-Return a JSON plan:
-{
-  "intent": "single" | "multi_step",
-  "steps": [
-    {
-      "id": "1",
-      "description": "Concise action description",
-      "tool": "AutoResearch" | "Chat" | "<skill_id>",
-      "params": { }
-    }
-  ]
-}
-
-Rules:
-1. If 'Force Auto Mode' is true, you MUST use the 'AutoResearch' tool as the primary step.
-2. If the user asks for a PDF, ALWAYS include a 'PdfGenerator' step followed by a 'Chat' step.
-3. The 'Chat' step message MUST explicitly mention the generated file and include a placeholder link like '[Title](...)' to indicate where it can be downloaded.
-4. If the user wants to test PDF generation directly or asks for a PDF without confirmation, just generate it.
-`;
-      try {
-          onProgress?.('token', prefersChinese
-            ? '我先明确任务目标，并拆成可执行的步骤，然后边做边补充信息。\n\n'
-            : "I'll clarify the goal, break it into executable steps, and iterate between searching and synthesizing.\n\n"
-          );
-
-          const response = await this.llm.chat([{ role: 'user', content: prompt }]);
-          const fullContent = response.content;
-          
-          // Log stats
-          const duration = Date.now() - startTime;
-          const tokens = Math.ceil(fullContent.length / 4);
-          if (log) {
-              log(`[Agent] Created plan`, { duration, tokens, operation: 'planning' });
-          }
-
-          let text = fullContent.trim();
-          if (text.startsWith('```')) {
-              text = text.replace(/^```(json)?/, '').replace(/```$/, '');
-          }
-          const plan = JSON.parse(text);
-          onProgress?.('token', prefersChinese ? '计划已生成，开始执行。\n\n' : 'Plan ready. Starting execution.\n\n');
-
-          onProgress?.('segment', {
-            id: 'planning',
-            type: 'thinking',
-            title: 'Planning',
-            status: 'completed'
-          });
-          return forceAuto ? this.normalizeAutoResearchPlan(plan, message) : plan;
-      } catch (e) {
-          logger.error('Planning failed:', e);
-
-          onProgress?.('segment', {
-            id: 'planning',
-            type: 'thinking',
-            title: 'Planning',
-            status: 'error',
-            error: String(e)
-          });
-          return { intent: 'single', steps: [] };
-      }
-  }
-
-  private normalizeAutoResearchPlan(plan: any, message: string): { intent: string; steps: any[] } {
-    const steps = Array.isArray(plan?.steps) ? plan.steps : [];
-    const autoIndex = steps.findIndex((step: any) => step?.tool === 'AutoResearch');
-
-    const autoStep = autoIndex >= 0
-      ? steps[autoIndex]
-      : {
-          id: 'auto',
-          description: `Conduct continuous optimization and research on the topic '${message}'`,
-          tool: 'AutoResearch',
-          params: { topic: message },
-        };
-
-    const topic = autoStep?.params?.topic || autoStep?.params?.query || message;
-    const normalizedAutoStep = {
-      ...autoStep,
-      id: String(autoStep?.id || 'auto'),
-      tool: 'AutoResearch',
-      params: {
-        ...(autoStep?.params || {}),
-        topic,
-      },
-    };
-
-    return {
-      intent: 'single',
-      steps: [normalizedAutoStep],
-    };
-  }
-
-  private async executeStep(
-      step: any, 
-      userId: string, 
-      session: Session, 
-      log: (c: string, stats?: any) => void,
-      onProgress?: AgentProgressHandler,
-      accumulatedArtifacts: any[] = [],
-      planSteps: any[] = [],
-      sendStepThinking?: (stepId: string, token: string) => void
-  ): Promise<{ output: string, artifacts: any[], usage?: { promptTokens: number, completionTokens: number } }> {
-      let output = '';
-      let artifacts: any[] = [];
-      let usage: { promptTokens: number, completionTokens: number } | undefined;
-
-      const skillHandlers = {
-          onLog: (type: string, content: string) => {
-              if (type === 'thinking') {
-                  if (process.env.SHOW_THINKING === 'true' && sendStepThinking) {
-                      sendStepThinking(step.id, content);
-                  }
-                  return;
-              }
-
-              if (type === 'action') {
-                  if (!content.startsWith('- ')) {
-                      onProgress?.('token', `${content}\n`);
-                      return;
-                  }
-              }
-
-              log(`[Skill:${step.tool}] ${content}`);
-          },
-          onProgress: async (progress: number, description: string, metadata?: any) => {
-               if (metadata && typeof metadata.chat === 'string' && metadata.chat.trim()) {
-                   onProgress?.('token', `\n\n${metadata.chat.trim()}\n`);
-               }
-
-               if (metadata && Array.isArray(metadata.todos)) {
-                   for (const todo of metadata.todos) {
-                       if (todo && typeof todo.id === 'string') {
-                           onProgress?.('todo', todo);
-                       }
-                   }
-               }
-
-               if (metadata && metadata.silentStepProgress) {
-                   return;
-               }
-
-               log(`[Skill] ${description}`, metadata);
-
-               // Update the step in UI
-               onProgress?.('todo', {
-                   id: step.id,
-                   status: 'in_progress',
-                   content: `${step.description}: ${description}`,
-                   metadata: metadata
-               });
-          }
-      };
-
-      switch (step.tool) {
-          case 'LiteratureReview':
-              output = await this.executeLiteratureReview(session, userId, step.params.topic, log, onProgress, sendStepThinking ? (token) => sendStepThinking(step.id, token) : undefined);
-              break;
-          case 'ConceptExplainer':
-              const ceResult = await this.skillManager.executeSkill('concept_explainer', userId, { concept: step.params.concept }, skillHandlers);
-              output = ceResult.formatted_output;
-              break;
-          case 'PdfGenerator':
-              const pdfContent = this.resolvePdfGeneratorContent(session, step.params.content, planSteps);
-              const pdfResult = await this.skillManager.executeSkill(
-                  'pdf_generator',
-                  userId,
-                  { title: step.params.title, content: pdfContent, sessionId: session.id },
-                  skillHandlers
-              );
-              output = pdfResult.formatted_output;
-              if (pdfResult.url && pdfResult.file_path) {
-                  // Ensure URL is valid (gateway url + relative path)
-                  const url = pdfResult.url.startsWith('/') ? pdfResult.url : `/${pdfResult.url}`;
-                  // Use absolute URL if needed, but relative is fine for same origin
-                  artifacts.push({
-                      id: `file-${Date.now()}`,
-                      name: `${step.params.title || 'document'}.pdf`,
-                      type: 'file',
-                      url: `${this.getGatewayBaseUrl()}${url}`,
-                      path: pdfResult.file_path,
-                      mimeType: 'application/pdf'
-                  });
-              }
-              break;
-          case 'CodeAnalysis':
-               const caResult = await this.skillManager.executeSkill('code_analysis', userId, { path: step.params.path || '.', operation: 'structure' }, skillHandlers);
-               output = `Project Structure:\n${caResult.structure}`;
-               break;
-          case 'MemorySearch':
-               const msResult = await this.skillManager.executeSkill('memory_management', userId, { operation: 'search', query: step.params.query }, skillHandlers);
-               output = JSON.stringify(msResult.results);
-               break;
-          case 'FileOps':
-               const foResult = await this.skillManager.executeSkill('local_file_ops', userId, { operation: step.params.operation }, skillHandlers);
-               output = `Moved ${foResult.moved} files.`;
-               break;
-          case 'AgentOrchestration':
-               output = "Agent orchestration not fully implemented in plan yet.";
-               break;
-          case 'Evolution':
-               output = "Evolution not fully implemented in plan yet.";
-               break;
-          case 'AutoResearch':
-              const topic = step.params.topic || 'General Research';
-              const parsedIterations = (() => {
-                  const raw = step.params.iterations ?? step.params.maxIterations ?? step.params.rounds;
-                  const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : raw;
-                  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
-              })();
-
-              const shouldDelay = !(process.env.NODE_ENV === 'test' || process.env.VITEST === 'true');
-              const actionTimeoutMs = clampInt(process.env.AUTO_RESEARCH_ACTION_TIMEOUT_MS, 2000, 600000, 60000);
-              const pdfEvery = clampInt(process.env.AUTO_RESEARCH_PDF_EVERY, 0, 50, 1);
-              const maxRounds = parsedIterations;
-              log(
-                maxRounds
-                  ? `[AutoResearch] Starting optimization loop for "${topic}". Max rounds: ${maxRounds}.`
-                  : `[AutoResearch] Starting continuous optimization loop for "${topic}". Will run until stopped.`
-              );
-              
-              let currentContent = await this.buildAutoResearchInitialDraft(session, userId, topic, log, onProgress, sendStepThinking ? (token: string) => sendStepThinking(step.id, token) : undefined);
-              let round = 0;
-              
-              while (true) {
-                  if (this.sessionManager.isSessionStopped(session.id)) {
-                      log('[AutoResearch] Session stopped by user.');
-                      output = `Auto-research completed/stopped. Stopped by user after ${round} rounds. Final content length: ${currentContent.length}.`;
-                      break;
-                  }
-
-                  if (maxRounds && round >= maxRounds) {
-                      output = `Auto-research completed/stopped. Completed after ${round} rounds. Final content length: ${currentContent.length}.`;
-                      break;
-                  }
-
-                  round++;
-
-                  log(`[AutoResearch] Round ${round}: Analyzing and improving...`);
-                  
-                  // 1. Plan Improvement
-                  const improvePrompt = `
-You are optimizing a research report on "${topic}".
-Current Round: ${round}
-Current Content Length: ${currentContent.length} chars.
-
-Goal: Identify ONE specific area to improve (e.g., "Add recent statistics", "Explain concept X better", "Find a case study").
-Return ONLY the improvement task description.
-`;
-                  
-                  // Use stream for thinking if available
-                  let improvementTask = '';
-                  if (this.llm.chatStream && sendStepThinking) {
-                      sendStepThinking(step.id, `\n\n> **Round ${round} Improvement Planning**\n`);
-                      onProgress?.('token', `\n\n第 ${round} 轮：先确定一个最关键的改进点。\n`);
-                      await this.llm.chatStream([{ role: 'user', content: improvePrompt }], {
-                          onToken: (token) => {
-                              improvementTask += token;
-                          }
-                      }, { timeoutMs: actionTimeoutMs });
-                  } else {
-                      const planRes = await this.llm.chat([{ role: 'user', content: improvePrompt }], { timeoutMs: actionTimeoutMs });
-                      improvementTask = planRes.content.trim();
-                  }
-                  
-                  log(`[AutoResearch] Improvement Task: ${improvementTask}`);
-                  
-                  // Check stop signal again before expensive operations
-                  if (this.sessionManager.isSessionStopped(session.id)) {
-                      output = `Auto-research completed/stopped. Stopped by user after ${round} rounds. Final content length: ${currentContent.length}.`;
-                      break;
-                  }
-
-                  // 2. Execute Improvement (Simulated via LLM or Skill)
-                  const refinePrompt = `
-You are an expert researcher.
-Topic: ${topic}
-Current Content:
-${currentContent}
-
-Task: ${improvementTask}
-
-Action: Perform the task and rewrite the FULL content to include the new information. Make it better, more detailed, and academic.
-`;
-                  let refinedContent = '';
-                  if (this.llm.chatStream && sendStepThinking) {
-                       onProgress?.('token', `\n\n第 ${round} 轮改进点：${improvementTask.trim()}\n`);
-                       onProgress?.('token', `开始应用改进并重写相关内容。\n`);
-                       await this.llm.chatStream([{ role: 'user', content: refinePrompt }], {
-                            onToken: (token) => {
-                                refinedContent += token;
-                            }
-                       }, { timeoutMs: actionTimeoutMs });
-                  } else {
-                       const refineRes = await this.llm.chat([{ role: 'user', content: refinePrompt }], { timeoutMs: actionTimeoutMs });
-                       refinedContent = refineRes.content;
-                  }
-
-                  currentContent = refinedContent;
-
-                  onProgress?.('token', `第 ${round} 轮完成。\n`);
-                  
-                  // 3. Generate Intermediate PDF
-                  const title = `${topic} - v${round}`;
-                  const shouldGeneratePdf = pdfEvery > 0 ? (round % pdfEvery === 0) : false;
-                  const pdfRes = shouldGeneratePdf
-                    ? await withTimeout(
-                        this.skillManager.executeSkill('pdf_generator', userId, { title, content: currentContent, sessionId: session.id }, skillHandlers),
-                        actionTimeoutMs,
-                        async () => ({ success: false } as any)
-                      )
-                    : null;
-                  
-                  if (pdfRes && pdfRes.url && pdfRes.file_path) {
-                       const url = pdfRes.url.startsWith('/') ? pdfRes.url : `/${pdfRes.url}`;
-                       const artifact = {
-                           id: `file-${Date.now()}`,
-                           name: `${title}.pdf`,
-                           type: 'file',
-                           url: `${this.getGatewayBaseUrl()}${url}`,
-                           path: pdfRes.file_path,
-                           mimeType: 'application/pdf'
-                       };
-                       artifacts.push(artifact);
-                       accumulatedArtifacts.push(artifact); // Add to global list
-                       
-                       // Send intermediate update to chat
-                       this.sessionManager.addMessage(session.id, 'assistant', `[AUTO] Round ${round} Complete: I have improved the document based on "${improvementTask}".\n\n[Download ${title}.pdf](${artifact.url})`, { attachments: [artifact], auto: true });
-                  }
-                  
-                  // Small delay to prevent tight loop if LLM is very fast, and allow stop signal processing
-                  if (shouldDelay) {
-                      await new Promise(resolve => setTimeout(resolve, maxRounds ? 500 : 2000));
-                  }
-              }
-              break;
-          case 'Chat': {
-              const history = this.sessionManager.getHistory(session.id, 10);
-              const historyText = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
-              const context = await this.memoryManager.getFormattedMemories(userId, step.params.message);
-              
-              let artifactContext = '';
-              if (accumulatedArtifacts.length > 0) {
-                  artifactContext = `
-[SYSTEM NOTICE] 
-The following files have been generated and are attached to this response:
-${accumulatedArtifacts.map(a => `- ${a.name} (${a.url})`).join('\n')}
-
-IMPORTANT INSTRUCTIONS FOR YOUR REPLY:
-1. You MUST explicitly mention that you have generated these files.
-2. You MUST include a markdown link to the file in your response using the format: [Filename.pdf](URL)
-3. Do not just say "I have attached the file", but provide the clickable link in the text.
-`;
-              }
-
-              let reply = '';
-              const messages = [
-                  { role: 'system', content: `You are Redigg. Context: ${context}\n\nSession History:\n${historyText}${artifactContext}` },
-                  { role: 'user', content: step.params.message }
-              ];
-
-              if (this.llm.chatStream && onProgress) {
-                  await this.llm.chatStream(messages as any, {
-                      onToken: (token) => {
-                          reply += token;
-                          onProgress('token', token);
-                      }
-                  });
-              } else {
-                  const response = await this.llm.chat(messages as any);
-                  reply = response.content;
-                  usage = response.usage;
-                  // Ensure UI gets the content if non-streaming
-                  onProgress?.('token', reply);
-              }
-              
-              // Attach accumulated artifacts to the final chat message
-              const metadata = accumulatedArtifacts.length > 0 ? { attachments: accumulatedArtifacts } : undefined;
-              this.sessionManager.addMessage(session.id, 'assistant', reply, metadata);
-              output = reply;
-              break;
-          }
-          default:
-              {
-                  const skillId = resolveToolToSkillId(this.skillManager, String(step.tool || ''));
-                  if (skillId) {
-                      const result = await this.skillManager.executeSkill(skillId, userId, step.params || {}, skillHandlers);
-                      output =
-                        typeof result === 'string'
-                          ? result
-                          : String((result as any).formatted_output || (result as any).summary || (result as any).message || JSON.stringify(result));
-                      break;
-                  }
-                  throw new Error(`Unknown tool: ${step.tool}`);
-              }
-      }
-
-      return { output, artifacts, usage };
-  }
-
-  private resolvePdfGeneratorContent(session: Session, plannedContent: unknown, planSteps: any[] = []): string {
-      const normalizedPlannedContent = typeof plannedContent === 'string' ? plannedContent.trim() : '';
-      if (this.isUsablePdfContent(normalizedPlannedContent)) {
-          return normalizedPlannedContent;
-      }
-
-      const previousStepContent = [...planSteps]
-          .filter(candidate => candidate.status === 'completed' && typeof candidate.result === 'string')
-          .map(candidate => String(candidate.result).trim())
-          .reverse()
-          .find(candidate => this.isUsablePdfContent(candidate));
-
-      if (previousStepContent) {
-          return previousStepContent;
-      }
-
-      const lastAssistantContent = [...this.sessionManager.getHistory(session.id, 20)]
-          .reverse()
-          .find(message => message.role === 'assistant' && this.isUsablePdfContent(message.content))
-          ?.content
-          ?.trim();
-
-      if (lastAssistantContent) {
-          return lastAssistantContent;
-      }
-
-      return normalizedPlannedContent || 'Generated based on literature review findings.';
-  }
-
-  private isUsablePdfContent(content: string): boolean {
-      const normalized = content.trim();
-      if (normalized.length < 120) {
-          return false;
-      }
-
-      const lower = normalized.toLowerCase();
-      const placeholderPhrases = [
-          'generated based on literature review findings',
-          'use the previous output',
-          'use previous output',
-          'same as above',
-          'previous step output',
-          'summarizing the key findings',
-          'based on the literature review findings'
-      ];
-
-      return !placeholderPhrases.some(phrase => lower.includes(phrase));
-  }
-
-  private async buildAutoResearchInitialDraft(
-      session: Session,
-      userId: string,
-      topic: string,
-      log: (c: string, stats?: any) => void,
-      onProgress?: AgentProgressHandler,
-      onThinking?: (token: string) => void
-  ): Promise<string> {
-      log(`[AutoResearch] Building initial survey draft with academic_survey_self_improve...`);
-
-      const actionTimeoutMs = clampInt(process.env.AUTO_RESEARCH_ACTION_TIMEOUT_MS, 2000, 600000, 60000);
-      const useCache = process.env.AUTO_RESEARCH_USE_CACHE === 'false' ? false : true;
-      const performance = {
-        parallelism: {
-          queryConcurrency: clampInt(process.env.AUTO_RESEARCH_QUERY_CONCURRENCY, 1, 6, 3),
-          snowballConcurrency: clampInt(process.env.AUTO_RESEARCH_SNOWBALL_CONCURRENCY, 1, 4, 2),
-          sectionWriteConcurrency: clampInt(process.env.AUTO_RESEARCH_WRITE_CONCURRENCY, 1, 6, 3),
-          sectionReviewConcurrency: clampInt(process.env.AUTO_RESEARCH_REVIEW_CONCURRENCY, 1, 6, 2),
-          figureConcurrency: clampInt(process.env.AUTO_RESEARCH_FIGURE_CONCURRENCY, 1, 4, 2)
-        },
-        timeouts: {
-          queryTimeoutMs: clampInt(process.env.AUTO_RESEARCH_QUERY_TIMEOUT_MS, 2000, 120000, actionTimeoutMs),
-          llmTimeoutMs: clampInt(process.env.AUTO_RESEARCH_LLM_TIMEOUT_MS, 2000, 240000, actionTimeoutMs),
-          llmRewriteTimeoutMs: clampInt(process.env.AUTO_RESEARCH_LLM_REWRITE_TIMEOUT_MS, 2000, 300000, actionTimeoutMs * 2),
-          snowballTimeoutMs: clampInt(process.env.AUTO_RESEARCH_SNOWBALL_TIMEOUT_MS, 2000, 120000, actionTimeoutMs)
-        }
-      };
-
-      try {
-          const result = await this.skillManager.executeSkill(
-              'academic_survey_self_improve',
-              userId,
-              { topic, depth: 'standard', useCache, performance },
-              {
-                  onLog: (type: any, content: string) => {
-                      if (type === 'thinking') {
-                          if (process.env.SHOW_THINKING === 'true' && onThinking) {
-                              onThinking(content);
-                          }
-                          return;
-                      } else {
-                          log(`[AutoResearch][Seed] ${content}`);
-                      }
-                  },
-                  onProgress: async (progress: number, description: string, metadata?: any) => {
-                      if (metadata && typeof metadata.chat === 'string' && metadata.chat.trim()) {
-                          onProgress?.('token', `\n\n${metadata.chat.trim()}\n`);
-                      }
-
-                      if (metadata && Array.isArray(metadata.todos)) {
-                          for (const todo of metadata.todos) {
-                              if (todo && typeof todo.id === 'string') {
-                                  onProgress?.('todo', todo);
-                              }
-                          }
-                      }
-
-                      if (metadata && metadata.silentStepProgress) {
-                          return;
-                      }
-
-                      log(`[AutoResearch][Seed] ${description}`, metadata);
-                  },
-                  onTodo: async (content: string, priority: string) => {
-                      onProgress?.('todo', {
-                          id: `auto-seed-${Date.now()}`,
-                          status: 'pending',
-                          content,
-                          priority
-                      });
-                  }
-              }
-          );
-
-          const initialContent = typeof result.formatted_output === 'string' && result.formatted_output.trim()
-              ? result.formatted_output
-              : typeof result.summary === 'string'
-                  ? result.summary
-                  : '';
-
-          if (initialContent.trim()) {
-              const paperCount = Array.isArray(result.papers) ? result.papers.length : 0;
-              const sectionCount = Array.isArray(result.sections) ? result.sections.length : 0;
-              const qualityScore = result.quality_report?.overallScore ?? null;
-
-              log('[AutoResearch] Initial survey draft ready.', {
-                  papers: paperCount,
-                  sections: sectionCount,
-                  quality: qualityScore
-              });
-
-              // Append quality report card to the survey markdown so it's visible in the UI
-              const qualityCard = formatQualityCard(result, paperCount, sectionCount);
-              return qualityCard ? `${initialContent}\n\n${qualityCard}` : initialContent;
-          }
-
-          throw new Error('Survey skill returned empty content.');
-      } catch (error) {
-          logger.error('[AutoResearch] Failed to build initial survey draft:', error);
-          log('[AutoResearch] Falling back to placeholder draft because survey seed generation failed.');
-          return `Initial draft for ${topic}.`;
-      }
-  }
-  
-  private async handlePostProcessing(
-      session: Session, 
-      userId: string, 
-      message: string, 
-      reply: string, 
-      log: (c: string) => void,
-      onProgress?: AgentProgressHandler
-  ) {
-    // Evolve Memory (Async)
-    try {
-        // DISABLED: Memory Evolution via LLM to save tokens as per user request.
-        // const result = await this.memoryEvo.evolve(userId, message, reply, (msg) => log(msg));
-        // if (result && result.added && result.added.length > 0) {
-        //     log(`[Evolution] Extracted ${result.added.length} new memories.`);
-        //     result.added.forEach((m: any) => {
-        //         log(`[Evolution] New Memory: "${m.content}" (${m.type}/${m.tier})`);
-        //     });
-        //     // Silent execution: no chat message for memory updates
-        // }
-        // if (result && result.updated && result.updated.length > 0) {
-        //      log(`[Evolution] Updated ${result.updated.length} memories.`);
-        //      result.updated.forEach((m: any) => {
-        //         log(`[Evolution] Updated Memory: "${m.content}" (${m.type}/${m.tier})`);
-        //      });
-        // }
-
-        // Trigger memory consolidation immediately after new interaction
-        // This handles background organization (pruning/promotion) without extra LLM extraction calls
-        await this.memoryManager.consolidateMemories(userId).then(() => {
-             // logger.debug('Post-chat consolidation complete');
-        }).catch(e => {
-             logger.error('Post-chat consolidation failed', e);
-        });
-
-        // After response and memory evolution, generate a title for the session if it's still generic
-        const dialogueTurns = session.messages.filter(m => m.role === 'user' || m.role === 'assistant').length;
-        if (dialogueTurns <= 4 && (session.title || '').length > 20) { // Early in convo or long default title
-            const title = await this.generateSessionTitle(session, message, reply);
-            if (title) {
-                session.title = title;
-                onProgress?.('session_title', { title, sessionId: session.id });
-                onProgress?.('token', `[TITLE_GENERATED]${title}`);
-            }
-        }
-    } catch (err) {
-      logger.error('Memory evolution failed:', err);
-    }
-  }
-
-  public async executeLegacyLogic(
-    session: Session,
-    userId: string, 
-    message: string, 
-    log: (content: string, stats?: any) => void,
-    onProgress?: AgentProgressHandler
-  ): Promise<string> {
-
-    const lowerMsg = message.toLowerCase();
-
-    // 1. Research Skills / Web Search
-    if (lowerMsg.includes('analyze paper') || lowerMsg.includes('summary of paper') || lowerMsg.includes('critique paper')) {
-        const title = message.replace(/\b(analyze paper|summary of paper|critique paper|about|on)\b/gi, '').trim();
-        if (title.length > 3) {
-            log(`[Agent] Analyzing paper: "${title}"`);
-            const result = await this.skillManager.executeSkill('paper_analysis', userId, { paper_title: title });
-            this.sessionManager.addMessage(session.id, 'assistant', result.formatted_output);
-            return result.formatted_output;
-        }
-    }
-
-    if (lowerMsg.startsWith('explain') || lowerMsg.includes('what is') || lowerMsg.includes('concept of')) {
-        // Simple heuristic: if it looks like a concept question
-        // But "what is your name" is conversational.
-        if (!lowerMsg.includes('your name') && !lowerMsg.includes('the time')) {
-             const concept = message.replace(/\b(explain|what is|concept of|tell me about)\b/gi, '').trim();
-             // Let's rely on LLM decision engine usually, but here we can force it if explicitly asked "explain X"
-             if (lowerMsg.startsWith('explain')) {
-                 log(`[Agent] Explaining concept: "${concept}"`);
-                 const result = await this.skillManager.executeSkill('concept_explainer', userId, { concept });
-                 this.sessionManager.addMessage(session.id, 'assistant', result.formatted_output);
-                 return result.formatted_output;
-             }
-        }
-    }
-
-    if (lowerMsg.includes('literature review') || lowerMsg.includes('search papers') || message.includes('[WEB SEARCH REQUEST]')) {
-      let topic = message.replace(/\b(do a|perform a|literature review|search papers|about|on)\b/gi, '').trim().replace(/\s+/g, ' ');
-      
-      if (message.includes('[WEB SEARCH REQUEST]')) {
-          topic = message.replace('[WEB SEARCH REQUEST]', '').split('\n')[0].trim(); // Extract first line as topic usually
-          // Clean up the prompt suffix if present
-          topic = topic.replace('Please perform a literature review or web search to answer this question.', '').trim();
-      }
-
-      if (topic.length > 3) {
-        return this.executeLiteratureReview(session, userId, topic, log, onProgress);
-      }
-    }
-
-    // 2. Infra Skills
-    if (lowerMsg.includes('analyze code') || lowerMsg.includes('project structure')) {
-      try {
-        const targetPath = '.'; 
-        logger.info(`Analyzing code in ${targetPath}...`);
-        const startTime = Date.now();
-        log(`[Agent] Analyzing code in ${targetPath}...`);
-        
-        const result = await this.skillManager.executeSkill('code_analysis', userId, { path: targetPath, operation: 'structure' });
-        
-        const duration = Date.now() - startTime;
-        const tokens = Math.ceil(result.structure.length / 4);
-        log(`[Agent] Completed Code Analysis`, { duration, tokens, operation: 'code_analysis' });
-
-        const response = `Here is the project structure:\n\`\`\`\n${result.structure}\n\`\`\``;
-        this.sessionManager.addMessage(session.id, 'assistant', response);
-        return response;
-      } catch (e) {
-        logger.error('Skill execution failed:', e);
-      }
-    }
-
-    if (lowerMsg.includes('organize files') || lowerMsg.includes('move pdfs')) {
-      try {
-        logger.info('Organizing files...');
-        const startTime = Date.now();
-        log('[Agent] Organizing files...');
-        
-        const result = await this.skillManager.executeSkill('local_file_ops', userId, { operation: 'organize' });
-        
-        const duration = Date.now() - startTime;
-        log(`[Agent] Completed File Organization`, { duration, tokens: 0, operation: 'file_ops' });
-
-        const response = `I have organized your PDF files into a 'papers' folder. Moved ${result.moved} files.`;
-        this.sessionManager.addMessage(session.id, 'assistant', response);
-        return response;
-      } catch (e) {
-        logger.error('Skill execution failed:', e);
-      }
-    }
-
-    // 3. Core Skills (Memory, Agents, Evolution)
-    if (lowerMsg.includes('search memories') || lowerMsg.includes('recall')) {
-      try {
-        const query = message.replace(/\b(search memories|recall|find memory about)\b/gi, '').trim();
-        logger.info(`Searching memories for "${query}"...`);
-        const startTime = Date.now();
-        log(`[Agent] Searching memories for "${query}"...`);
-        
-        const result = await this.skillManager.executeSkill('memory_management', userId, { 
-            operation: 'search', 
-            query 
-        });
-        
-        const duration = Date.now() - startTime;
-        const memories = result.results as any[];
-        const tokens = Math.ceil(JSON.stringify(memories).length / 4);
-        log(`[Agent] Completed Memory Search`, { duration, tokens, operation: 'memory_search' });
-        
-        let response = '';
-        if (memories.length === 0) {
-            response = `I couldn't find any memories matching "${query}".`;
-        } else {
-            response = `Here are the memories I found:\n\n${memories.map(m => `- [${m.tier}] ${m.content} (${new Date(m.created_at).toLocaleDateString()})`).join('\n')}`;
-        }
-        this.sessionManager.addMessage(session.id, 'assistant', response);
-        return response;
-      } catch (e) {
-        logger.error('Memory search failed:', e);
-      }
-    }
-
-    if (lowerMsg.includes('create agent') || lowerMsg.includes('sub-agent') || lowerMsg.includes('delegate') || lowerMsg.includes('list agents')) {
-        try {
-            if (lowerMsg.includes('create agent')) {
-                const nameMatch = message.match(/named\s+["']?(\w+)["']?/i);
-                const roleMatch = message.match(/role\s+of\s+["']?([\w\s]+)["']?/i);
-                const name = nameMatch ? nameMatch[1] : 'Assistant';
-                const role = roleMatch ? roleMatch[1] : 'Generalist';
-                
-                const result = await this.skillManager.executeSkill('agent_orchestration', userId, {
-                    operation: 'create_agent',
-                    name,
-                    role
-                });
-                
-                const response = `Created sub-agent ${result.name} (ID: ${result.agentId})`;
-                this.sessionManager.addMessage(session.id, 'assistant', response);
-                return response;
-            } else if (lowerMsg.includes('list agents')) {
-                const result = await this.skillManager.executeSkill('agent_orchestration', userId, {
-                    operation: 'list_agents'
-                });
-                const agents = result.agents as any[];
-                const response = `Active Agents:\n${agents.map(a => `- ${a.name} (${a.role})`).join('\n')}`;
-                this.sessionManager.addMessage(session.id, 'assistant', response);
-                return response;
-            }
-        } catch (e) {
-            logger.error('Orchestration failed:', e);
-        }
-    }
-
-    if (lowerMsg.includes('can you') || lowerMsg.includes('how do i') || lowerMsg.includes('evolve')) {
-       logger.info('Checking if I need to learn a new skill or evolve...');
-       log('[Agent] Checking if I need to learn a new skill or evolve...');
-       try {
-           const intent = message.replace(/\b(can you|how do i|evolve|create a skill to)\b/gi, '').trim();
-           if (intent.length > 5) {
-               const result = await this.skillManager.executeSkill('evolution', userId, {
-                   operation: 'create_skill',
-                   intent
-               });
-               
-               if (result.success) {
-                   const response = `I've evolved! ${result.message} (Skill ID: ${result.skillId})`;
-                   this.sessionManager.addMessage(session.id, 'assistant', response);
-                   return response;
-               }
-           }
-       } catch (e) {
-           // Fallback
-       }
-    }
-
-    // 4. Intelligent Default: Web Search for Unknown Topics
-    // Check if we have relevant memories. Strict search (no fallback to recent).
-    // This implements the "Default to Search" behavior for new topics.
-    const strictMemories = await this.memoryManager.searchMemories(userId, message, { limit: 1 });
-    const hasContext = strictMemories.length > 0;
-    const isConversational = /^(hello|hi|hey|thanks|thank you|bye|goodbye|ok|okay|yes|no|cool|great|wow|who are you|what are you)\b/i.test(message.trim().replace(/[!.?]+$/, ''));
-
-    if (!hasContext && !isConversational) {
-        log('[Agent] No local knowledge found. Checking if web search is needed...');
-        const decision = await this.shouldSearch(message, log);
-        
-        if (decision.shouldSearch) {
-             logger.info(`Implicit intent: Web Search on "${decision.topic}"`);
-             log(`[Agent] Decided to search web for: "${decision.topic}"`);
-             
-             return this.executeLiteratureReview(session, userId, decision.topic, log, onProgress);
-        } else {
-             log('[Agent] Decided not to search web. Generating response...');
-        }
-    }
-
-    // 5. Fallback: LLM Chat
-    logger.info(`Retrieving context for user ${userId}...`);
-    log(`[Agent] Retrieving context for user ${userId}...`);
-    const context = await this.memoryManager.getFormattedMemories(userId, message);
-    
-    // Retrieve Session History
-    const history = this.sessionManager.getHistory(session.id, 5); // Last 5 messages
-    const historyText = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
-
-    // Build Prompt
-    const systemPrompt = `
-You are Redigg, an autonomous research agent.
-Your goal is to assist researchers by providing accurate, insightful, and personalized responses.
-
-User Context & Preferences:
-${context || 'No prior context available.'}
-
-Session History:
-${historyText}
-
-Instructions:
-- Use the provided context to tailor your response.
-- Be concise and scientific.
-- If you don't know something, admit it.
-    `.trim();
-
-    // Generate Response
-    logger.info(`Generating response...`);
-    log(`[Agent] Generating response...`);
-    
-    let reply = '';
-
-    if (this.llm.chatStream && onProgress) {
-        await this.llm.chatStream([
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: message }
-        ], {
-            onToken: (token) => {
-                reply += token;
-                onProgress('token', token);
-            },
-            onError: (err) => logger.error(String(err))
-        });
-    } else {
-        const response = await this.llm.chat([
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: message }
-        ]);
-        reply = response.content;
-        // Call onProgress in non-streaming fallback to show tokens in UI
-        onProgress?.('token', reply);
-    }
-
-    // Save response to session
-    this.sessionManager.addMessage(session.id, 'assistant', reply);
-
-    // Evolve Memory (Async - now awaited to ensure logs are streamed)
-    try {
-        const result = await this.memoryEvo.evolve(userId, message, reply, (msg) => log(msg));
-        
-        if (result && result.added && result.added.length > 0) {
-            log(`[Evolution] Extracted ${result.added.length} new memories.`);
-            result.added.forEach((m: any) => {
-                log(`[Evolution] New Memory: "${m.content}" (${m.type}/${m.tier})`);
-            });
-            // Silent execution: no chat message for memory updates
-        }
-        if (result && result.updated && result.updated.length > 0) {
-             log(`[Evolution] Updated ${result.updated.length} memories.`);
-             result.updated.forEach((m: any) => {
-                log(`[Evolution] Updated Memory: "${m.content}" (${m.type}/${m.tier})`);
-             });
-        }
-
-        // Trigger memory consolidation immediately after new interaction
-        await this.memoryManager.consolidateMemories(userId).then(() => {
-             // logger.debug('Post-chat consolidation complete');
-        }).catch(e => {
-             logger.error('Post-chat consolidation failed', e);
-        });
-
-        // After response and memory evolution, generate a title for the session if it's still generic
-        if (session.messages.length <= 4 && (session.title || '').length > 20) { // Early in convo or long default title
-            const title = await this.generateSessionTitle(session, message, reply);
-            if (title) {
-                session.title = title;
-                onProgress?.('token', `[TITLE_GENERATED]${title}`);
-            }
-        }
-    } catch (err) {
-      logger.error('Memory evolution failed:', err);
-    }
-
-    return reply;
-  }
-
   private async generateSessionTitle(session: Session, userMsg: string, agentMsg: string): Promise<string | null> {
       try {
-          const prompt = `Summarize the following conversation into a short, 3-5 word title. Do not use quotes.
-User: ${userMsg}
-Agent: ${agentMsg}
-Title:`;
+          const prompt = `Summarize the following conversation into a short, 3-5 word title. Do not use quotes.\nUser: ${userMsg}\nAgent: ${agentMsg}\nTitle:`;
           const response = await this.llm.chat([{ role: 'user', content: prompt }]);
           return response.content.trim();
       } catch (e) {
           return null;
       }
   }
-
-  private async executeLiteratureReview(
-      session: Session, 
-      userId: string, 
-      topic: string, 
-      log: (content: string, stats?: any) => void,
-      onProgress?: AgentProgressHandler,
-      onThinking?: (token: string) => void
-  ): Promise<string> {
-    logger.info(`Detected intent: Literature Review on "${topic}"`);
-    const startTime = Date.now();
-    log(`[Agent] Detected intent: Literature Review (Web Search) on "${topic}"`);
-    
-    try {
-      const result = await this.skillManager.executeSkill(
-        'academic_survey_self_improve', 
-        userId, 
-        { topic },
-        {
-            onLog: (type, content) => {
-                if (type === 'thinking') {
-                    if (process.env.SHOW_THINKING === 'true' && onThinking) {
-                        onThinking(content);
-                    }
-                    return;
-                } else {
-                    log(`[Skill] ${content}`);
-                }
-            },
-            onProgress: async (progress, description, metadata) => {
-                 if (metadata && typeof metadata.chat === 'string' && metadata.chat.trim()) {
-                     onProgress?.('token', `\n\n${metadata.chat.trim()}\n`);
-                 }
-
-                 log(`[Skill] ${description}`, metadata);
-
-                 if (metadata && Array.isArray(metadata.todos)) {
-                     for (const todo of metadata.todos) {
-                         if (todo && typeof todo.id === 'string') {
-                             onProgress?.('todo', todo);
-                         }
-                     }
-                 }
-
-                 if (metadata && metadata.silentStepProgress) {
-                     return;
-                 }
-
-                 if (metadata && metadata.papers) {
-                     // Emit todo/progress update for UI
-                     onProgress?.('todo', { 
-                         id: 'research-progress', 
-                         type: 'research',
-                         status: 'in_progress', 
-                         content: `Found ${metadata.papers.length} papers`, 
-                         metadata: metadata 
-                     });
-                 }
-            },
-            onTodo: async (content, priority, step) => {
-                onProgress?.('todo', {
-                    id: `skill-todo-${Date.now()}`,
-                    status: 'pending',
-                    content,
-                    priority
-                });
-            }
-        }
-      );
-      const duration = Date.now() - startTime;
-      const tokens = Math.ceil(result.summary.length / 4); // Estimate
-      
-      log(`[Agent] Completed Literature Review`, { duration, tokens, operation: 'literature_review' });
-      
-      const response = `Here is a literature review on "${topic}":\n\n${result.summary}\n\n**Sources:**\n${result.papers.map((p: any) => `- [${p.title}](${p.url || '#'}) (${p.year})`).join('\n')}`;
-      
-      // Perform Quality Check
-      const quality = await this.qualityManager.evaluateTask(
-          `Literature Review on "${topic}"`,
-          result.summary,
-          { papersCount: result.papers.length }
-      );
-      
-      if (!quality.passed) {
-          log(`[Quality] Warning: Score ${quality.score}/100. ${quality.reasoning}`);
-          const warning = `\n\n> ⚠️ **Quality Check**: This review scored ${quality.score}/100. ${quality.suggestions[0] || ''}`;
-          this.sessionManager.addMessage(session.id, 'assistant', response + warning);
-          return response + warning;
-      }
-
-      this.sessionManager.addMessage(session.id, 'assistant', response);
-      return response;
-    } catch (e) {
-      logger.error('Skill execution failed:', e);
-      const errorMsg = "I encountered an error while searching for papers.";
-      this.sessionManager.addMessage(session.id, 'assistant', errorMsg);
-      return errorMsg;
-    }
-  }
-
-  private async shouldSearch(message: string, log?: (content: string, stats?: any) => void): Promise<{ shouldSearch: boolean; topic: string }> {
-      const prompt = `
-You are a decision engine for a research agent.
-The user sent: "${message}"
-We have NO local memory/context about this topic.
-
-Should we perform a web search to answer this?
-- YES if it asks for facts, news, definitions, explanations of concepts, or research.
-- NO if it is conversational (greeting, thanks), personal ("who are you"), or asks about "this project" or "code" (which should have been caught by other skills).
-
-Reply strictly in this format:
-SEARCH: <topic>
-or
-NO_SEARCH
-`;
-      try {
-          if (log) log('[Agent] Thinking about whether to search the web...');
-          const res = await this.llm.chat([{ role: 'user', content: prompt }]);
-          console.log('[DEBUG] shouldSearch response:', res);
-          const text = res.content.trim();
-          if (text.startsWith('SEARCH:')) {
-              return { shouldSearch: true, topic: text.replace('SEARCH:', '').trim() };
-          }
-      } catch (e) {
-          logger.error('Decision engine failed:', e);
-      }
-      return { shouldSearch: false, topic: '' };
-  }
-}
-
-/** Build a markdown quality report card from the survey skill result */
-function formatQualityCard(result: any, paperCount: number, sectionCount: number): string {
-    const qr = result.quality_report;
-    if (!qr || typeof qr.overallScore !== 'number') return '';
-
-    const sections = Array.isArray(result.sections) ? result.sections : [];
-    const claimCount = sections.reduce((sum: number, s: any) =>
-        sum + (Array.isArray(s.claimAlignments) ? s.claimAlignments.length : 0), 0);
-
-    const markdown = String(result.formatted_output || result.summary || '');
-    const citationMatches = markdown.match(/\[(\d+)\]/g);
-    const uniqueCitations = new Set(citationMatches?.map((m: string) => m.replace(/\[|\]/g, '')) || []);
-
-    const consistency = result.final_survey?.citationConsistency;
-    const ghostCount = consistency?.ghostCitations?.length ?? '?';
-    const orphanCount = consistency?.orphanReferences?.length ?? '?';
-    const isConsistent = consistency?.isConsistent;
-
-    const lines: string[] = [
-        '## Quality Report',
-        '',
-        `| Metric | Value |`,
-        `| --- | --- |`,
-        `| Overall Score | **${qr.overallScore}/100** |`,
-        `| Sections | ${sectionCount} |`,
-        `| Papers Retrieved | ${paperCount} |`,
-        `| Unique Citations | ${uniqueCitations.size} |`,
-        `| Claim Alignments | ${claimCount} |`,
-        `| Ghost Citations | ${ghostCount} |`,
-        `| Orphan References | ${orphanCount} |`,
-        `| Citation Consistent | ${isConsistent === true ? 'Yes' : isConsistent === false ? 'No' : '?'} |`,
-    ];
-
-    // SurGE-style metrics (computed locally)
-    try {
-        const requiredHeadings = sections.map((s: any) => String(s.title || ''));
-        const surge = computeSurgeMetrics(markdown, requiredHeadings);
-        lines.push(`| Citation Recall | ${(surge.citationRecall * 100).toFixed(0)}% |`);
-        lines.push(`| Structural Similarity | ${(surge.structuralSimilarity * 100).toFixed(0)}% |`);
-        lines.push(`| Vocabulary Diversity | ${(surge.vocabularyDiversity * 100).toFixed(0)}% |`);
-        lines.push(`| SurGE Composite | **${(surge.composite * 100).toFixed(1)}** |`);
-    } catch {
-        // metrics computation failed, skip
-    }
-
-    // Per-section review scores
-    if (Array.isArray(qr.sectionReviews) && qr.sectionReviews.length > 0) {
-        lines.push('', '### Section Scores', '');
-        lines.push('| Section | Score | Rewritten |');
-        lines.push('| --- | ---: | --- |');
-        for (const review of qr.sectionReviews) {
-            const title = sections.find((s: any) => s.sectionId === review.sectionId)?.title || review.sectionId;
-            lines.push(`| ${title} | ${review.score} | ${review.rewriteApplied ? 'Yes' : 'No'} |`);
-        }
-    }
-
-    // Strengths & issues
-    if (Array.isArray(qr.strengths) && qr.strengths.length > 0) {
-        lines.push('', '### Strengths', '');
-        for (const s of qr.strengths) lines.push(`- ${s}`);
-    }
-    if (Array.isArray(qr.issues) && qr.issues.length > 0) {
-        lines.push('', '### Issues', '');
-        for (const i of qr.issues) lines.push(`- ${i}`);
-    }
-    if (Array.isArray(qr.suggestions) && qr.suggestions.length > 0) {
-        lines.push('', '### Suggestions', '');
-        for (const s of qr.suggestions) lines.push(`- ${s}`);
-    }
-
-    return lines.join('\n');
 }

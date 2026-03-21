@@ -1,6 +1,8 @@
 export type AgentProgressEventType =
   | 'token'
   | 'thinking'
+  | 'tool_call'
+  | 'tool_result'
   | 'log'
   | 'segment'
   | 'plan'

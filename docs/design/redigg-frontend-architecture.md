@@ -44,7 +44,6 @@ POST /api/chat/async
 | sessionId | string | false | 会话ID，用于维持对话上下文 |
 | webSearch | boolean | false | 是否附加 Web Search 指令 |
 | attachments | array | false | 上传文件列表（用于上下文提示） |
-| autoMode | boolean | false | 是否强制 AutoResearch 模式 |
 
 响应：`202 Accepted`
 

@@ -4,7 +4,7 @@ import { SQLiteStorage } from './storage/sqlite.js';
 import { ResearchAgent } from './agent/ResearchAgent.js';
 import { MemoryEvolutionSystem } from './memory/evolution/MemoryEvolutionSystem.js';
 import { MockLLMClient, LLMClient, LLMResponse, LLMStreamHandler } from './llm/LLMClient.js';
-import OpenAI from 'openai';
+import { OpenAIClient } from './llm/OpenAIClient.js';
 import dotenv from 'dotenv';
 import { createLogger } from './utils/logger.js';
 
@@ -12,77 +12,11 @@ dotenv.config({ override: true });
 
 const logger = createLogger('Main');
 
-// Real OpenAI Client (Copied from cli.ts for now, should be refactored to shared location)
-class OpenAIClient implements LLMClient {
-  private openai: OpenAI;
-  private model: string;
-
-  constructor(apiKey: string, baseURL?: string, model?: string) {
-    this.openai = new OpenAI({ 
-      apiKey,
-      baseURL: baseURL || 'https://api.openai.com/v1'
-    });
-    this.model = model || 'gpt-3.5-turbo';
-  }
-
-  async complete(prompt: string): Promise<LLMResponse> {
-    const response = await this.openai.chat.completions.create({
-      model: this.model,
-      messages: [{ role: 'user', content: prompt }],
-    });
-    const content = response.choices[0].message.content || '';
-    console.log('[LLM Complete Output]:', content);
-    return { content };
-  }
-
-  async chat(messages: { role: string; content: string }[]): Promise<LLMResponse> {
-    const response = await this.openai.chat.completions.create({
-      model: this.model,
-      messages: messages as any,
-    });
-    const content = response.choices[0].message.content || '';
-    console.log('[LLM Chat Output]:', content);
-    return { content };
-  }
-
-  async chatStream(messages: { role: string; content: string }[], handler: LLMStreamHandler): Promise<void> {
-    try {
-      const stream = await this.openai.chat.completions.create({
-        model: this.model,
-        messages: messages as any,
-        stream: true,
-      });
-
-      let fullText = '';
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta;
-        
-        // Handle reasoning tokens (o1, o3, deepseek etc.)
-        const thinking = (delta as any).reasoning_content || (delta as any).thinking;
-        if (thinking) {
-           handler.onThinking?.(thinking);
-        }
-
-        const content = delta?.content || '';
-        if (content) {
-          process.stdout.write(content); // Stream to console for debugging
-          fullText += content;
-          handler.onToken?.(content);
-        }
-      }
-      process.stdout.write('\n'); // End of stream newline
-      handler.onComplete?.(fullText);
-    } catch (error) {
-      handler.onError?.(error);
-      throw error;
-    }
-  }
-}
-
 import { fileURLToPath } from 'url';
 
 import { SkillManager } from './skills/SkillManager.js';
 import path from 'path';
+import fs from 'fs';
 
 // ...
 
@@ -111,7 +45,10 @@ export async function main(options: { port?: number } = {}) {
   const __dirname = path.dirname(__filename);
   const systemSkillsDir = path.join(__dirname, '..', 'skills');
 
-  const skillManager = new SkillManager(llm, memoryManager, process.cwd(), undefined, systemSkillsDir);
+  const workspaceRoot = path.join(process.cwd(), 'workspace');
+  fs.mkdirSync(workspaceRoot, { recursive: true });
+
+  const skillManager = new SkillManager(llm, memoryManager, workspaceRoot, undefined, systemSkillsDir);
   await skillManager.loadSkillsFromDisk();
 
   const memoryEvo = new MemoryEvolutionSystem(memoryManager, llm);

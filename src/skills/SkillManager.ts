@@ -28,6 +28,8 @@ export class SkillManager {
     this.workspace = workspace;
     this.skillsDir = path.join(workspace, 'skills');
     // this.registerSkill(new PdfGeneratorSkill());
+
+    fs.mkdir(this.workspace, { recursive: true }).catch(() => {});
   }
 
   public setManagers(managers: SkillContext['managers']) {
@@ -85,8 +87,12 @@ export class SkillManager {
                 }
                 
                 // Check if it's a Skill (has SKILL.md or just index.ts/js?)
-                // ... (rest of logic)
                 await this.loadSkill(itemPath);
+            } else if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.js'))) {
+                // Support loading single-file skills directly from the pack/category folder
+                if (entry.name !== 'index.ts' && entry.name !== 'index.js') {
+                    await this.loadSkill(path.join(dir, entry.name));
+                }
             }
         }
     } catch (e) {
@@ -98,14 +104,17 @@ export class SkillManager {
   }
 
   private async loadSkill(skillPath: string): Promise<Skill | null> {
-    const skillId = path.basename(skillPath);
-    let implPath = path.join(skillPath, 'index.ts');
+    const isFile = skillPath.endsWith('.ts') || skillPath.endsWith('.js');
+    const skillId = isFile ? path.basename(skillPath).replace(/\.[tj]s$/, '') : path.basename(skillPath);
+    let implPath = isFile ? skillPath : path.join(skillPath, 'index.ts');
     
-    // Check for .js if .ts not found
-    try {
-        await fs.access(implPath);
-    } catch {
-        implPath = path.join(skillPath, 'index.js');
+    if (!isFile) {
+        // Check for .js if .ts not found
+        try {
+            await fs.access(implPath);
+        } catch {
+            implPath = path.join(skillPath, 'index.js');
+        }
     }
 
     // 1. Try loading executable skill (index.ts/js)
@@ -140,7 +149,18 @@ export class SkillManager {
                 if (this.skills.has(skillInstance.id)) {
                     logger.debug(`Overwriting existing skill: ${skillInstance.id}`);
                 }
-                
+
+                // Try to load SKILL.md if it exists
+                if (!isFile) {
+                    try {
+                        const skillMdPath = path.join(skillPath, 'SKILL.md');
+                        const readmeContent = await fs.readFile(skillMdPath, 'utf-8');
+                        skillInstance.readme = readmeContent;
+                    } catch {
+                        // SKILL.md not found, that's ok
+                    }
+                }
+
                 this.skills.set(skillInstance.id, skillInstance);
                 logger.info(`Registered skill: ${skillInstance.id}`);
                 return skillInstance;
@@ -154,32 +174,34 @@ export class SkillManager {
     }
 
     // 2. Try loading declarative skill (SKILL.md)
-    // ...
-    const skillMdPath = path.join(skillPath, 'SKILL.md');
-    try {
-        const content = await fs.readFile(skillMdPath, 'utf-8');
-        const frontmatter = this.parseFrontmatter(content);
-        
-        if (frontmatter.name) {
-            const skill: Skill = {
-                id: skillId,
-                name: frontmatter.name,
-                description: frontmatter.description || 'No description provided.',
-                tags: ['vendor', 'declarative'],
-                execute: async (ctx, params) => {
-                    return {
-                        success: true,
-                        message: `This is a declarative skill (${frontmatter.name}). It provides tools or capabilities but cannot be executed directly.`
-                    };
-                }
-            };
-            
-            this.skills.set(skill.id, skill);
-            logger.info(`Registered declarative skill: ${skill.id}`);
-            return skill;
+    if (!isFile) {
+        const skillMdPath = path.join(skillPath, 'SKILL.md');
+        try {
+            const content = await fs.readFile(skillMdPath, 'utf-8');
+            const frontmatter = this.parseFrontmatter(content);
+
+            if (frontmatter.name) {
+                const skill: Skill = {
+                    id: skillId,
+                    name: frontmatter.name,
+                    description: frontmatter.description || 'No description provided.',
+                    tags: ['vendor', 'declarative'],
+                    readme: content,
+                    execute: async (ctx, params) => {
+                        return {
+                            success: true,
+                            message: `This is a declarative skill (${frontmatter.name}). It provides tools or capabilities but cannot be executed directly.`
+                        };
+                    }
+                };
+
+                this.skills.set(skill.id, skill);
+                logger.info(`Registered declarative skill: ${skill.id}`);
+                return skill;
+            }
+        } catch (e) {
+            // Ignore if SKILL.md missing
         }
-    } catch (e) {
-        // Ignore if SKILL.md missing
     }
 
     return null;

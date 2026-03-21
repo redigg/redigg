@@ -189,7 +189,7 @@ export class ResearchAgent {
   private heartbeatRunQueued = false;
   private heartbeatRunTimer: NodeJS.Timeout | null = null;
 
-  private queueHeartbeatRun() {
+  private queueHeartbeatRun(delayMs: number = 5000) {
     if (process.env.NODE_ENV === 'test') return;
     this.heartbeatRunQueued = true;
     if (this.heartbeatRunTimer) return;
@@ -197,7 +197,7 @@ export class ResearchAgent {
     this.heartbeatRunTimer = setTimeout(() => {
       this.heartbeatRunTimer = null;
       void this.runHeartbeatLoop();
-    }, 0);
+    }, delayMs);
   }
 
   private async runHeartbeatLoop() {
@@ -266,11 +266,15 @@ export class ResearchAgent {
     onProgress?: AgentProgressHandler,
     sessionId?: string
   ): Promise<string> {
+    logger.info(`[Chat] Starting chat for user ${userId}, message: ${message.substring(0, 100)}...`);
+    const startTime = Date.now();
+    
     const log = (content: string, stats?: any) => {
       const payload = stats ? `${content}__STATS__${JSON.stringify(stats)}` : content;
       onProgress?.('log', payload);
       if (stats) onProgress?.('stats', stats);
       this.sessionManager.addMessage(session.id, 'log', payload);
+      logger.info(`[ChatLog] ${content}`);
     };
 
     let session: Session;
@@ -285,6 +289,7 @@ export class ResearchAgent {
       session = this.sessionManager.getOrCreateActiveSession(userId);
     }
     
+    logger.info(`[Chat] Session: ${session.id}`);
     this.sessionManager.activateSession(session.id);
     this.sessionManager.setSessionStatus(session.id, 'running');
     
@@ -349,6 +354,9 @@ IMPORTANT:
           let toolCalls: any[] | undefined = undefined;
 
           // Call LLM
+          logger.info(`[Chat] Calling LLM, step ${stepCount}...`);
+          const llmStartTime = Date.now();
+          
           if (this.llm.chatStream && onProgress) {
              await this.llm.chatStream(messages, {
                 onToken: (t) => { streamText += t; onProgress('token', t); },
@@ -359,6 +367,7 @@ IMPORTANT:
                 },
                 onComplete: (text, tc) => { toolCalls = tc; }
              }, { tools });
+             logger.info(`[Chat] LLM stream completed in ${Date.now() - llmStartTime}ms`);
           } else {
              const res = await this.llm.chat(messages, { tools });
              streamText = res.content;
@@ -606,7 +615,8 @@ IMPORTANT:
         if (!this.sessionManager.isSessionStopped(session.id)) {
             this.sessionManager.setSessionStatus(session.id, 'active');
         }
-        this.queueHeartbeatRun();
+        // DISABLED: heartbeat is not needed for now
+        // this.queueHeartbeatRun();
     }
   }
 

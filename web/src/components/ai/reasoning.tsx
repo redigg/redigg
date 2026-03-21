@@ -1,90 +1,124 @@
-"use client" 
- 
- import { useControllableState } from "@radix-ui/react-use-controllable-state" 
- import { BrainIcon, ChevronDownIcon } from "lucide-react" 
- import type { ComponentProps, ReactNode } from "react" 
- import { createContext, memo, useContext, useEffect, useState } from "react" 
- import { Streamdown } from "streamdown" 
- import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible" 
- import { cn } from "@/lib/utils" 
- import { Shimmer } from "@/components/ai/shimmer" 
- 
- interface ReasoningContextValue { 
-   isStreaming: boolean 
-   isOpen: boolean 
-   setIsOpen: (open: boolean) => void 
-   duration: number | undefined 
- } 
- 
- const ReasoningContext = createContext<ReasoningContextValue | null>(null) 
- 
- export const useReasoning = () => { 
-   const context = useContext(ReasoningContext) 
-   if (!context) { 
-     throw new Error("Reasoning components must be used within Reasoning") 
-   } 
-   return context 
- } 
+"use client"
+
+import { useControllableState } from "@radix-ui/react-use-controllable-state"
+import { BrainIcon, ChevronDownIcon } from "lucide-react"
+import type { ComponentProps, ReactNode } from "react"
+import { createContext, memo, useContext, useEffect, useRef, useState } from "react"
+import { Streamdown } from "streamdown"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { cn } from "@/lib/utils"
+import { Shimmer } from "@/components/ai/shimmer"
+
+interface ReasoningContextValue {
+  isStreaming: boolean
+  isOpen: boolean
+  setIsOpen: (open: boolean) => void
+  duration: number | undefined
+}
+
+const ReasoningContext = createContext<ReasoningContextValue | null>(null)
+
+function useReasoning() {
+  const context = useContext(ReasoningContext)
+  if (!context) {
+    throw new Error("Reasoning components must be used within Reasoning")
+  }
+  return context
+} 
  
  export type ReasoningProps = ComponentProps<typeof Collapsible> & { 
-   isStreaming?: boolean 
-   open?: boolean 
-   defaultOpen?: boolean 
-   onOpenChange?: (open: boolean) => void 
-   duration?: number 
- } 
- 
- const AUTO_CLOSE_DELAY = 1000 
- const MS_IN_S = 1000 
- 
- export const Reasoning = memo( 
-   ({ 
-     className, 
-     isStreaming = false, 
-     open, 
-     defaultOpen = true, 
-     onOpenChange, 
-     duration: durationProp, 
-     children, 
-     ...props 
-   }: ReasoningProps) => { 
-     const [isOpen, setIsOpen] = useControllableState({ 
-       prop: open, 
-       defaultProp: defaultOpen, 
-       onChange: onOpenChange, 
-     }) 
-     const [duration, setDuration] = useControllableState({ 
-       prop: durationProp, 
-       defaultProp: undefined, 
-     }) 
- 
-     const [hasAutoClosed, setHasAutoClosed] = useState(false) 
-     const [startTime, setStartTime] = useState<number | null>(null) 
- 
-     // Track duration when streaming starts and ends 
-     useEffect(() => { 
-       if (isStreaming) { 
-         if (startTime === null) { 
-           setStartTime(Date.now()) 
-         } 
-       } else if (startTime !== null) { 
-         setDuration(Math.ceil((Date.now() - startTime) / MS_IN_S)) 
-         setStartTime(null) 
-       } 
-     }, [isStreaming, startTime, setDuration]) 
- 
-     // Auto-open when streaming starts, auto-close when streaming ends (once only) 
-     useEffect(() => { 
-       if (defaultOpen && !isStreaming && isOpen && !hasAutoClosed) { 
-         // Add a small delay before closing to allow user to see the content 
-         const timer = setTimeout(() => { 
-           setIsOpen(false) 
-           setHasAutoClosed(true) 
-         }, AUTO_CLOSE_DELAY) 
- 
-         return () => clearTimeout(timer) 
-       } 
-     }, [isStreaming, isOpen, defaultOpen, setIsOpen, hasAutoClosed]) 
+  isStreaming?: boolean 
+  open?: boolean 
+  defaultOpen?: boolean 
+  onOpenChange?: (open: boolean) => void 
+  duration?: number 
+  hasContent?: boolean
+  contentChanged?: boolean  // Signal that content has changed
+} 
+
+const MS_IN_S = 1000
+
+export const Reasoning = memo( 
+  ({ 
+    className, 
+    isStreaming = false, 
+    open, 
+    defaultOpen = true, 
+    onOpenChange, 
+    duration: durationProp, 
+    hasContent = false,
+    contentChanged,
+    children, 
+    ...props 
+  }: ReasoningProps) => { 
+    const [isOpen, setIsOpen] = useControllableState({ 
+      prop: open, 
+      defaultProp: defaultOpen, 
+      onChange: onOpenChange, 
+    }) 
+    const [duration, setDuration] = useControllableState({ 
+      prop: durationProp, 
+      defaultProp: undefined, 
+    }) 
+
+    const [startTime, setStartTime] = useState<number | null>(null) 
+    const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    // Track duration when streaming starts and ends 
+    useEffect(() => { 
+      if (isStreaming) { 
+        if (startTime === null) { 
+          setStartTime(Date.now()) 
+        } 
+      } else if (startTime !== null) { 
+        setDuration(Math.ceil((Date.now() - startTime) / MS_IN_S)) 
+        setStartTime(null) 
+      } 
+    }, [isStreaming, startTime, setDuration]) 
+
+    // Track content changes
+    useEffect(() => {
+      if (hasContent) {
+        // Clear any pending close timer when content changes
+        if (closeTimerRef.current) {
+          clearTimeout(closeTimerRef.current)
+          closeTimerRef.current = null
+        }
+      }
+    }, [hasContent, contentChanged])
+
+    // Auto-open when streaming starts
+    useEffect(() => {
+      if (isStreaming && !isOpen) {
+        setIsOpen(true);
+      }
+    }, [isStreaming, isOpen, setIsOpen]);
+
+    // Auto-close when:
+    // 1. Content stops changing for AUTO_CLOSE_DELAY
+    // 2. Or streaming ends (isStreaming becomes false)
+    // TEMPORARILY DISABLED: Keep reasoning open always
+    // useEffect(() => { 
+    //   // Clear any existing timer
+    //   if (closeTimerRef.current) {
+    //     clearTimeout(closeTimerRef.current)
+    //     closeTimerRef.current = null
+    //   }
+
+    //   // If streaming ended and we have content, close after delay
+    //   if (!isStreaming && hasContent && isOpen && !hasAutoClosed) {
+    //     closeTimerRef.current = setTimeout(() => {
+    //       setIsOpen(false)
+    //       setHasAutoClosed(true)
+    //     }, AUTO_CLOSE_DELAY)
+    //   }
+
+    //   return () => {
+    //     if (closeTimerRef.current) {
+    //       clearTimeout(closeTimerRef.current)
+    //     }
+    //   }
+    // }, [isStreaming, hasContent, isOpen, hasAutoClosed, setIsOpen]) 
  
      const handleOpenChange = (newOpen: boolean) => { 
        setIsOpen(newOpen) 

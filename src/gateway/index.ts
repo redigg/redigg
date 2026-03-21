@@ -197,7 +197,59 @@ export class A2AGateway {
     // Simple Chat API for Web Dashboard
     this.app.use(express.json({ limit: '50mb' }));
     this.app.use('/files/sessions', express.static(path.join(process.cwd(), 'workspace', 'sessions')));
-    this.app.use('/files', express.static(path.join(process.cwd(), 'workspace/output')));
+    this.app.use('/files', express.static(path.join(process.cwd(), 'workspace/output'), {
+        fallthrough: false
+    }));
+
+    // Open local file/folder in file manager
+    this.app.get('/api/open', async (req, res) => {
+        try {
+            const filePath = req.query.path as string;
+            if (!filePath) {
+                res.status(400).json({ error: 'No path provided' });
+                return;
+            }
+            
+            // Security: only allow paths within workspace
+            const workspacePath = path.join(process.cwd(), 'workspace');
+            const resolvedPath = path.resolve(workspacePath, filePath);
+            
+            if (!resolvedPath.startsWith(workspacePath)) {
+                res.status(403).json({ error: 'Access denied' });
+                return;
+            }
+            
+            if (!fs.existsSync(resolvedPath)) {
+                res.status(404).json({ error: 'Path not found' });
+                return;
+            }
+            
+            // Open in file manager
+            const { exec } = await import('child_process');
+            const platform = process.platform;
+            
+            let command: string;
+            if (platform === 'darwin') {
+                command = `open "${resolvedPath}"`;
+            } else if (platform === 'win32') {
+                command = `explorer "${resolvedPath}"`;
+            } else {
+                command = `xdg-open "${resolvedPath}"`;
+            }
+            
+            exec(command, (error) => {
+                if (error) {
+                    logger.error(`Failed to open path: ${error.message}`);
+                    res.status(500).json({ error: 'Failed to open path' });
+                } else {
+                    res.json({ success: true, path: resolvedPath });
+                }
+            });
+        } catch (error) {
+            logger.error('Error opening path:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    });
 
     // Serve Frontend Static Files (Production Mode)
     // Check if web/dist exists (relative to current working directory or package root)
@@ -226,7 +278,7 @@ export class A2AGateway {
         
         // SPA Fallback
         this.app.get('*', (req, res, next) => {
-            if (req.path.startsWith('/api') || req.path.startsWith('/a2a')) {
+            if (req.path.startsWith('/api') || req.path.startsWith('/a2a') || req.path.startsWith('/files')) {
                 return next();
             }
             res.sendFile(path.join(webDistPath, 'index.html'));
@@ -596,29 +648,41 @@ export class A2AGateway {
         try {
             const startTime = Date.now();
             let hasStreamedTokens = false;
+            const pendingActions = new Map<string, any>();
+            
             const reply = await this.agent.chat(userId, message, (type, content) => {
                 if (type === 'token') {
                     hasStreamedTokens = true;
-                    // Send token
                     res.write(`data: ${JSON.stringify({ type: 'token', content })}\n\n`);
                 } else if (type === 'thinking') {
-                    // Send thinking
                     res.write(`data: ${JSON.stringify({ type: 'thinking', content })}\n\n`);
                 } else if (type === 'tool_call') {
-                    res.write(`data: ${JSON.stringify({ type: 'tool_call', content })}\n\n`);
+                    const action = {
+                        id: content.id,
+                        name: content.tool,
+                        input: content.input,
+                        status: 'running'
+                    };
+                    pendingActions.set(content.id, action);
+                    res.write(`data: ${JSON.stringify({ type: 'action', content: action })}\n\n`);
                 } else if (type === 'tool_result') {
-                    res.write(`data: ${JSON.stringify({ type: 'tool_result', content })}\n\n`);
+                    const existingAction = pendingActions.get(content.id);
+                    const action = {
+                        id: content.id,
+                        name: content.tool || existingAction?.name,
+                        output: content.output,
+                        status: content.ok ? 'success' : 'error'
+                    };
+                    res.write(`data: ${JSON.stringify({ type: 'action', content: action })}\n\n`);
                 } else if (type === 'log') {
-                    // Send log
-                    res.write(`data: ${JSON.stringify({ type: 'log', content })}\n\n`);
+                    // Send log as thinking for display
+                    res.write(`data: ${JSON.stringify({ type: 'thinking', content: content + '\n' })}\n\n`);
                 } else if (type === 'plan') {
-                    // Send plan
-                    res.write(`data: ${JSON.stringify({ type: 'plan', content })}\n\n`);
+                    // Skip plans - we use actions now
                 } else if (type === 'todo') {
-                    // Send todo
-                    res.write(`data: ${JSON.stringify({ type: 'todo', content })}\n\n`);
+                    // Skip todos - we use actions now
                 } else if (type === 'segment') {
-                    res.write(`data: ${JSON.stringify({ type: 'segment', content })}\n\n`);
+                    // Skip segments - we use actions now
                 }
             }, sessionId);
             

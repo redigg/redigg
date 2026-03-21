@@ -30,14 +30,20 @@ import {
   ContextTrigger,
 } from './components/ui/context';
 
+interface Action {
+  id: string;
+  name: string;
+  input?: Record<string, unknown>;
+  output?: any;
+  status: 'running' | 'success' | 'error';
+}
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'agent';
   content: string;
   thinking?: string;
-  logs?: string[];
-  todos?: any[];
-  segments?: any[];
+  actions?: Action[];
   attachments?: any[];
   timestamp: Date;
   stats?: {
@@ -50,6 +56,7 @@ interface Skill {
   name: string;
   description: string;
   packId?: string;
+  readme?: string;
   usage?: { used: number, success: number, failed: number };
 }
 
@@ -106,17 +113,6 @@ function App() {
   const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
   const [skillPreview, setSkillPreview] = useState<{ skill: Skill; snippet: string } | null>(null);
 
-  const upsertSegment = (list: any[] = [], next: any) => {
-    const id = String(next?.id || '');
-    if (!id) return list;
-    const idx = list.findIndex((s) => String(s?.id || '') === id);
-    if (idx >= 0) {
-      const copy = list.slice();
-      copy[idx] = { ...copy[idx], ...next };
-      return copy;
-    }
-    return [...list, next];
-  };
   const [uiLang, setUiLang] = useState<'en' | 'zh'>(() => {
     try {
       const stored = localStorage.getItem('uiLang');
@@ -126,16 +122,6 @@ function App() {
     }
   });
   
-  // Auto Mode State
-  const [autoModeMap, setAutoModeMap] = useState<Record<string, boolean>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('sessionAutoModeMap') || '{}');
-    } catch {
-      return {};
-    }
-  });
-  const [pendingAutoMode, setPendingAutoMode] = useState(true);
-
   useEffect(() => {
     try {
       localStorage.setItem('uiLang', uiLang);
@@ -283,20 +269,6 @@ function App() {
       .replaceAll('[标题]', title);
   };
 
-  const handleAutoModeChange = (checked: boolean) => {
-    if (currentSessionId) {
-        setAutoModeMap(prev => {
-            const next = { ...prev, [currentSessionId]: checked };
-            localStorage.setItem('sessionAutoModeMap', JSON.stringify(next));
-            return next;
-        });
-    } else {
-        setPendingAutoMode(checked);
-    }
-  };
-
-  const currentAutoMode = currentSessionId ? (autoModeMap[currentSessionId] ?? true) : pendingAutoMode;
-
   const gatewayBaseUrl = import.meta.env.VITE_GATEWAY_URL || (import.meta.env.DEV ? 'http://localhost:4000' : window.location.origin);
   
   // Notification State
@@ -334,17 +306,25 @@ function App() {
   }, []);
 
   const buildSkillSnippet = (skill: Skill) => {
+    const skillName = skill.name || skill.id;
+    
     if (skill.id === 'literature_review') {
-      return 'Conduct a literature review on: <topic>';
+      return `Use the ${skillName} skill to conduct a comprehensive literature review on: [your topic here]`;
+    }
+    if (skill.id === 'paper_search') {
+      return `Use the ${skillName} skill to search for papers about: [your topic here]`;
     }
     if (skill.id === 'code_analysis') {
-      return 'Analyze the codebase structure. Focus on: <area>';
+      return `Use the ${skillName} skill to analyze the codebase. Focus on: [specific area or question]`;
     }
     if (skill.id === 'local_file_ops') {
-      return 'Help me organize my local files. specifically: <goal>';
+      return `Use the ${skillName} skill to help me organize my local files: [describe your goal]`;
+    }
+    if (skill.id === 'bibtex_manager') {
+      return `Use the ${skillName} skill to manage my BibTeX references: [describe what you need]`;
     }
 
-    return `Use the ${skill.id} skill to help me with: <your request>`;
+    return `Use the ${skillName} skill to help me with: [your request here]`;
   };
 
   useEffect(() => {
@@ -419,8 +399,9 @@ function App() {
         .then(res => res.json())
         .then(data => {
             setSessions(data);
-            if (data.length > 0 && !currentSessionId) {
-                // Load most recent session
+            // Only auto-load if user has never selected a session (first visit)
+            // Don't auto-load during polling to avoid jumping around
+            if (data.length > 0 && !currentSessionId && !hasSelectedSession.current) {
                 loadSession(data[0].id);
             }
             
@@ -509,15 +490,14 @@ function App() {
 
 
   // Auto-refresh chat history to catch async events (like memory updates)
-  useEffect(() => {
-    if (!currentSessionId) return; // Removed isConnecting check to allow polling while processing
-
-    const interval = setInterval(() => {
-        loadSession(currentSessionId);
-    }, 3000); // Poll every 3 seconds
-
-    return () => clearInterval(interval);
-  }, [currentSessionId, isConnecting]); // isConnecting is still a dep but ignored in logic
+  // DISABLED: This overwrites thinking content during streaming
+  // useEffect(() => {
+  //   if (!currentSessionId) return;
+  //   const interval = setInterval(() => {
+  //       loadSession(currentSessionId);
+  //   }, 3000);
+  //   return () => clearInterval(interval);
+  // }, [currentSessionId, isConnecting]);
 
   const loadSession = async (sessionId: string) => {
       setCurrentSessionId(sessionId);
@@ -525,296 +505,34 @@ function App() {
           const res = await fetch(`/api/sessions/${sessionId}/history`);
           const history = await res.json();
           
-          // Reconstruct messages, merging logs into the *preceding* agent message or creating a placeholder
           const reconstructedMessages: ChatMessage[] = [];
           
           for (const msg of history) {
-              // Check for auto research log to determine active state
-              if (msg.role === 'log' && msg.content.includes('[AutoResearch]')) {
-                  // If we see recent auto research logs, we can infer it *might* be active
-                  // But history is past. We need to know if it is CURRENTLY active.
-                  // The best way is to check the last message. If it's a log from AutoResearch
-                  // and no final completion, it's active.
-              }
-
-              if (msg.role === 'plan') {
-                  let plan: any = null;
-                  try {
-                      plan = JSON.parse(msg.content);
-                  } catch {}
-
-                  const steps = plan?.steps;
-                  if (Array.isArray(steps)) {
-                      let lastMsg = reconstructedMessages[reconstructedMessages.length - 1];
-                      if (!lastMsg || lastMsg.role !== 'agent') {
-                          const placeholder: ChatMessage = {
-                              id: `temp-plan-${msg.id}`,
-                              role: 'agent',
-                              content: '',
-                              logs: [],
-                              todos: steps,
-                          segments: [],
-                              timestamp: new Date(msg.timestamp)
-                          };
-                          reconstructedMessages.push(placeholder);
-                      } else {
-                          lastMsg.todos = steps;
-                      }
-                  }
-              } else if (msg.role === 'log') {
-                  // Find the last agent message to attach logs to
-                  // Or if no agent message, create a pending one?
-                  // Actually, logs usually come *before* or *during* the agent's reply.
-                  // But in our current flow, agent message is created *after* reply? 
-                  // No, agent message is added to DB at the end.
-                  // Logs are added *during*.
-                  // So in DB history: [User Msg, Log1, Log2, Agent Msg]
-                  
-                  // We want to display logs inside the Agent Message.
-                  // So we need to buffer logs until we hit an agent message?
-                  // Or attach them to the *next* agent message?
-                  
-                  // Wait, if we are loading history, we see: User -> Log -> Log -> Agent
-                  // We should probably create a "Pending/Agent" message when we see the first log after a user message.
-                  
-                  let lastMsg = reconstructedMessages[reconstructedMessages.length - 1];
-                  if (!lastMsg || lastMsg.role !== 'agent') {
-                      // Create a new agent placeholder
-                      const placeholder: ChatMessage = {
-                          id: `temp-${msg.id}`, // Use log id as base
-                          role: 'agent',
-                          content: '',
-                          logs: [msg.content],
-                          segments: [],
-                          timestamp: new Date(msg.timestamp)
-                      };
-                      reconstructedMessages.push(placeholder);
-                  } else {
-                      // Append to existing agent message
-                      lastMsg.logs = [...(lastMsg.logs || []), msg.content];
-                  }
-              } else {
-                  // Normal message
-                  // If we have a "placeholder" agent message (content empty) and this is an agent message, merge them?
-                  if (msg.role === 'assistant') {
-                       let lastMsg = reconstructedMessages[reconstructedMessages.length - 1];
-                       if (lastMsg && lastMsg.role === 'agent' && !lastMsg.content) {
-                           // This was our placeholder. Update it.
-                           lastMsg.id = msg.id;
-                           lastMsg.content = msg.content;
-                           lastMsg.timestamp = new Date(msg.timestamp); // Update timestamp to finish time
-                           // logs are already there
-                       } else {
-                           reconstructedMessages.push({
-                              id: msg.id,
-                              role: 'agent',
-                              content: msg.content,
-                              timestamp: new Date(msg.timestamp),
-                              logs: [],
-                              attachments: msg.metadata?.attachments
-                          });
-                       }
-                  } else {
-                      reconstructedMessages.push({
-                          id: msg.id,
-                          role: msg.role === 'assistant' ? 'agent' : msg.role,
-                          content: msg.content,
-                          timestamp: new Date(msg.timestamp),
-                          logs: [],
-                          attachments: msg.metadata?.attachments
-                      });
-                  }
+              if (msg.role === 'user') {
+                  reconstructedMessages.push({
+                      id: msg.id,
+                      role: 'user',
+                      content: msg.content,
+                      attachments: msg.metadata?.attachments,
+                      timestamp: new Date(msg.timestamp)
+                  });
+              } else if (msg.role === 'assistant') {
+                  reconstructedMessages.push({
+                      id: msg.id,
+                      role: 'agent',
+                      content: msg.content,
+                      thinking: msg.thinking || undefined,
+                      actions: msg.actions || undefined,
+                      attachments: msg.metadata?.attachments,
+                      timestamp: new Date(msg.timestamp)
+                  });
               }
           }
           
           setMessages(reconstructedMessages);
-
-          // Check if the last message indicates an ongoing auto-research process
-          // Heuristic: Last message is an agent message with logs containing [AutoResearch] 
-          // AND the content does NOT say "Auto-research completed".
-          const lastMsg = reconstructedMessages[reconstructedMessages.length - 1];
-          if (lastMsg && lastMsg.role === 'agent') {
-              const isAutoLog = lastMsg.logs?.some(l => l.includes('[AutoResearch]'));
-              const isCompleted = lastMsg.content.includes('Auto-research completed');
-              
-              if (isAutoLog && !isCompleted && !lastMsg.content) {
-                  // It's likely still running or was interrupted.
-                  // Since we don't have persistent backend state for "running",
-                  // we can't be 100% sure if the backend process is *still* alive just from DB history.
-                  // BUT, if we are loading this session, we can assume the user wants to resume monitoring.
-                  // If the backend process died, the SSE connection won't send updates, but the UI state is "connected".
-                  
-                  // However, `loadSession` is just fetching data. It doesn't reconnect SSE.
-                  // We need to explicitly reconnect SSE if we think it's active.
-                  
-                  // If the session was created recently (e.g. < 5 mins ago) and incomplete, reconnect.
-                  const lastUpdate = new Date(lastMsg.timestamp).getTime();
-                  const now = Date.now();
-                  if (now - lastUpdate < 5 * 60 * 1000) {
-                      // Auto-reconnect
-                      connectToSession(sessionId);
-                  }
-              }
-          }
       } catch (err) {
           console.error('Failed to load session history:', err);
       }
-  };
-
-  const connectToSession = (sessionId: string) => {
-      if (abortControllerRef.current) {
-          abortControllerRef.current.abort(); // Close existing
-      }
-      
-      setIsConnecting(true);
-
-      const lastEventId = window.localStorage.getItem(`redigg:lastEventId:${sessionId}`) || '0';
-      
-      const eventSource = new EventSource(`/api/sessions/${sessionId}/events?since=${encodeURIComponent(lastEventId)}`);
-      
-      abortControllerRef.current = {
-          abort: () => {
-              eventSource.close();
-          }
-      } as any;
-
-      eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (event.lastEventId) {
-          window.localStorage.setItem(`redigg:lastEventId:${sessionId}`, event.lastEventId);
-        }
-        // ... (reuse the logic from handleSend? Refactor needed)
-        // For now, let's copy the logic or extract it.
-        handleSSEMessage(data, sessionId);
-      };
-      
-      eventSource.onerror = (err) => {
-          console.error('Reconnection EventSource failed:', err);
-          eventSource.close();
-          setIsConnecting(false);
-      };
-  };
-
-  const handleSSEMessage = (data: any, _sessionId: string) => {
-        // Find the last agent message (placeholder or real)
-        // If we reconnected, we might not have the exact "agentMsgId" in closure.
-        // We need to find the *latest* agent message in state.
-        
-        if (data.type === 'session_title') {
-          const title = data.content?.title;
-          if (typeof title === 'string' && title.trim()) {
-            setSessions(prev => prev.map(s =>
-              s.id === currentSessionId ? { ...s, title: title.trim() } : s
-            ));
-          }
-        } else if (data.type === 'stats') {
-          setMessages(prev => {
-            const lastIdx = prev.length - 1;
-            const lastMsg = prev[lastIdx];
-            if (lastMsg && lastMsg.role === 'agent') {
-              const newMsg = { ...lastMsg, stats: data.content };
-              return [...prev.slice(0, lastIdx), newMsg];
-            }
-            return prev;
-          });
-        } else if (data.type === 'token') {
-          const content = data.content;
-          if (content && content.startsWith('[TITLE_GENERATED]')) {
-             // ...
-          } else {
-            setMessages(prev => {
-                const lastIdx = prev.length - 1;
-                const lastMsg = prev[lastIdx];
-                if (lastMsg && lastMsg.role === 'agent') {
-                    const newMsg = { ...lastMsg, content: lastMsg.content + content };
-                    return [...prev.slice(0, lastIdx), newMsg];
-                }
-                return prev;
-            });
-          }
-        } else if (data.type === 'log') {
-             // ...
-             setMessages(prev => {
-                const lastIdx = prev.length - 1;
-                const lastMsg = prev[lastIdx];
-                if (lastMsg && lastMsg.role === 'agent') {
-                    const rawContent = data.content;
-                    let stats = undefined;
-                    if (rawContent && typeof rawContent === 'string' && rawContent.includes('__STATS__')) {
-                        const parts = rawContent.split('__STATS__');
-                        try { stats = JSON.parse(parts[1]); } catch (e) {}
-                    }
-                    const newMsg = { ...lastMsg, logs: [...(lastMsg.logs || []), rawContent], stats: stats || lastMsg.stats };
-                    return [...prev.slice(0, lastIdx), newMsg];
-                }
-                return prev;
-            });
-        }
-        // ... (implement other types similarly for reconnection context)
-        // For simplicity in this iteration, we just rely on `loadSession` polling for history updates 
-        // if we are not "actively" generating new tokens but just waiting for logs.
-        // But logs come via SSE.
-        
-        if (data.type === 'plan') {
-          const plan = data.content;
-          setMessages(prev => {
-              const lastIdx = prev.length - 1;
-              const lastMsg = prev[lastIdx];
-              if (lastMsg && lastMsg.role === 'agent') {
-                  const newMsg = { ...lastMsg, todos: plan.steps };
-                  return [...prev.slice(0, lastIdx), newMsg];
-              }
-              return prev;
-          });
-        } else if (data.type === 'todo') {
-          const todoItem = data.content;
-          setMessages(prev => {
-              const lastIdx = prev.length - 1;
-              const lastMsg = prev[lastIdx];
-              if (!lastMsg || lastMsg.role !== 'agent') return prev;
-              const existingTodos = lastMsg.todos || [];
-              const index = existingTodos.findIndex((t: any) => t.id === todoItem.id);
-              if (index >= 0) {
-                  const newTodos = [...existingTodos];
-                  const existing = newTodos[index];
-                  let updatedThinking = existing.thinking || '';
-                  if (todoItem.thinking) {
-                      updatedThinking += todoItem.thinking;
-                  }
-                  newTodos[index] = { ...existing, ...todoItem, thinking: updatedThinking };
-                  const newMsg = { ...lastMsg, todos: newTodos };
-                  return [...prev.slice(0, lastIdx), newMsg];
-              }
-              const newMsg = { ...lastMsg, todos: [...existingTodos, todoItem] };
-              return [...prev.slice(0, lastIdx), newMsg];
-          });
-        } else if (data.type === 'segment') {
-          const seg = data.content;
-          if (!seg || !seg.id) return;
-          setMessages(prev => {
-            const lastIdx = prev.length - 1;
-            const lastMsg = prev[lastIdx];
-            if (lastMsg && lastMsg.role === 'agent') {
-              const newMsg = { ...lastMsg, segments: upsertSegment(lastMsg.segments, seg) };
-              return [...prev.slice(0, lastIdx), newMsg];
-            }
-            return prev;
-          });
-        }
-
-        // Actually, the `handleSend` SSE logic is complex because it updates specific IDs.
-        // When reconnecting, we don't have those IDs.
-        // A better approach for "Resume" is:
-        // 1. Load history (which gets logs).
-        // 2. Poll history periodically (which gets new logs from DB).
-        // 3. Only use SSE for *real-time* tokens if we are actively generating text.
-        // The AutoResearch mode mostly generates *Logs* and *Files*, then a final text.
-        // So polling `loadSession` might be enough for the "monitoring" phase!
-        
-        // Let's stick to the polling mechanism we already added:
-        // useEffect(() => { ... loadSession ... }, 3000);
-        // This naturally handles "reopening" the page.
-        // We just need to make sure the "Stop" button appears if it looks active.
   };
 
   const createNewSession = async () => {
@@ -891,6 +609,7 @@ function App() {
   };
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const hasSelectedSession = useRef(false);
 
   const handleStop = () => {
       if (abortControllerRef.current) {
@@ -950,8 +669,6 @@ function App() {
       id: agentMsgId,
       role: 'agent',
       content: '',
-      logs: [],
-      segments: [],
       timestamp: new Date()
     };
     
@@ -1050,77 +767,49 @@ function App() {
           }
         } else if (data.type === 'thinking') {
             const content = data.content;
-            setMessages(prev => prev.map(msg => 
-              msg.id === agentMsgId 
-                ? { ...msg, thinking: (msg.thinking || '') + content } 
-                : msg
-            ));
-        } else if (data.type === 'log') {
-          // If log content contains __STATS__, parse it
-          const rawContent = data.content;
-          let stats = undefined;
-          if (rawContent && typeof rawContent === 'string' && rawContent.includes('__STATS__')) {
-              const parts = rawContent.split('__STATS__');
-              try {
-                  stats = JSON.parse(parts[1]);
-              } catch (e) {}
-          }
-
-          setMessages(prev => prev.map(msg => 
-            msg.id === agentMsgId 
-              ? { ...msg, logs: [...(msg.logs || []), rawContent], stats: stats || msg.stats }
-              : msg
-          ));
-        } else if (data.type === 'plan') {
-          // data.content is { steps: [] }
-          const plan = data.content;
-          setMessages(prev => prev.map(msg => 
-            msg.id === agentMsgId 
-              ? { ...msg, todos: plan.steps }
-              : msg
-          ));
-        } else if (data.type === 'todo') {
-            // Update or add a single todo item
-            const todoItem = data.content;
+            console.log('[App] thinking received:', content.substring(0, 50), 'length:', content.length);
+            setMessages(prev => {
+              const updated = prev.map(msg => 
+                msg.id === agentMsgId 
+                  ? { ...msg, thinking: (msg.thinking || '') + content } 
+                  : msg
+              );
+              console.log('[App] after thinking update, thinking length:', updated.find(m => m.id === agentMsgId)?.thinking?.length);
+              return updated;
+            });
+        } else if (data.type === 'action') {
+            const action = data.content;
+            console.log('[App] action received:', action.id, action.name, 'current thinking length:', messages.find(m => m.id === agentMsgId)?.thinking?.length);
             setMessages(prev => prev.map(msg => {
                 if (msg.id === agentMsgId) {
-                    const existingTodos = msg.todos || [];
-                    const index = existingTodos.findIndex((t: any) => t.id === todoItem.id);
+                    const existingActions = msg.actions || [];
+                    const index = existingActions.findIndex((a: Action) => a.id === action.id);
+                    let newActions;
                     if (index >= 0) {
-                        // Update existing
-                        const newTodos = [...existingTodos];
-                        const existing = newTodos[index];
-                        
-                        // Cumulative thinking tokens
-                        let updatedThinking = existing.thinking || '';
-                        if (todoItem.thinking) {
-                            updatedThinking += todoItem.thinking;
-                        }
-
-                        newTodos[index] = { ...existing, ...todoItem, thinking: updatedThinking };
-                        return { ...msg, todos: newTodos };
+                        newActions = [...existingActions];
+                        newActions[index] = { ...newActions[index], ...action };
                     } else {
-                        // Add new
-                        return { ...msg, todos: [...existingTodos, todoItem] };
+                        newActions = [...existingActions, action];
                     }
+                    console.log('[App] updating action, thinking:', msg.thinking?.substring(0, 50), 'actions count:', newActions.length);
+                    return { ...msg, actions: newActions, thinking: msg.thinking };
                 }
                 return msg;
             }));
-        } else if (data.type === 'segment') {
-            const seg = data.content;
-            setMessages(prev => prev.map(msg =>
-              msg.id === agentMsgId
-                ? { ...msg, segments: upsertSegment(msg.segments, seg) }
-                : msg
-            ));
         } else if (data.type === 'done') {
           eventSource.close();
-          setIsConnecting(false); // Explicitly set connecting to false when done
+          setIsConnecting(false);
           
-          // Refresh sessions to get updated title/timestamp
+          // Refresh sessions and memories after completion
           fetch(`/api/sessions?userId=web-user`)
             .then(res => res.json())
             .then(data => setSessions(data));
+          fetch('/api/memories?userId=web-user')
+            .then(res => res.json())
+            .then(data => {
+                const sortedData = data.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                setMemories(sortedData);
+            });
         } else if (data.type === 'error') {
           console.error('SSE Error:', data.content);
           eventSource.close();
@@ -1159,7 +848,7 @@ function App() {
             <img src="/favicons/favicon-256x256.ico" alt="Redigg" className="h-8 w-8 rounded-lg shadow-indigo-200 shadow-lg shrink-0" />
             <div className="flex items-baseline gap-2">
                 <h1 className="text-xl font-bold text-zinc-900 tracking-tight">Redigg</h1>
-                <span className="text-[10px] text-zinc-400 font-mono">v0.1.0</span>
+                <span className="text-[10px] text-zinc-400 font-mono">v0.1.4</span>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -1221,16 +910,13 @@ function App() {
                               ? 'bg-indigo-50 border-indigo-200 text-indigo-900 shadow-sm' 
                               : 'bg-white border-zinc-100 text-zinc-600 hover:border-indigo-200 hover:text-zinc-900'
                           )}
-                          onClick={() => loadSession(session.id)}
+                          onClick={() => {
+                            hasSelectedSession.current = true;
+                            loadSession(session.id);
+                          }}
                         >
                           <div className="font-medium text-sm flex items-center gap-2 w-full min-w-0">
                               <span className="truncate flex-1">{session.title || t.newChat}</span>
-                              {session.status === 'running' && (
-                                  <div className="shrink-0 px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[8px] font-bold border border-indigo-200 flex items-center gap-0.5">
-                                    <Sparkles className="h-2 w-2 animate-pulse" />
-                                    <span>AUTO</span>
-                                  </div>
-                              )}
                               {unseenSessionIds.has(session.id) && (
                                   <span className="h-2 w-2 rounded-full bg-red-500 shrink-0"></span>
                               )}
@@ -1276,12 +962,15 @@ function App() {
                                 {/* Top: Packs List (as Tabs) */}
                                 <div className="border-b border-zinc-200 mb-2">
                                     <div className="flex overflow-x-auto scrollbar-hide">
-                                        {Object.entries(groupedSkills).map(([packId, _]) => {
+                                        {Object.entries(groupedSkills)
+                                            .filter(([packId, _]) => packId !== 'other')
+                                            .map(([packId, _]) => {
                                             const pack = skillPacks.find(p => p.id === packId);
-                                            // Capitalize pack name and rename 'infra' to 'System', 'core' to 'Agent'
-                                            let packName = pack ? pack.name : (packId === 'other' ? 'Other' : packId);
+                                            let packName = pack ? pack.name : packId;
                                             if (packName === 'infra') packName = 'System';
                                             else if (packName === 'core') packName = 'Agent';
+                                            // Remove number prefix like "01-", "02-"
+                                            packName = packName.replace(/^\d{2}-/, '');
                                             packName = packName.charAt(0).toUpperCase() + packName.slice(1);
                                             
                                             const isSelected = packId === currentPackId;
@@ -1318,13 +1007,12 @@ function App() {
                                             }}
                                           >
                                             <div className="flex items-center gap-2 font-medium text-zinc-900 group-hover:text-indigo-600 transition-colors text-sm">
-                                              <Sparkles className="h-4 w-4 text-indigo-500" />
-                                              {skill.name}
+                                              <Sparkles className="h-4 w-4 text-indigo-500 shrink-0" />
+                                              <span className="truncate">{skill.name}</span>
                                               {skill.usage && skill.usage.used > 0 && (
-                                                  <div className="ml-auto flex items-center gap-1.5 text-[10px] text-zinc-400 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100">
-                                                      <span className="font-mono">{skill.usage.used} runs</span>
-                                                      {(skill.usage.failed > 0) && <span className="text-red-500">({skill.usage.failed} fail)</span>}
-                                                  </div>
+                                                  <span className="ml-auto shrink-0 text-[10px] text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded font-mono">
+                                                    {skill.usage.used}×
+                                                  </span>
                                               )}
                                             </div>
                                             <div className="text-xs text-zinc-500 mt-1 pl-6 line-clamp-2">{skill.description}</div>
@@ -1581,32 +1269,37 @@ function App() {
               }
             }}
           >
-            <AlertDialogContent className="max-w-2xl">
+            <AlertDialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
               <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {skillPreview ? `${skillPreview.skill.name} (${skillPreview.skill.id})` : 'Skill'}
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-indigo-500" />
+                  {skillPreview ? skillPreview.skill.name : 'Skill'}
                 </AlertDialogTitle>
                 <AlertDialogDescription>
                   {skillPreview?.skill.description}
                 </AlertDialogDescription>
               </AlertDialogHeader>
 
-              <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                <pre className="text-xs leading-relaxed text-zinc-800 whitespace-pre-wrap break-words font-mono">
-                  {skillPreview?.snippet || ''}
-                </pre>
+              <div className="flex-1 overflow-y-auto rounded-lg border border-zinc-200 bg-white">
+                <div className="prose prose-zinc prose-sm max-w-none p-4 dark:prose-invert">
+                  {skillPreview?.skill.readme ? (
+                    <div className="whitespace-pre-wrap text-sm text-zinc-700 leading-relaxed">
+                      {skillPreview.skill.readme}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-zinc-500 italic">
+                      No documentation available.
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <AlertDialogFooter>
+              <AlertDialogFooter className="mt-4">
                 <AlertDialogCancel>{t.cancel}</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={() => {
                     if (!skillPreview) return;
-                    setInput((prev) => {
-                      const trimmed = prev.trim();
-                      if (!trimmed) return skillPreview.snippet;
-                      return `${prev}\n\n${skillPreview.snippet}`;
-                    });
+                    setInput(skillPreview.snippet);
                     setSkillPreviewOpen(false);
                     setInputFocusNonce((n) => n + 1);
                   }}
@@ -1702,10 +1395,8 @@ function App() {
                     role={msg.role}
                     content={msg.content}
                     thinking={msg.thinking}
-                    isThinking={msg.role === 'agent' && !msg.content && index === messages.length - 1}
-                    logs={msg.logs}
-                    todos={msg.todos}
-                    segments={msg.segments}
+                    actions={msg.actions}
+                    isThinking={msg.role === 'agent' && isConnecting && index === messages.length - 1}
                     stats={msg.stats}
                     attachments={msg.attachments}
                     onCopy={() => handleCopy(msg.content)}
@@ -1750,8 +1441,6 @@ function App() {
                     onChange={setInput}
                     focusNonce={inputFocusNonce}
                     sessionId={currentSessionId}
-                    autoMode={currentAutoMode}
-                    onAutoModeChange={handleAutoModeChange}
                 />
                 <div className="flex justify-center mt-3">
                     <Context 

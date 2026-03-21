@@ -34,7 +34,7 @@ export default class CodeAnalysisSkill implements Skill {
         const summary = await this.summarizeCode(ctx, safePath);
         return { summary };
       } else if (operation === 'scan') {
-        const scan = await this.scanCodebase(safePath);
+        const scan = await this.scanCodebase(safePath, workspaceRoot);
         return { scan };
       } else {
         throw new Error(`Unknown operation: ${operation}`);
@@ -81,7 +81,7 @@ export default class CodeAnalysisSkill implements Skill {
     return output;
   }
 
-  private async scanCodebase(dir: string): Promise<any> {
+  private async scanCodebase(dir: string, workspaceRoot: string): Promise<any> {
       const stats = {
           files: 0,
           directories: 0,
@@ -91,7 +91,7 @@ export default class CodeAnalysisSkill implements Skill {
           keyFiles: [] as string[]
       };
 
-      await this.traverse(dir, stats);
+      await this.traverse(dir, stats, 0, workspaceRoot);
       
       // Format extensions for display
       const extSummary = Object.entries(stats.extensions)
@@ -113,7 +113,7 @@ export default class CodeAnalysisSkill implements Skill {
       return { stats, summary };
   }
 
-  private async traverse(dir: string, stats: any, depth = 0) {
+  private async traverse(dir: string, stats: any, depth = 0, workspaceRoot: string) {
       if (depth > 10) return;
       
       try {
@@ -126,7 +126,7 @@ export default class CodeAnalysisSkill implements Skill {
               
               if (stat.isDirectory()) {
                   stats.directories++;
-                  await this.traverse(filePath, stats, depth + 1);
+                  await this.traverse(filePath, stats, depth + 1, workspaceRoot);
               } else {
                   stats.files++;
                   stats.totalSize += stat.size;
@@ -136,7 +136,6 @@ export default class CodeAnalysisSkill implements Skill {
                   }
                   
                   if (['.ts', '.tsx', '.js', '.jsx', '.css', '.scss', '.html', '.md', '.json', '.py', '.go', '.rs'].includes(ext)) {
-                      // Only count SLOC for text files
                       const content = await fs.readFile(filePath, 'utf-8');
                       stats.sloc += content.split('\n').filter(l => l.trim().length > 0).length;
                   }

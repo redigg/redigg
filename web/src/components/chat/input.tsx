@@ -1,36 +1,28 @@
-import { Send, Paperclip, X, Sparkles, StopCircle } from "lucide-react";
+import { Send, Paperclip, X, StopCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 
 interface ChatInputProps {
-  onSubmit: (value: string, attachments?: any[], webSearch?: boolean, autoMode?: boolean) => void;
+  onSubmit: (value: string, attachments?: any[], webSearch?: boolean) => void;
   onStop?: () => void;
   isLoading?: boolean;
   placeholder?: string;
   value?: string;
   onChange?: (value: string) => void;
-  autoMode?: boolean;
-  onAutoModeChange?: (checked: boolean) => void;
   sessionId?: string | null;
   focusNonce?: number;
 }
 
-export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redigg...", value, onChange, autoMode: controlledAutoMode, onAutoModeChange, sessionId, focusNonce }: ChatInputProps) {
+export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redigg...", value, onChange, sessionId, focusNonce }: ChatInputProps) {
   const [internalInput, setInternalInput] = useState("");
   const [attachments, setAttachments] = useState<any[]>([]);
-  const [internalAutoMode, setInternalAutoMode] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isControlled = value !== undefined;
   const input = isControlled ? value : internalInput;
-  
-  const isAutoModeControlled = controlledAutoMode !== undefined;
-  const isAutoMode = isAutoModeControlled ? controlledAutoMode : internalAutoMode;
 
   const setInput = (newValue: string) => {
     if (isControlled) {
@@ -38,14 +30,6 @@ export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redi
     } else {
       setInternalInput(newValue);
     }
-  };
-  
-  const handleAutoModeChange = (checked: boolean) => {
-      if (isAutoModeControlled) {
-          onAutoModeChange?.(checked);
-      } else {
-          setInternalAutoMode(checked);
-      }
   };
 
   useEffect(() => {
@@ -59,11 +43,9 @@ export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redi
 
   const handleSubmit = () => {
     if ((!input.trim() && attachments.length === 0) || isLoading) return;
-    onSubmit(input, attachments, false, isAutoMode);
+    onSubmit(input, attachments, false);
     setInput("");
     setAttachments([]);
-    // Don't reset web search preference? Or should we? Let's keep it per message for now or persistent.
-    // Usually persistent per session is better, but here simple toggle.
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
     }
@@ -78,7 +60,6 @@ export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redi
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setInput(e.target.value);
-      // Auto-resize
       e.target.style.height = 'auto';
       e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
   };
@@ -105,7 +86,6 @@ export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redi
               console.error('Upload failed', err);
           }
           
-          // Reset input
           e.target.value = '';
       }
   };
@@ -158,41 +138,20 @@ export function ChatInput({ onSubmit, onStop, isLoading, placeholder = "Ask Redi
                 </Button>
             </div>
             
-            <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 mr-2">
-                    <Switch 
-                        id="auto-mode" 
-                        checked={isAutoMode} 
-                        onCheckedChange={handleAutoModeChange}
-                        className="data-[state=checked]:bg-indigo-600 scale-75"
-                    />
-                    <Label 
-                        htmlFor="auto-mode" 
-                        className={cn(
-                            "text-xs font-medium cursor-pointer select-none flex items-center gap-1",
-                            isAutoMode ? "text-indigo-600" : "text-zinc-400"
-                        )}
-                    >
-                        <Sparkles className="h-3 w-3" />
-                        Auto
-                    </Label>
-                </div>
-
-                <Button 
-                    onClick={isLoading ? onStop : handleSubmit} 
-                    disabled={!isLoading && (!input.trim() && attachments.length === 0)}
-                    size="icon"
-                    className={cn(
-                        "h-8 w-8 transition-all duration-200",
-                        isLoading 
-                            ? "bg-red-500 hover:bg-red-600 text-white shadow-sm"
-                            : (input.trim() || attachments.length > 0 ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm" : "bg-zinc-200 text-zinc-400")
-                    )}
-                    title={isLoading ? "Stop generating" : "Send message"}
-                >
-                    {isLoading ? <StopCircle className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-                </Button>
-            </div>
+            <Button 
+                onClick={isLoading ? onStop : handleSubmit} 
+                disabled={!isLoading && (!input.trim() && attachments.length === 0)}
+                size="icon"
+                className={cn(
+                    "h-8 w-8 transition-all duration-200",
+                    isLoading 
+                        ? "bg-red-500 hover:bg-red-600 text-white shadow-sm"
+                        : (input.trim() || attachments.length > 0 ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm" : "bg-zinc-200 text-zinc-400")
+                )}
+                title={isLoading ? "Stop generating" : "Send message"}
+            >
+                {isLoading ? <StopCircle className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+            </Button>
         </div>
     </div>
   );

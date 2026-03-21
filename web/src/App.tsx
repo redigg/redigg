@@ -8,6 +8,11 @@ import { ScrollToBottom } from './components/chat/scroll-to-bottom';
 import { Sparkles, MessageSquare, Plus, Trash2, PanelLeftClose, PanelLeftOpen, FileText, Brain } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -112,6 +117,8 @@ function App() {
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'session' | 'memory' | 'all_sessions', id?: string } | null>(null);
   const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
   const [skillPreview, setSkillPreview] = useState<{ skill: Skill; snippet: string } | null>(null);
+  const [markdownPreviewOpen, setMarkdownPreviewOpen] = useState(false);
+  const [markdownPreview, setMarkdownPreview] = useState<{ title: string; content: string } | null>(null);
 
   const [uiLang, setUiLang] = useState<'en' | 'zh'>(() => {
     try {
@@ -1306,6 +1313,64 @@ function App() {
                   className="bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-600"
                 >
                   Use
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          {/* Markdown Preview Dialog */}
+          <AlertDialog
+            open={markdownPreviewOpen}
+            onOpenChange={(open) => {
+              setMarkdownPreviewOpen(open);
+              if (!open) {
+                setMarkdownPreview(null);
+              }
+            }}
+          >
+            <AlertDialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-emerald-500" />
+                  {markdownPreview?.title || 'Document'}
+                </AlertDialogTitle>
+              </AlertDialogHeader>
+
+              <div className="flex-1 overflow-y-auto rounded-lg border border-zinc-200 bg-white">
+                <div className="prose prose-zinc prose-sm max-w-none p-6 dark:prose-invert">
+                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                    {markdownPreview?.content || ''}
+                  </ReactMarkdown>
+                </div>
+              </div>
+
+              <AlertDialogFooter className="mt-4">
+                <AlertDialogCancel>Close</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={async () => {
+                    if (!markdownPreview) return;
+                    // Generate PDF
+                    const response = await fetch('/api/generate-pdf', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ 
+                        title: markdownPreview.title, 
+                        content: markdownPreview.content 
+                      })
+                    });
+                    if (response.ok) {
+                      const blob = await response.blob();
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `${markdownPreview.title}.pdf`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-600"
+                >
+                  Generate PDF
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

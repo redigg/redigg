@@ -83,14 +83,36 @@ const MarkdownContent = memo(({ content }: { content: string }) => {
             const href = props.href || '';
             const lowerHref = href.toLowerCase();
             const isPdf = lowerHref.endsWith('.pdf');
-            const isFile = lowerHref.endsWith('.md') || lowerHref.endsWith('.txt') || lowerHref.endsWith('.json') || lowerHref.endsWith('.csv') || lowerHref.endsWith('.zip');
+            const isMarkdown = lowerHref.endsWith('.md');
+            const isFile = lowerHref.endsWith('.txt') || lowerHref.endsWith('.json') || lowerHref.endsWith('.csv') || lowerHref.endsWith('.zip');
+            
+            const handleFileClick = (e: React.MouseEvent) => {
+              e.preventDefault();
+              // Handle both /files/ prefix and direct file paths
+              let filePath = href;
+              if (href.startsWith('/files/')) {
+                filePath = href.replace('/files/', '');
+              }
+              fetch(`/api/open?path=${encodeURIComponent(filePath)}`);
+            };
             
             if (isPdf) {
               return (
                 <a 
-                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-red-50 text-red-600 hover:bg-red-100 border border-red-100 transition-colors no-underline font-medium text-xs align-middle"
-                  href={href}
-                  download
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-red-50 text-red-600 hover:bg-red-100 border border-red-100 transition-colors no-underline font-medium text-xs align-middle cursor-pointer"
+                  onClick={handleFileClick}
+                >
+                  <FileText className="h-3 w-3" />
+                  {props.children}
+                </a>
+              );
+            }
+            
+            if (isMarkdown) {
+              return (
+                <a 
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-100 transition-colors no-underline font-medium text-xs align-middle cursor-pointer"
+                  onClick={handleFileClick}
                 >
                   <FileText className="h-3 w-3" />
                   {props.children}
@@ -101,9 +123,8 @@ const MarkdownContent = memo(({ content }: { content: string }) => {
             if (isFile) {
               return (
                 <a 
-                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-100 transition-colors no-underline font-medium text-xs align-middle"
-                  href={href}
-                  download
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-100 transition-colors no-underline font-medium text-xs align-middle cursor-pointer"
+                  onClick={handleFileClick}
                 >
                   <FileText className="h-3 w-3" />
                   {props.children}

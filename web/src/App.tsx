@@ -848,7 +848,7 @@ function App() {
             <img src="/favicons/favicon-256x256.ico" alt="Redigg" className="h-8 w-8 rounded-lg shadow-indigo-200 shadow-lg shrink-0" />
             <div className="flex items-baseline gap-2">
                 <h1 className="text-xl font-bold text-zinc-900 tracking-tight">Redigg</h1>
-                <span className="text-[10px] text-zinc-400 font-mono">v0.1.4</span>
+                <span className="text-[10px] text-zinc-400 font-mono">v0.1.5</span>
             </div>
           </div>
           <div className="flex items-center gap-1">

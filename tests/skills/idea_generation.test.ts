@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import HypothesisGeneratorSkill from '../../skills/02-idea/hypothesis-generator/index.js';
 import GapAnalyzerSkill from '../../skills/02-idea/gap-analyzer/index.js';
+import PaperIdeaGeneratorSkill from '../../skills/02-idea/paper-idea-generator/index.js';
 import type { SkillContext } from '../../src/skills/types.js';
 
 describe('Idea Generation Skills API Tests', () => {
@@ -102,6 +103,53 @@ describe('Idea Generation Skills API Tests', () => {
       
       expect(result.success).toBe(false);
       expect(result.error).toContain('Rate limit exceeded');
+    });
+  });
+
+  describe('PaperIdeaGeneratorSkill', () => {
+    it('should generate paper ideas with arXiv papers', async () => {
+      const mockComplete = vi.fn().mockResolvedValue({
+        content: JSON.stringify({
+          title: 'Test Idea',
+          title_zh: '测试点子',
+          questions: ['Question 1'],
+          method: 'Test method',
+          score: 85
+        })
+      });
+
+      // Mock fetch for arXiv
+      global.fetch = vi.fn().mockResolvedValue({
+        text: () => Promise.resolve(`
+          <entry>
+            <title>Test Paper</title>
+            <summary>Test abstract</summary>
+            <published>2024-01-01</published>
+            <id>http://arxiv.org/abs/1234</id>
+            <name>Author Name</name>
+          </entry>
+        `)
+      });
+
+      const mockContext: SkillContext = {
+        llm: { complete: mockComplete } as any,
+        memory: {} as any,
+        managers: {} as any,
+        workspace: '/tmp',
+        userId: 'test-user',
+        log: vi.fn()
+      };
+
+      const skill = new PaperIdeaGeneratorSkill();
+      const result = await skill.execute(mockContext, { 
+        topic: 'LLM Agents',
+        num_ideas: 2,
+        max_papers: 5
+      });
+      
+      expect(result.success).toBe(true);
+      expect(result.ideas).toBeDefined();
+      expect(result.papers_found).toBeGreaterThanOrEqual(0);
     });
   });
 });

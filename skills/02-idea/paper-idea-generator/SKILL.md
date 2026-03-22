@@ -1,25 +1,28 @@
 ---
 name: paper-idea-generator
-version: 2.0.0
-description: Generate novel, actionable paper ideas from arXiv papers and LLM analysis. Supports multiple languages, detail levels, and focus areas.
+version: 2.1.0
+description: Generate novel, actionable paper ideas from arXiv papers and LLM analysis. Includes selection reasons, score breakdowns, and gap evidence.
 ---
 
-# Paper Idea Generator v2.0
+# Paper Idea Generator v2.1
 
-An intelligent paper idea generator that automatically:
-1. Fetches relevant papers from arXiv (no rate limits)
-2. Identifies research gaps using extended keyword analysis
-3. Uses LLM to generate detailed, actionable research proposals
-4. Outputs structured Markdown with experiments and evaluations
+## 🆕 v2.1 新增功能
 
-## 🆕 v2.0 Features
+### 选择原因 (Selection Reason)
+每个点子都会显示：
+- 为什么选择这个研究空白
+- 哪些论文暗示这个空白存在
 
-- **Batch Processing**: Generate ideas in parallel for better performance
-- **Multiple Languages**: Support for English, Chinese, or both
-- **Detail Levels**: Brief, standard, or detailed output
-- **Focus Areas**: Narrow down to specific research categories
-- **Improved Prompts**: Better LLM prompts for more specific ideas
-- **Relevance Scoring**: Gaps ranked by relevance to topic
+### 评分区分度 (Score Breakdown)
+不再是统一的 85 分，而是：
+- **新颖性** (30%): 方法创新程度
+- **可行性** (25%): 技术实现难度
+- **相关性** (25%): 与主题的匹配度
+- **影响力** (20%): 潜在研究价值
+
+### 空白证据 (Gap Evidence)
+- 统计多少论文提及该技术
+- 找出间接暗示该空白的论文
 
 ## Parameters
 

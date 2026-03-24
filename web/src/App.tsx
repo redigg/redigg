@@ -71,18 +71,6 @@ interface SkillPack {
     description: string;
 }
 
-interface Memory {
-  id: string;
-  content: string;
-  type: string;
-  tier: string;
-  created_at: string;
-  updated_at: string;
-  retrieval_count: number;
-  last_retrieved_at: string | null;
-  metadata?: any;
-}
-
 interface Session {
   id: string;
   title?: string;
@@ -104,17 +92,14 @@ function App() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [skillPacks, setSkillPacks] = useState<SkillPack[]>([]);
-  const [memories, setMemories] = useState<Memory[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [config, setConfig] = useState<Config | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [selectedSkillPackId, setSelectedSkillPackId] = useState<string | null>(null);
-  const [selectedMemoryTier, setSelectedMemoryTier] = useState<string>('all');
-  const [selectedMemoryType, setSelectedMemoryType] = useState<string | null>(null);
   const [tokenCount, setTokenCount] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'session' | 'memory' | 'all_sessions', id?: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'session' | 'all_sessions', id?: string } | null>(null);
   const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
   const [skillPreview, setSkillPreview] = useState<{ skill: Skill; snippet: string } | null>(null);
   const [markdownPreviewOpen, setMarkdownPreviewOpen] = useState(false);
@@ -137,18 +122,14 @@ function App() {
 
   const t = uiLang === 'zh'
     ? {
-        tabs: { chats: '聊天', skills: '技能', memory: '记忆', papers: '论文' },
+        tabs: { chats: '聊天', skills: '技能' },
         newChat: '新对话',
         noRecentChats: '暂无对话',
         loadingSkills: '加载技能中...',
-        noActiveMems: '暂无记忆',
-        noRefsLoaded: '暂无论文',
-        viewPaper: '查看论文',
         gatewayOnline: '网关在线',
         gatewayUrl: '网关地址',
         deleteTitle: '确定删除？',
         deleteDescSession: '此操作不可撤销，将永久删除该会话。',
-        deleteDescMemory: '此操作不可撤销，将永久删除该记忆。',
         cancel: '取消',
         delete: '删除',
         clearAllChats: '清空全部聊天',
@@ -179,18 +160,14 @@ function App() {
         },
       }
     : {
-        tabs: { chats: 'Chat', skills: 'Skill', memory: 'Mem', papers: 'Ref' },
+        tabs: { chats: 'Chat', skills: 'Skill' },
         newChat: 'New Chat',
         noRecentChats: 'No recent chats',
         loadingSkills: 'Loading skills...',
-        noActiveMems: 'No active mems',
-        noRefsLoaded: 'No refs loaded',
-        viewPaper: 'View Paper',
         gatewayOnline: 'Gateway Online',
         gatewayUrl: 'Gateway URL',
         deleteTitle: 'Are you sure?',
         deleteDescSession: 'This action cannot be undone. This will permanently delete the chat session.',
-        deleteDescMemory: 'This action cannot be undone. This will permanently delete the memory item.',
         cancel: 'Cancel',
         delete: 'Delete',
         clearAllChats: 'Clear Chats',
@@ -279,22 +256,11 @@ function App() {
   const gatewayBaseUrl = import.meta.env.VITE_GATEWAY_URL || (import.meta.env.DEV ? 'http://localhost:4000' : window.location.origin);
   
   // Notification State
-  const [unseenMemoriesCount, setUnseenMemoriesCount] = useState(0);
-  const [unseenPapersCount, setUnseenPapersCount] = useState(0);
   const [unseenSessionIds, setUnseenSessionIds] = useState<Set<string>>(new Set());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isAutoScrollEnabled = useRef(true);
-
-  const [lastViewedMemoryId, setLastViewedMemoryId] = useState<string | null>(localStorage.getItem('lastViewedMemoryId'));
-  const [lastViewedPaperId, setLastViewedPaperId] = useState<string | null>(localStorage.getItem('lastViewedPaperId'));
-
-  // Use refs to keep linter happy for now as they might be used later
-  useEffect(() => {
-    if (lastViewedMemoryId) {}
-    if (lastViewedPaperId) {}
-  }, [lastViewedMemoryId, lastViewedPaperId]);
 
   // Track scroll position to determine if we should auto-scroll
   useEffect(() => {
@@ -371,36 +337,6 @@ function App() {
       .then(data => setConfig(data))
       .catch(err => console.error('Failed to fetch config:', err));
 
-    const fetchMemories = () => {
-        fetch('/api/memories?userId=web-user')
-        .then(res => res.json())
-        .then(data => {
-            // Sort by created_at desc
-            const sortedData = data.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-            setMemories(sortedData);
-            
-            // Calculate unseen counts
-            const papers = sortedData.filter((m: any) => m.type === 'paper');
-            const otherMemories = sortedData.filter((m: any) => m.type !== 'paper');
-            
-            const lastViewedMemoryCount = parseInt(localStorage.getItem('lastViewedMemoryCount') || '0');
-            const lastViewedPaperCount = parseInt(localStorage.getItem('lastViewedPaperCount') || '0');
-            
-            if (otherMemories.length > lastViewedMemoryCount) {
-                setUnseenMemoriesCount(otherMemories.length - lastViewedMemoryCount);
-            } else {
-                setUnseenMemoriesCount(0);
-            }
-            
-            if (papers.length > lastViewedPaperCount) {
-                setUnseenPapersCount(papers.length - lastViewedPaperCount);
-            } else {
-                setUnseenPapersCount(0);
-            }
-        })
-        .catch(err => console.error('Failed to fetch memories:', err));
-    };
-
     const fetchSessions = () => {
         fetch('/api/sessions?userId=web-user')
         .then(res => res.json())
@@ -435,12 +371,10 @@ function App() {
         .catch(err => console.error('Failed to fetch sessions:', err));
     };
 
-    fetchMemories();
     fetchSessions();
     
-    // Poll for updates (Memories & Sessions) to update notification dots
+    // Poll for updates (Sessions) to update notification dots
     const pollInterval = setInterval(() => {
-        fetchMemories();
         // We only poll sessions if we want to see dots appear for *other* sessions while chatting
         // Since `loadSession` is polled separately for the current session, this is for the sidebar list.
         fetchSessions(); 
@@ -465,34 +399,6 @@ function App() {
           localStorage.setItem('sessionLastReadMap', JSON.stringify(lastReadMap));
       }
   }, [currentSessionId, messages]); // Update when messages change too (user is viewing them)
-  
-  // Handler for clearing memory notifications
-  const handleTabChange = (value: string) => {
-      const now = new Date().toISOString();
-      if (value === 'memory') {
-          localStorage.setItem('lastViewedMemoryTimestamp', now);
-          const memoriesList = memories.filter(m => m.type !== 'paper');
-          const count = memoriesList.length;
-          localStorage.setItem('lastViewedMemoryCount', count.toString());
-          if (memoriesList.length > 0) {
-              const latestId = memoriesList[0].id; // sorted desc
-              localStorage.setItem('lastViewedMemoryId', latestId);
-              setLastViewedMemoryId(latestId);
-          }
-          setUnseenMemoriesCount(0);
-      } else if (value === 'papers') {
-          localStorage.setItem('lastViewedPaperTimestamp', now);
-          const papersList = memories.filter(m => m.type === 'paper');
-          const count = papersList.length;
-          localStorage.setItem('lastViewedPaperCount', count.toString());
-          if (papersList.length > 0) {
-              const latestId = papersList[0].id; // sorted desc
-              localStorage.setItem('lastViewedPaperId', latestId);
-              setLastViewedPaperId(latestId);
-          }
-          setUnseenPapersCount(0);
-      }
-  };
 
 
 
@@ -581,13 +487,6 @@ function App() {
       } catch (err) {
         console.error('Failed to delete session:', err);
       }
-    } else if (deleteTarget.type === 'memory') {
-      try {
-        await fetch(`/api/memories/${deleteTarget.id}`, { method: 'DELETE' });
-        setMemories(prev => prev.filter(m => m.id !== deleteTarget.id));
-      } catch (err) {
-        console.error('Failed to delete memory:', err);
-      }
     }
     
     setDeleteDialogOpen(false);
@@ -597,12 +496,6 @@ function App() {
   const deleteSession = (sessionId: string, e: React.MouseEvent) => {
       e.stopPropagation();
       setDeleteTarget({ type: 'session', id: sessionId });
-      setDeleteDialogOpen(true);
-  };
-
-  const deleteMemory = (memoryId: string, e: React.MouseEvent) => {
-      e.stopPropagation();
-      setDeleteTarget({ type: 'memory', id: memoryId });
       setDeleteDialogOpen(true);
   };
 
@@ -807,16 +700,10 @@ function App() {
           eventSource.close();
           setIsConnecting(false);
           
-          // Refresh sessions and memories after completion
+          // Refresh sessions after completion
           fetch(`/api/sessions?userId=web-user`)
             .then(res => res.json())
             .then(data => setSessions(data));
-          fetch('/api/memories?userId=web-user')
-            .then(res => res.json())
-            .then(data => {
-                const sortedData = data.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-                setMemories(sortedData);
-            });
         } else if (data.type === 'error') {
           console.error('SSE Error:', data.content);
           eventSource.close();
@@ -872,9 +759,9 @@ function App() {
         </div>
 
         <div className="flex-1 overflow-hidden flex flex-col min-h-0 min-w-[20rem]">
-          <Tabs defaultValue="chats" className="flex-1 flex flex-col min-h-0" onValueChange={handleTabChange}>
+          <Tabs defaultValue="chats" className="flex-1 flex flex-col min-h-0">
             <div className="px-4 pt-4 shrink-0">
-              <TabsList className="w-full bg-zinc-100 p-1 mb-2 grid grid-cols-4 h-auto">
+              <TabsList className="w-full bg-zinc-100 p-1 mb-2 grid grid-cols-2 h-auto">
                   <TabsTrigger value="chats" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm relative" title="Chat">
                     <MessageSquare className="h-3.5 w-3.5" />
                     <span className="text-xs font-medium">{t.tabs.chats}</span>
@@ -885,20 +772,6 @@ function App() {
                   <TabsTrigger value="skills" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm" title="Skill">
                     <Sparkles className="h-3.5 w-3.5" />
                     <span className="text-xs font-medium">{t.tabs.skills}</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="memory" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm relative" title="Mem">
-                    <Brain className="h-3.5 w-3.5" />
-                    <span className="text-xs font-medium">{t.tabs.memory}</span>
-                    {unseenMemoriesCount > 0 && (
-                        <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500 border border-white"></span>
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger value="papers" className="px-1 py-1.5 flex items-center justify-center gap-1.5 data-[state=active]:shadow-sm relative" title="Ref">
-                    <FileText className="h-3.5 w-3.5" />
-                    <span className="text-xs font-medium">{t.tabs.papers}</span>
-                    {unseenPapersCount > 0 && (
-                        <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-red-500 border border-white"></span>
-                    )}
                   </TabsTrigger>
                 </TabsList>
             </div>
@@ -1036,195 +909,6 @@ function App() {
                     </div>
                   )}
                 </TabsContent>
-
-                <TabsContent value="memory" className="mt-0">
-                  <div className="flex flex-col h-full overflow-hidden">
-                      {/* Memory Tiers Tabs */}
-                       <div className="border-b border-zinc-200 mb-2">
-                           <div className="flex overflow-x-auto scrollbar-hide">
-                               {['all', 'working', 'short_term', 'long_term'].map(tier => (
-                                   <button 
-                                       key={tier}
-                                       className={cn(
-                                           "px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap capitalize",
-                                           selectedMemoryTier === tier
-                                               ? "border-indigo-500 text-indigo-600" 
-                                               : "border-transparent text-zinc-500 hover:text-zinc-700 hover:border-zinc-300"
-                                       )}
-                                       onClick={() => setSelectedMemoryTier(tier)}
-                                   >
-                                       {tier.replace('_', ' ')}
-                                   </button>
-                               ))}
-                           </div>
-                       </div>
-                       
-                       {/* Type Filters */}
-                       <div className="px-1 mb-3 flex flex-wrap gap-2">
-                           <button
-                               type="button"
-                               className={cn(
-                                   "px-2 py-1 text-[10px] rounded-full border transition-colors capitalize",
-                                   selectedMemoryType === null
-                                       ? "bg-zinc-900 text-white border-zinc-900 hover:bg-zinc-800" 
-                                       : "bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300"
-                               )}
-                               onClick={() => setSelectedMemoryType(null)}
-                           >
-                               All
-                           </button>
-                           {['preference', 'fact', 'context'].map(type => (
-                               <button
-                                   key={type}
-                                   className={cn(
-                                       "px-2 py-1 text-[10px] rounded-full border transition-colors capitalize",
-                                       selectedMemoryType === type
-                                           ? type === 'preference' ? "bg-purple-50 text-purple-700 border-purple-200" :
-                                             type === 'fact' ? "bg-blue-50 text-blue-700 border-blue-200" :
-                                             type === 'context' ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                                            "bg-amber-50 text-amber-700 border-amber-200"
-                                          : "bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300"
-                                   )}
-                                   onClick={() => setSelectedMemoryType(type)}
-                                >
-                                    {type}
-                                </button>
-                            ))}
-                       </div>
-
-                       <div className="flex-1 overflow-y-auto pr-1">
-                         <div className="space-y-1">
-                             {(() => {
-                                 const filteredMemories = memories.filter(m => 
-                                     m.type !== 'paper' && 
-                                     (selectedMemoryTier === 'all' || m.tier === selectedMemoryTier) &&
-                                     (selectedMemoryType === null || m.type === selectedMemoryType)
-                                 );
-                                 
-                                 return filteredMemories.length > 0 ? (
-                                 <div className="space-y-2">
-                                     {filteredMemories.slice(0, 20).map(m => (
-                                    <div key={m.id} className="text-sm p-2.5 bg-white rounded-lg border border-zinc-100 hover:border-indigo-200 transition-colors relative group pr-8">
-                                        <div className="font-medium text-zinc-900 leading-snug">
-                                            {m.content}
-                                            {/* Show New Tag if created_at is newer than last viewed session time OR simply if it's one of the new items */}
-                                            {/* Logic: We have unseen count. The top N items are new. */}
-                                            {/* But wait, filteredMemories might not be the raw list. */}
-                                            {/* Better logic: Compare m.id with lastViewedMemoryId? No, IDs are random UUIDs. */}
-                                            {/* Compare timestamps? We don't store timestamp of last view, only count/ID. */}
-                                            {/* Let's assume the list is sorted by time desc. If we have N unseen, the first N are new. */}
-                                            {/* BUT filters might hide some. */}
-                                            {/* Robust logic: If m.created_at > lastViewedTimestamp? We need to store timestamp. */}
-                                            
-                                            {/* Let's use the ID method if we store the ID of the *top* item when we last viewed. */}
-                                            {/* If we see an item that is newer than that ID? UUIDs don't have order. */}
-                                            
-                                            {/* Alternative: Store 'lastViewedTimestamp' in localStorage. */}
-                                            {(() => {
-                                                const lastViewedTime = localStorage.getItem('lastViewedMemoryTimestamp');
-                                                const isNew = !lastViewedTime || new Date(m.created_at) > new Date(lastViewedTime);
-                                                if (isNew) {
-                                                    return (
-                                                        <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-red-100 text-red-800">
-                                                            NEW
-                                                        </span>
-                                                    );
-                                                }
-                                                return null;
-                                            })()}
-                                        </div>
-                                        <div className="flex items-center gap-2 mt-1.5">
-                                         <span className={cn(
-                                             "text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-sm border",
-                                             m.type === 'preference' ? "bg-purple-50 text-purple-600 border-purple-100" :
-                                             m.type === 'fact' ? "bg-blue-50 text-blue-600 border-blue-100" :
-                                             m.type === 'context' ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
-                                             "bg-zinc-50 text-zinc-500 border-zinc-100"
-                                         )}>
-                                             {m.type}
-                                         </span>
-                                         <span className="text-[10px] text-zinc-400">{new Date(m.created_at).toLocaleDateString()}</span>
-                                         {m.retrieval_count > 0 && (
-                                             <span className="ml-auto flex items-center gap-1 text-[10px] font-medium text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-full border border-indigo-100" title={`Last retrieved: ${new Date(m.last_retrieved_at!).toLocaleString()}`}>
-                                                 <Sparkles className="h-2.5 w-2.5" />
-                                                 {m.retrieval_count}
-                                             </span>
-                                         )}
-                                         </div>
-                                         <div 
-                                             className="absolute right-2 top-2 p-1.5 rounded-md hover:bg-red-100 text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-                                             onClick={(e) => deleteMemory(m.id, e)}
-                                         >
-                                             <Trash2 className="h-3.5 w-3.5" />
-                                         </div>
-                                     </div>
-                                     ))}
-                                 </div>
-                                 ) : (
-                                 <div className="text-center py-8 text-zinc-400 text-xs">
-                                     <Brain className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                                     {t.noActiveMems}
-                                 </div>
-                                 );
-                             })()}
-                         </div>
-                       </div>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="papers" className="mt-0">
-                  {memories.filter(m => m.type === 'paper').length > 0 ? (
-                     <div className="space-y-3">
-                       {memories.filter(m => m.type === 'paper').slice(0, 10).map(m => (
-                         <div key={m.id} className="text-sm p-3 bg-white rounded-lg border border-zinc-100 hover:border-indigo-200 transition-colors relative group pr-8">
-                           <div className="font-medium text-zinc-900 line-clamp-2 leading-snug">
-                               {m.metadata?.title || m.content.replace('Paper: ', '')}
-                               {(() => {
-                                   const lastViewedTime = localStorage.getItem('lastViewedPaperTimestamp');
-                                   const isNew = !lastViewedTime || new Date(m.created_at) > new Date(lastViewedTime);
-                                   if (isNew) {
-                                       return (
-                                           <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-red-100 text-red-800">
-                                               NEW
-                                           </span>
-                                       );
-                                   }
-                                   return null;
-                               })()}
-                           </div>
-                           <div className="flex items-center gap-2 mt-2">
-                              <div className="text-[10px] text-zinc-500 bg-zinc-100 px-1.5 py-0.5 rounded-full line-clamp-1 max-w-[120px]">
-                                 {m.metadata?.authors?.join(', ') || 'Unknown Author'}
-                              </div>
-                              <span className="text-[10px] text-zinc-400">{new Date(m.created_at).toLocaleDateString()}</span>
-                              {m.retrieval_count > 0 && (
-                                  <span className="ml-auto flex items-center gap-1 text-[10px] font-medium text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-full border border-indigo-100" title={`Last retrieved: ${new Date(m.last_retrieved_at!).toLocaleString()}`}>
-                                      <Sparkles className="h-2.5 w-2.5" />
-                                      {m.retrieval_count}
-                                  </span>
-                              )}
-                           </div>
-                           {m.metadata?.url && (
-                             <a href={m.metadata.url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:underline mt-2 flex items-center gap-1">
-                               {t.viewPaper} <FileText className="h-3 w-3" />
-                             </a>
-                           )}
-                           <div 
-                               className="absolute right-2 top-2 p-1.5 rounded-md hover:bg-red-100 text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-                               onClick={(e) => deleteMemory(m.id, e)}
-                           >
-                               <Trash2 className="h-3.5 w-3.5" />
-                           </div>
-                         </div>
-                       ))}
-                     </div>
-                  ) : (
-                    <div className="text-center py-8 text-zinc-400 text-xs">
-                        <FileText className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                        {t.noRefsLoaded}
-                    </div>
-                  )}
-                </TabsContent>
             </div>
           </Tabs>
         </div>
@@ -1253,11 +937,10 @@ function App() {
               <AlertDialogHeader>
                 <AlertDialogTitle>{t.deleteTitle}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  {deleteTarget?.type === 'all_sessions'
-                    ? t.clearAllChatsDesc
-                    : deleteTarget?.type === 'session'
-                      ? t.deleteDescSession
-                      : t.deleteDescMemory}
+          {/* Removed memory delete target logic for now */}
+          {deleteTarget?.type === 'all_sessions'
+            ? t.clearAllChatsDesc
+            : t.deleteDescSession}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

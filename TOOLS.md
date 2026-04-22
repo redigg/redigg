@@ -31,6 +31,12 @@ Things like:
 - Default speaker: Kitchen HomePod
 ```
 
+## API Keys
+
+- **Tavily Search API**: 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
+
+---
+
 ## Why Separate?
 
 Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.
